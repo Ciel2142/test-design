@@ -56,6 +56,8 @@ no persistence. Appending the table to the spec instead."
 
 No other columns. Priority, mission, and grouping live outside the table.
 
+Harness hints for `component`, `smoke`, and `e2e` rows go on `harness SC-nn: <hint>` lines below the table; each behavior group records which axis produced each surviving row.
+
 | Column | Rule |
 |---|---|
 | `ID` | `SC-nn`, or `<area>/SC-nn` in a monorepo where `<area>` is the package the grep and suite scope to. Never renumbered. |
