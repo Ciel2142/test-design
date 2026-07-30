@@ -28,7 +28,8 @@ claude plugin marketplace add /home/igi21/experiements/test-design
 claude plugin install test-design@test-design
 ```
 
-Then add the gate rule from `docs/enforcement.md` to your `~/.claude/CLAUDE.md`.
+Then install the gate rule — see [docs/enforcement.md](docs/enforcement.md) for the text
+and for why it must name the `brainstorming` instruction it supersedes.
 
 ## Design
 
