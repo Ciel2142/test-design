@@ -14,8 +14,8 @@ truthful than the unit test.
 | `smoke` | the deployed surface answers correctly | needs the system up |
 | `e2e` | a full path across services | slowest, most fragile |
 
-Rows at `component`, `smoke`, or `e2e` need a harness hint: environment, fixtures, what is
-touched. Layer 3 executes the `smoke` and `e2e` rows.
+Rows at `integration`, `component`, `smoke`, or `e2e` need a harness hint: environment,
+fixtures, what is touched. Layer 3 executes the `smoke` and `e2e` rows.
 
 ## Concurrency exception
 

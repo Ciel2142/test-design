@@ -41,7 +41,7 @@ no persistence. Appending the table to the spec instead."
 5. **Assign level** per [references/level-assignment.md](references/level-assignment.md).
    Cheapest level that catches the mutation; axis 5 rows are `integration`+, axis 11 rows
    are `component`+.
-6. **Add harness hints** for `component`, `smoke`, and `e2e` rows.
+6. **Add harness hints** for `integration`, `component`, `smoke`, and `e2e` rows.
 7. **Record ruled-out axes** per behavior, each citing a spec fact or a code fact.
 8. **Extract invariants** — properties holding across all scenarios, `INV-n`.
 9. **List out-of-scope** items, each with a reason.
@@ -56,7 +56,7 @@ no persistence. Appending the table to the spec instead."
 
 No other columns. Priority, mission, and grouping live outside the table.
 
-Harness hints for `component`, `smoke`, and `e2e` rows go on `harness SC-nn: <hint>` lines below the table; each behavior group records which axis produced each surviving row.
+Harness hints for `integration`, `component`, `smoke`, and `e2e` rows go on `harness SC-nn: <hint>` lines below the table; each behavior group records which axis produced each surviving row.
 
 | Column | Rule |
 |---|---|
@@ -117,7 +117,7 @@ approval. Never renumber, never silently edit a row an implementer already tagge
 - [ ] Every `Bug it catches` is a mutation, not a negated `Expected`
 - [ ] Risk derived by rule; every argue-down carries a recorded approval line
 - [ ] Axis 5 rows `integration`+; axis 11 rows `component`+
-- [ ] Harness hints on `component`, `smoke`, `e2e` rows
+- [ ] Harness hints on `integration`, `component`, `smoke`, `e2e` rows
 - [ ] Invariants and out-of-scope both present
 - [ ] Baseline commit recorded in the header
 - [ ] Artifact committed to the target repo, not the plugin repo
