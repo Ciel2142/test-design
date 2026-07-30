@@ -1,0 +1,5 @@
+node_modules/
+*.log
+/tmp/
+fixtures/sample-project/coverage/
+fixtures/sample-project/.vitest-report.json

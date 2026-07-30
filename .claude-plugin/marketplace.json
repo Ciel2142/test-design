@@ -1,0 +1,13 @@
+{
+  "name": "test-design",
+  "owner": {
+    "name": "AT_VALukin"
+  },
+  "plugins": [
+    {
+      "name": "test-design",
+      "source": "./",
+      "description": "Coverage design before implementation, four-layer coverage verification after."
+    }
+  ]
+}
