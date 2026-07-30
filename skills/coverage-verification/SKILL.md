@@ -64,6 +64,11 @@ no edit tools, not from having no information.
 canary `HOLDS` has all its verdicts voided and re-dispatches at a higher effort tier.
 Without this, an all-`HOLDS` critic passes forever after the one-time acceptance check.
 
+The canary must be drawn from a test already known weak for this run — one layer 1 flagged,
+or one a prior run verdicted `WEAK` or `VACUOUS`. If no such test exists for this batch, say
+so in the report and skip the batch-voiding rule for that batch rather than manufacturing an
+unrelated canary.
+
 Verdicts: `HOLDS`, `WEAK`, `VACUOUS`. `WEAK` and `VACUOUS` are blocking.
 
 A critic may also return `SC-nn MISSING` when a row's tagged test does not exist. That is
@@ -99,6 +104,11 @@ Verdicts: `MUTATION-CAUGHT`, `MUTATION-SURVIVED` (blocking), `MUTATION-UNAPPLIAB
 phrased as a code-level mutation. Report it as such; do not let the mutator invent a
 substitute.
 
+A row layer 1 already reported as `gap` has no executable test to mutate, so it is not
+dispatched to the mutator at all — record it as `MUTATION-N/A (layer 1 gap)` instead. This
+is not `MUTATION-UNAPPLIABLE`, which means only that the row's `Bug it catches` itself was
+mis-phrased, not that the tagged test is missing or skipped.
+
 ## Verdicts
 
 Exactly three.
@@ -108,8 +118,13 @@ Exactly three.
 
 **`PARTIAL`** when a layer could not run. Requires **both**:
 
-- a human acknowledgement line: `PARTIAL accepted by <user> — <reason>`
-- attempt evidence in the transcript directory: commands tried, exit codes, files sought
+- a human acknowledgement line, obtained on an actual user turn — the run stops and asks,
+  then records the user's reply verbatim as `PARTIAL accepted by <user> — <reason>`. An
+  agent-composed line does not count.
+- attempt evidence in the transcript directory: commands tried, exit codes, files sought.
+  The commands tried must exercise the project's own documented run recipe (README,
+  Makefile, compose file, documented start command) — the same rule `live-runner` already
+  applies to bring-up, not one deliberately-doomed command.
 
 Without both, the expensive layer is opt-out by unverified declaration — and layer 3 is
 where that pressure lands.

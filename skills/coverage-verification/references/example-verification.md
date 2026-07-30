@@ -2,7 +2,7 @@
 
 Coverage: docs/superpowers/coverage/2026-07-30-order-creation-coverage.md
 Baseline: a1b2c3d · Run: 2026-07-30T14:02Z
-Verdict: BLOCKED — 1 gap, 1 vacuous, 1 mutation survived, 1 live failure
+Verdict: BLOCKED — 2 gaps, 1 vacuous, 1 mutation survived, 1 live failure
 
 ## Layer 1 — trace (full re-run)
 
@@ -48,8 +48,9 @@ Tamper check: HEAD unchanged, stash list unchanged, diff hash unchanged.
 ## Layer 4 — mutation (risk=high rows)
 
 ```
-SC-02 MUTATION-UNAPPLIABLE  row has no tagged executable test (see layer 1 gap)
-SC-03 MUTATION-SURVIVED     uniqueness check moved outside the transaction, test still passed
+SC-02 MUTATION-N/A (layer 1 gap)  row has no tagged executable test (see layer 1 gap)
+SC-05 MUTATION-N/A (layer 1 gap)  no tagged test at all (see layer 1 gap)
+SC-03 MUTATION-SURVIVED           uniqueness check moved outside the transaction, test still passed
 ```
 
 transcripts: `docs/superpowers/coverage/transcripts/SC-03-mutation.txt`
