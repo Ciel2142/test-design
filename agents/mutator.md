@@ -19,13 +19,30 @@ For each `risk=high` row you are given:
 2. **Apply the mutation** named in `Bug it catches`, and nothing else. One row, one
    mutation, one file where possible.
 3. **Run only the tagged test** — never the whole suite. This is what keeps the layer
-   affordable: cost scales with high-risk row count, not suite runtime.
+   affordable: cost scales with high-risk row count, not suite runtime. Resolve which test
+   an `SC-nn` tag names using `skills/coverage-verification/references/runner-output.md`
+   ("Extracting the test name a tag refers to"), including its suffix-match rule; do not
+   restate those patterns here. Then invoke only that test:
+   - vitest/jest: `-t '<name>'`
+   - pytest: `-k '<name>'`
+   - go: `-run '<name>'`
+   - maven: `-Dtest='<Class>#<method>'`
+   - gradle: `--tests '<pattern>'`
 4. **Require FAIL.** A passing test here is the finding: the test does not bite.
 5. **Revert** with `git checkout -- <file>` and run the same test again.
 6. **Require PASS.** If it now fails, your revert was incomplete or the test is flaky —
    report that rather than proceeding.
 7. **Write the transcript** to `<coverage-dir>/transcripts/SC-nn-mutation.txt`: the diff you
-   applied, both commands, and both outputs verbatim.
+   applied, both commands, and both outputs verbatim. Leave the transcript untracked —
+   never commit it, on the throwaway branch or anywhere else, because cleanup deletes that
+   branch and a committed transcript would go with it.
+
+FAIL and PASS above are read from the test runner's process exit code, never inferred by
+parsing its output text. Capture that exit code directly: a pipe (`cmd | tail`) yields the
+pipe's own exit status, not the runner's, so use `PIPESTATUS[0]` or redirect output to a
+file and read the code separately. If something between you and the runner — a wrapper,
+hook, or harness — interposes on the command such that the exit code can no longer be
+trusted, say so and report it rather than inferring a verdict from output text.
 
 ## Verdicts
 
