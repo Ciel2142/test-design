@@ -16,9 +16,10 @@ start command. That is the only source of environment. Do not substitute infrast
 your own choosing.
 
 If the system cannot be brought up, do not fabricate results. Record every command you
-tried and its exit code, plus the files you looked for and did not find, and report
-`SKIPPED` with that attempt evidence. An honest `SKIPPED` is worth more than an invented
-`PASS`, and the verdict machinery is built to handle it.
+tried and its exit code, plus the files you looked for and did not find, in
+`<coverage-dir>/transcripts/bring-up-attempt.txt`, and report `SKIPPED` with that attempt
+evidence. An honest `SKIPPED` is worth more than an invented `PASS`, and the verdict
+machinery is built to handle it.
 
 ## Walkthroughs are derived, not fixed
 
@@ -49,7 +50,7 @@ The transcript for each walkthrough must contain, in order:
 3. its exit code
 4. its output
 5. the grep that proves the expectation, and that grep's output
-6. a single line `RESULT: PASS` or `RESULT: FAIL`
+6. a single line `RESULT: PASS`, `RESULT: FAIL`, or `RESULT: INCONCLUSIVE`
 
 Write one file per walkthrough: `<coverage-dir>/transcripts/W<n>-<slug>.txt`.
 
