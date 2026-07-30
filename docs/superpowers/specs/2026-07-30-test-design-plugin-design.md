@@ -153,6 +153,31 @@ harness SC-02: pg testcontainer, fault injection on the second insert
 harness SC-03: 2 parallel clients, real pg, no mocks
 ```
 
+### Column semantics
+
+- **`Risk`** takes exactly `low`, `med`, or `high`. Only `high` is load-bearing: it is what
+  obliges a row to carry recorded RED evidence at verification. Assign `high` when the bug
+  would cause data loss, data corruption, a security hole, or silent wrongness — not merely
+  when the code feels tricky.
+- **`Level`** takes exactly `unit`, `integration`, `smoke`, or `e2e`. Rows at `smoke` or
+  `e2e` are the ones the live layer executes, so they need a harness hint.
+- **`ID`** is `SC-nn`, stable for the lifetime of the feature. Never renumber; a deleted row
+  leaves its ID retired, because test tags and past verification reports cite it.
+
+### Artifact location
+
+Coverage docs and verification reports live in the **repository being worked on**, beside
+its specs and plans, not in the `test-design` repo:
+
+```
+<target-repo>/docs/superpowers/
+  specs/       YYYY-MM-DD-<feature>-design.md         (superpowers:brainstorming)
+  coverage/    YYYY-MM-DD-<feature>-coverage.md       (test-coverage-design)
+               YYYY-MM-DD-<feature>-verification.md   (coverage-verification)
+               transcripts/W*.txt                     (live-runner)
+  plans/       YYYY-MM-DD-<feature>.md                (superpowers:writing-plans)
+```
+
 ### Size discipline
 
 Aim for the smallest set that names distinct bugs. A typical feature lands 8–25 rows.
@@ -167,6 +192,25 @@ Runs after implementation, before `superpowers:requesting-code-review`. Unattend
 
 - `grep -rn "covers: SC-"` across the test tree → map SC-ID to `file:line`
 - run the suite, require green
+
+The tag is a comment immediately above the test, written in the host language's comment
+syntax and containing the literal text `covers: SC-nn` (comma-separated for multiple
+rows). Only that substring is load-bearing, so `//`, `#`, `--`, `/* */`, and docstrings all
+work and the grep stays language-agnostic:
+
+```go
+// covers: SC-01, SC-03
+func TestRejectsZeroQuantity(t *testing.T) {
+```
+
+```python
+# covers: SC-02
+def test_partial_write_rolls_back():
+```
+
+The tag is a comment rather than part of the test name because superpowers TDD requires
+test names to describe behavior; IDs embedded in names make them unreadable and get dropped
+during refactors.
 - findings: **gap** (row with no tagged test), **drift** (tag citing an SC-ID absent from
   the coverage doc), **red** (suite not green)
 
@@ -186,7 +230,11 @@ to the bug). Defect patterns it hunts:
 
 Rows with `risk=high` additionally require the RED output captured during the TDD cycle.
 Recording the failure at write time is cheaper and stronger evidence than re-breaking the
-code later. Absent → `NO-EVIDENCE`.
+code later. Absent → the row is flagged `NO-EVIDENCE`.
+
+`NO-EVIDENCE` is an orthogonal flag, not a fourth verdict: a row can be both `HOLDS` and
+`NO-EVIDENCE`. The read verdict answers "does this test bind to the bug"; the flag answers
+"was the failure ever witnessed". Both are blocking.
 
 ### Layer 3 — `live-runner` subagent
 
@@ -216,7 +264,7 @@ fact rather than granted away.
 ```markdown
 # Verification: <feature>
 Coverage: docs/superpowers/coverage/2026-07-30-orders-coverage.md
-Verdict: BLOCKED — 3 gaps, 1 live failure
+Verdict: BLOCKED — 2 gaps, 1 vacuous, 1 no-evidence, 1 live failure
 
 ## Layer 1 — trace
 20/23 rows tagged · suite green (142 passed)
@@ -224,10 +272,10 @@ gap:   SC-07, SC-12 — no tagged test
 drift: tag SC-99 in orders_test.go — not in coverage doc
 
 ## Layer 2 — adversarial read
-HOLDS 17 · WEAK 2 · VACUOUS 1
+20 rows read: HOLDS 17 · WEAK 2 · VACUOUS 1
 SC-05 VACUOUS      asserts mock.calledOnce, never asserts persisted state
 SC-11 WEAK         would still pass with the off-by-one present
-SC-03 NO-EVIDENCE  risk=high, no RED output recorded
+flags: SC-03 NO-EVIDENCE (HOLDS, but risk=high with no RED output recorded)
 
 ## Layer 3 — live
 smoke/e2e rows 6/6 PASS
