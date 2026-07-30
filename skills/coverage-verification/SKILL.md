@@ -107,8 +107,9 @@ of treating an unrelated walkthrough's result as that row's verdict.
 
 Dispatch `mutator`. Same tamper-check protocol as layer 3, before and after. Before
 dispatch, the dispatcher also confirms the working tree is clean — `git status --porcelain`
-empty — since the mutator's own revert (`git checkout --`) cannot distinguish its mutation
-from pre-existing uncommitted work.
+empty apart from untracked files under `transcripts/`, which layer 3 already wrote — since
+the mutator's own revert (`git checkout --`) cannot distinguish its mutation from
+pre-existing uncommitted work.
 
 Verdicts: `MUTATION-CAUGHT`, `MUTATION-SURVIVED` (blocking), `MUTATION-UNAPPLIABLE`.
 

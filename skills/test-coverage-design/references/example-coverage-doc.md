@@ -1,7 +1,7 @@
 # Coverage: order creation
 
 Spec: docs/superpowers/specs/2026-07-30-order-creation-design.md
-Baseline: a1b2c3d · 42 passed, 0 failed, 1 skipped
+Baseline: a1b2c3d · 1 passed, 0 failed, 0 skipped
 
 ## Baseline failures
 
@@ -27,14 +27,15 @@ None — the suite was green at the baseline commit.
 
 Axes: SC-01 axis 1, SC-02 axis 3, SC-03 axis 4 and axis 5, SC-05 axis 3
 
-Ruled out: data shape (spec §2 defines one field, `qty: integer`, enforced by the request
-schema before this handler runs — no free-text field to probe), time (spec defines no date
-logic or expiry), auth (internal endpoint, spec §3 states no actor concept), state/lifecycle
-(an order has no transitions after creation — no update, cancel, or archive verb in this
-spec), rendering (API only, no UI surface), contract/observability (error codes and body
-shape are already asserted by SC-02 and SC-05's `Expected` column; spec defines no separate
-logging/metrics contract), migration (no schema change — no new changeset in this feature),
-resource limits (payload is two scalar fields)
+Ruled out: data shape (spec §2 defines two scalar fields, `qty: integer` and an idempotency
+key, enforced by the request schema before this handler runs — no free-text field to probe),
+time (spec defines no date logic or expiry), auth (internal endpoint, spec §3 states no
+actor concept), state/lifecycle (an order has no transitions after creation — no update,
+cancel, or archive verb in this spec), rendering (API only, no UI surface),
+contract/observability (error codes and body shape are already asserted by SC-02 and
+SC-05's `Expected` column; spec defines no separate logging/metrics contract), migration
+(no schema change — no new changeset in this feature), resource limits (payload is two
+scalar fields)
 
 | ID | Behavior | Bug it catches | Level | Expected | Risk |
 |----|----------|----------------|-------|----------|------|
