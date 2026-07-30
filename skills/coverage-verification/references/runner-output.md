@@ -46,10 +46,11 @@ Then the JUnit XML reader below.
 
 ```bash
 mvn -q test                     # or: mvn -q -Pit-full verify
+./gradlew test
 ```
 
-Then the JUnit XML reader below, globbing `target/surefire-reports/*.xml` and
-`target/failsafe-reports/*.xml`.
+Then the JUnit XML reader below, globbing `target/surefire-reports/*.xml`,
+`target/failsafe-reports/*.xml`, and `build/test-results/test/*.xml`.
 
 ### JUnit XML reader (pytest, maven, gradle, and anything else emitting JUnit XML)
 
@@ -78,14 +79,16 @@ PY
 **The DTD guard is not optional.** `xml.etree` expands internal entities, so a report
 containing nested `ENTITY` declarations can blow up memory (billion laughs / quadratic
 blowup). No legitimate JUnit report needs a DTD, so refusing any file that declares one
-costs nothing and removes the class entirely — without pulling in `defusedxml` and breaking
-the plugin's zero-dependency property.
+costs nothing and closes off the common case cheaply — without pulling in `defusedxml`
+and breaking the plugin's zero-dependency property.
 
 Threat model, stated honestly: this parses the project's own test-runner output on a
 developer machine, so exploiting it requires already controlling that output — a malicious
 test dependency, or a report fetched from an untrusted CI artifact. Defense in depth, not a
 live hole. A report rejected by the guard is reported to stderr and its tests count as
-absent from the run, which surfaces as `gap` rather than as a silent pass.
+absent from the run, which surfaces as `gap` rather than as a silent pass. The guard only
+inspects the first 4096 bytes, so a report padded with enough leading comment or
+processing-instruction content before the DTD declaration can slip past it.
 
 ## Extracting the test name a tag refers to
 
@@ -100,6 +103,8 @@ output by **suffix match** on the name, because runners prefix with suite, class
 | TS/JS | `^\s*(?:it\|test)(?:\.\w+)?\(\s*['"\`](.+?)['"\`]` | `rejects zero quantity` |
 | Java/Kotlin | `(?:void\|fun) (\w+)\s*\(` on the line after `@Test` | `rejectsZeroQuantity` |
 | Rust | `^\s*fn (\w+)` on the line after `#[test]` | `rejects_zero_quantity` |
+
+`\|` inside the Pattern column is markdown table-cell escaping; the actual regex uses a bare `|`.
 
 Note the TS/JS pattern deliberately allows a modifier — `it.skip(`, `it.only(`,
 `test.todo(` all match, so a skipped test is still *found* and then reported `skipped`
