@@ -13,6 +13,10 @@ You work on a throwaway branch and you leave the tree exactly as you found it.
 
 For each `risk=high` row you are given:
 
+0. **Confirm the working tree is clean.** Run `git status --porcelain`. Non-empty output →
+   stop and report; do not mutate. Steps 5 and the cleanup section below revert with
+   `git checkout --`, which discards uncommitted work indiscriminately — it cannot tell your
+   own mutation from something that was already there.
 1. **Confirm you are on a throwaway branch.** Run `git rev-parse --abbrev-ref HEAD`. If it
    is the working branch, create one: `git checkout -b mutation-check-<SC-nn>`. Never mutate
    on the branch the user is developing on.

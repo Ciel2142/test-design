@@ -46,7 +46,9 @@ no persistence. Appending the table to the spec instead."
 8. **Extract invariants** — properties holding across all scenarios, `INV-n`.
 9. **List out-of-scope** items, each with a reason.
 10. **Capture the baseline** — `git merge-base HEAD <default-branch>` and the suite result
-    at that commit. Verification compares against it so pre-existing failures are not
+    at that commit. Record the merge-base sha plus passed/failed/skipped counts in the
+    header, and list any failing test names under a `## Baseline failures` section (empty if
+    the suite was green). Verification compares against it so pre-existing failures are not
     charged to this feature.
 11. Present to the user, get approval, write and commit.
 
@@ -126,3 +128,10 @@ approval. Never renumber, never silently edit a row an implementer already tagge
 
 **REQUIRED SUB-SKILL:** `superpowers:writing-plans`. Tell it to cite SC-IDs in each task's
 test steps, so every row maps to a task and an uncovered row is visible as a plan gap.
+
+Also tell it to require, on every implemented test, a comment immediately above it
+containing the literal text `covers: SC-nn` — comma-separated for multiple IDs. More than 2
+IDs on one test is an `overclaim` finding at verification. Only that substring is
+load-bearing, so any comment syntax works (`//`, `#`, `--`, etc.). Citing SC-IDs in the plan
+alone is not enough: `coverage-verification` layer 1 greps test source for this tag, not the
+plan, so an untagged test reads as a `gap` even when the plan cited the row correctly.

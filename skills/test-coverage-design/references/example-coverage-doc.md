@@ -1,7 +1,11 @@
 # Coverage: order creation
 
 Spec: docs/superpowers/specs/2026-07-30-order-creation-design.md
-Baseline: a1b2c3d — suite result captured at this commit
+Baseline: a1b2c3d · 42 passed, 0 failed, 1 skipped
+
+## Baseline failures
+
+None — the suite was green at the baseline commit.
 
 ## Invariants
 
@@ -21,11 +25,16 @@ Baseline: a1b2c3d — suite result captured at this commit
 
 ### Behavior: create an order
 
-Axes: SC-01 axis 1, SC-02 axis 3, SC-03 axis 5, SC-05 axis 3
+Axes: SC-01 axis 1, SC-02 axis 3, SC-03 axis 4 and axis 5, SC-05 axis 3
 
-Ruled out: time (spec defines no date logic or expiry), auth (internal endpoint, spec §3
-states no actor concept), rendering (API only, no UI surface), migration (no schema change
-— no new changeset in this feature), resource limits (payload is two scalar fields)
+Ruled out: data shape (spec §2 defines one field, `qty: integer`, enforced by the request
+schema before this handler runs — no free-text field to probe), time (spec defines no date
+logic or expiry), auth (internal endpoint, spec §3 states no actor concept), state/lifecycle
+(an order has no transitions after creation — no update, cancel, or archive verb in this
+spec), rendering (API only, no UI surface), contract/observability (error codes and body
+shape are already asserted by SC-02 and SC-05's `Expected` column; spec defines no separate
+logging/metrics contract), migration (no schema change — no new changeset in this feature),
+resource limits (payload is two scalar fields)
 
 | ID | Behavior | Bug it catches | Level | Expected | Risk |
 |----|----------|----------------|-------|----------|------|
@@ -41,8 +50,8 @@ harness SC-05: service started with `FAIL_DB=1`, `POST /orders {"qty":3}`
 ### Notes on this example
 
 `SC-01` is `med` because axis 1 is not in the high-by-rule set. `SC-02` and `SC-05` are
-axis 3, `SC-03` is axis 5 — all `high` by rule, so all three require layer 4 mutation
-evidence.
+axis 3, `SC-03` is axis 4 and axis 5 — all `high` by rule, so all three require layer 4
+mutation evidence.
 
 `SC-03` is `integration`, not `unit`, because two mocked concurrent calls execute
 sequentially in one thread and would pass whether or not the check sits inside the

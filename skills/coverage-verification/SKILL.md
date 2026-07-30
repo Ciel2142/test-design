@@ -35,7 +35,10 @@ no yardstick is worse than no report.
    normalized `status<TAB>name` contract. Never let raw suite output land in this context —
    a failing suite in a large repo is tens of thousands of tokens.
 5. **Join tags to runner results** by suffix match on the test name.
-6. **Compare against the baseline** suite result recorded in the coverage doc header.
+6. **Compare against the baseline** — the passed/failed/skipped counts and the
+   `## Baseline failures` list recorded in the coverage doc header.
+7. **Read the production diff for this branch.** Report any touched behavior with no SC row
+   as `stale`.
 
 Findings:
 
@@ -67,7 +70,8 @@ Without this, an all-`HOLDS` critic passes forever after the one-time acceptance
 The canary must be drawn from a test already known weak for this run — one layer 1 flagged,
 or one a prior run verdicted `WEAK` or `VACUOUS`. If no such test exists for this batch, say
 so in the report and skip the batch-voiding rule for that batch rather than manufacturing an
-unrelated canary.
+unrelated canary. The report names which row served as the canary for each batch, or records
+that no eligible canary existed — a claimed catch with no named row is not auditable.
 
 Verdicts: `HOLDS`, `WEAK`, `VACUOUS`. `WEAK` and `VACUOUS` are blocking.
 
@@ -94,9 +98,17 @@ No `smoke` or `e2e` rows → layer 3 is `N/A`, not `SKIPPED`, not `PARTIAL`.
 
 A single-iteration concurrency walkthrough is `INCONCLUSIVE`, never `PASS`.
 
+Each walkthrough line names the SC-IDs it exercises, so a reader can tell which row a
+`W2 dep down` line verdicts. A `smoke` or `e2e` row layer 1 already reported as `gap` has no
+tagged test to bind a walkthrough result to; record it as `LIVE-N/A (layer 1 gap)` instead
+of treating an unrelated walkthrough's result as that row's verdict.
+
 ## Layer 4 — mutation (`risk=high` rows only)
 
-Dispatch `mutator`. Same tamper-check protocol as layer 3, before and after.
+Dispatch `mutator`. Same tamper-check protocol as layer 3, before and after. Before
+dispatch, the dispatcher also confirms the working tree is clean — `git status --porcelain`
+empty — since the mutator's own revert (`git checkout --`) cannot distinguish its mutation
+from pre-existing uncommitted work.
 
 Verdicts: `MUTATION-CAUGHT`, `MUTATION-SURVIVED` (blocking), `MUTATION-UNAPPLIABLE`.
 
@@ -114,7 +126,7 @@ mis-phrased, not that the tagged test is missing or skipped.
 Exactly three.
 
 **`BLOCKED`** on any of: `gap`, unretired `drift`, unresolved `overclaim`, unresolved
-`stale`, `red`, `WEAK`, `VACUOUS`, `MUTATION-SURVIVED`, live `FAIL`.
+`stale`, `red`, `WEAK`, `VACUOUS`, `MUTATION-SURVIVED`, live `FAIL`, live `INCONCLUSIVE`.
 
 **`PARTIAL`** when a layer could not run. Requires **both**:
 
@@ -161,7 +173,8 @@ Format: [references/example-verification.md](references/example-verification.md)
 
 - [ ] Layer 1 ran in full, consuming machine-readable runner output
 - [ ] Every active row has a verdict from every applicable layer
-- [ ] Each layer-2 batch's canary was caught
+- [ ] Each layer-2 batch names its canary and reports it caught, or records that no
+      eligible canary existed for that batch
 - [ ] Layer 3 transcripts re-grepped by this thread, not trusted from the summary
 - [ ] Tamper check run before and after both layer 3 and layer 4
 - [ ] Every `risk=high` row has a layer 4 verdict

@@ -2,7 +2,7 @@
 
 Coverage: docs/superpowers/coverage/2026-07-30-order-creation-coverage.md
 Baseline: a1b2c3d · Run: 2026-07-30T14:02Z
-Verdict: BLOCKED — 2 gaps, 1 vacuous, 1 mutation survived, 1 live failure
+Verdict: BLOCKED — 2 gaps, 1 vacuous, 1 mutation survived, 1 live failure, 1 live inconclusive
 
 ## Layer 1 — trace (full re-run)
 
@@ -19,7 +19,7 @@ stale:     none
 `SC-02` is the case a grep-only layer 1 would have called covered: the tag is present and
 the suite is green, because a skipped test does not fail.
 
-## Layer 2 — adversarial read (canary caught in 1/1 batches)
+## Layer 2 — adversarial read (no eligible canary this run — batch-voiding skipped)
 
 2 rows read: HOLDS 1 · WEAK 0 · VACUOUS 1
 
@@ -32,13 +32,23 @@ SC-03 VACUOUS
   test never inspects
 ```
 
+No eligible canary: layer 1's flagged rows are `SC-02` and `SC-05`, neither of which is in
+this batch (`SC-01`, `SC-03`), and neither had a prior `WEAK`/`VACUOUS` verdict before this
+run started. Batch-voiding skipped for this batch per the no-canary fallback rather than
+manufacturing an unrelated canary.
+
 ## Layer 3 — live (transcripts re-grepped by main thread)
 
 ```
-W0 happy    PASS          EXPECT 201 → got 201
-W2 dep down FAIL          EXPECT 503 and "rows":0 → got 500
-W5 parallel INCONCLUSIVE  1 iteration only; needs a stated count with fail-if-any
+W0 happy    PASS          EXPECT 201 → got 201                                    no SC row (baseline happy path)
+W2 dep down FAIL          EXPECT 503 and "rows":0 → got 500                       SC-05
+W5 parallel INCONCLUSIVE  1 iteration only; needs a stated count with fail-if-any  SC-03
+SC-05 LIVE-N/A (layer 1 gap)  no tagged test at all (see layer 1 gap)
 ```
+
+`W2` exercises exactly the scenario `SC-05` describes, but the row has no tagged test, so
+its formal layer-3 verdict is `LIVE-N/A (layer 1 gap)` — `W2`'s `FAIL` is diagnostic
+evidence for item 3 below, not a substitute for tagging the row.
 
 transcripts: `docs/superpowers/coverage/transcripts/W0-happy.txt`, `W2-dep-down.txt`,
 `W5-parallel.txt`
