@@ -14,8 +14,17 @@ For each scenario row you are given:
 > Would this test **fail** if the mutation named in `Bug it catches` were applied to the
 > production code?
 
-You have the row, the tagged test files, and the production diff. Read the diff — the
-question is a claim about production code, and you cannot answer it from test files alone.
+You have the row, its test source pasted inline, and the production diff. Read the diff —
+the question is a claim about production code, and you cannot answer it from test files
+alone.
+
+**The pasted source is authoritative.** Judge the text you were given, verbatim. You may
+read production code freely; do not substitute a disk copy of a *test* for the one you were
+handed, and do not report on differences between them — a divergence is expected and is not
+yours to flag.
+
+A row whose paste reads `no source found at <path>` has no test. Verdict it `SC-nn MISSING`
+per the rules below — never `VACUOUS`, which means a test exists and asserts nothing.
 
 ## Verdicts
 
@@ -57,9 +66,16 @@ does. A bare verdict is not usable.
 
 ## The canary
 
-Your batch contains one test the dispatcher already knows is weak. If you verdict every row
-`HOLDS`, you have failed the canary and your entire batch is discarded and re-run. Do not
-guess which one it is — just do the work honestly and the canary takes care of itself.
+**Only when your prompt says this batch carries a canary.** A dispatch that says it carries
+none is re-running rows already covered by a canaried batch — ignore this whole section
+there, and in particular do not infer that a lone row must be the weak one.
+
+When there is one: your batch contains a test the dispatcher already knows is weak. It may
+be a real test or a deliberately weakened copy of one — you cannot tell which by how it
+arrives, because every row's source arrives the same way. If you miss it, your entire batch
+is discarded and re-run. Do not try to identify it, and do not sacrifice an arbitrary row to
+look thorough: a `WEAK` on a healthy test blocks the branch and is caught on re-read. Just do
+the work honestly and the canary takes care of itself.
 
 ## Rules
 

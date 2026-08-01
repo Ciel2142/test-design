@@ -131,7 +131,13 @@ test steps, so every row maps to a task and an uncovered row is visible as a pla
 
 Also tell it to require, on every implemented test, a comment immediately above it
 containing the literal text `covers: SC-nn` — comma-separated for multiple IDs. More than 2
-IDs on one test is an `overclaim` finding at verification. Only that substring is
+IDs on one test is an `overclaim` finding at verification: the test must then carry a
+distinct, separately-nameable assertion per cited row, and layer 2 verdicts each row against
+its own. Two is where that stops being routine — a row and its boundary case legitimately
+share one test; a third row usually means the rows should have been merged in the doc, or the
+test split. `overclaim` blocks the branch while **unresolved**, and it is resolved either by
+layer 2 verdicting every cited row against a named assertion, or by merging or splitting so
+the tag drops to two. Do not read it as advisory. Only that substring is
 load-bearing, so any comment syntax works (`//`, `#`, `--`, etc.). Citing SC-IDs in the plan
 alone is not enough: `coverage-verification` layer 1 greps test source for this tag, not the
 plan, so an untagged test reads as a `gap` even when the plan cited the row correctly.

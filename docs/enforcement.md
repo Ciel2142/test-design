@@ -1,6 +1,7 @@
 # Enforcement
 
-The two stages are wired in by skill-text handoffs plus one rule in `~/.claude/CLAUDE.md`.
+The two stages are wired in by skill-text handoffs, one rule in `~/.claude/CLAUDE.md`, and
+one warning hook the plugin ships.
 
 ## Why the rule must name what it supersedes
 
@@ -39,13 +40,40 @@ handoff, before the branch is finished. A plan with no coverage doc, or a branch
 verification report, is incomplete.
 ```
 
-## Not hooks, for now
+## The warning hook
+
+`hooks/coverage-doc-warning.sh`, wired as `PostToolUse` on `Write`. When a file under
+`docs/superpowers/plans/` is written and no `docs/superpowers/coverage/*-coverage.md`
+exists beside it, the hook exits 2, which feeds its message back to Claude.
+
+It exists because the rule above does not ship with the plugin. Installing `test-design`
+installs the skills, the agents, and nothing that makes anyone use them — and the failure is
+silent, because a stage that never runs produces no error, just an absent artifact. The hook
+is the only part of the gate that survives `claude plugin install`.
+
+It cannot block. `PostToolUse` fires after the write has already happened, so exit 2 is
+feedback, not a veto. It fails open on input it cannot read — an empty or malformed
+payload, a `file_path` it cannot resolve to a repo root — exiting 0 and saying nothing.
+(Not on a missing `jq`: without it the script's `sed` fallback still resolves the path and
+still warns.) The message names the two legitimate cases (the floor rule, a
+package-relative doc in a monorepo) so a correct run that trips it reads as expected rather
+than as a defect.
+
+What it does **not** do: correlate a plan with *its own* coverage doc. Any
+`*-coverage.md` in the directory satisfies it, so from the repo's second feature onward the
+hook is effectively silent. That is deliberate for a warning — matching plan to doc means
+guessing a naming convention, and a warning that misfires gets muted — but it means the
+hook is a first-plan tripwire, not a measurement of how often the stage is skipped. Do not
+read its silence as evidence for or against the denial hook below.
+
+## Not a *denial* hook, for now
 
 A hook could enforce this deterministically — Claude Code hooks run arbitrary commands, so
-one could perform the entire tag-and-runner-report check. The reason to defer is the
-unknown false-denial rate: a gate that blocks legitimate work mid-flow gets disabled
-permanently, and that risk is unmeasured until the stage has real mileage.
+one could perform the entire tag-and-runner-report check in `PreToolUse` and deny. The
+reason to defer that is the unknown false-denial rate: a gate that blocks legitimate work
+mid-flow gets disabled permanently, and that risk is unmeasured until the stage has real
+mileage.
 
-Revisit after the dogfood phases. If the stage is observed being skipped, the first step up
-is a **warning** hook on writes to `docs/superpowers/plans/*` that injects context about
-whether a coverage doc exists — not a denial.
+The warning hook above is not subject to that argument — it has no false-denial rate to
+measure, because it denies nothing. Revisit the denial version after the dogfood phases,
+using what the warning hook reveals about how often the stage is genuinely skipped.

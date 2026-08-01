@@ -1,0 +1,17 @@
+{
+  "description": "test-design — warns, never denies, when an implementation plan is written with no coverage doc beside it",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/coverage-doc-warning.sh\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

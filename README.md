@@ -23,14 +23,20 @@ nominally guard against. A green suite proves tests pass, not that they bite.
 
 ## Install
 
+Clone, then point a local marketplace at the clone:
+
 ```bash
-claude plugin marketplace add /home/igi21/experiements/test-design
+git clone http://192.168.1.34:3000/service/test-design.git
+claude plugin marketplace add ./test-design
 claude plugin install test-design@test-design
 ```
 
-Then install the gate rule — see [docs/enforcement.md](docs/enforcement.md) for the text
-and for why it must name the `brainstorming` instruction it supersedes.
+`claude plugin marketplace add` takes the path to the clone, so substitute wherever you put
+it. The remote above is LAN-only; any clone of this repo works the same way.
 
-## Design
-
-See `docs/superpowers/specs/2026-07-30-test-design-plugin-design.md`.
+Installing gives you the skills, the agents, and a warning hook that fires when a plan is
+written with no coverage doc beside it. It does **not** give you the gate rule that puts
+`test-coverage-design` between `brainstorming` and `writing-plans` — that lives in
+`~/.claude/CLAUDE.md` and you have to add it. See [docs/enforcement.md](docs/enforcement.md)
+for the text, for why it must name the `brainstorming` instruction it supersedes, and for
+what the hook does and does not cover.

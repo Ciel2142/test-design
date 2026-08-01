@@ -19,9 +19,10 @@ stale:     none
 `SC-02` is the case a grep-only layer 1 would have called covered: the tag is present and
 the suite is green, because a skipped test does not fail.
 
-## Layer 2 — adversarial read (no eligible canary this run — batch-voiding skipped)
+## Layer 2 — adversarial read (canary synthesized from SC-01 — caught)
 
-2 rows read: HOLDS 1 · WEAK 0 · VACUOUS 1
+2 rows read: HOLDS 1 · WEAK 0 · VACUOUS 1 — real-source verdicts only; the canary copy's
+own `VACUOUS` is canary evidence, not a row verdict, and is excluded from this tally
 
 ```
 SC-01 HOLDS
@@ -32,10 +33,16 @@ SC-03 VACUOUS
   test never inspects
 ```
 
-No eligible canary: layer 1's flagged rows are `SC-02` and `SC-05`, neither of which is in
-this batch (`SC-01`, `SC-03`), and neither had a prior `WEAK`/`VACUOUS` verdict before this
-run started. Batch-voiding skipped for this batch per the no-canary fallback rather than
-manufacturing an unrelated canary.
+Canary: no natural one was available — layer 1's flagged rows are `SC-02` and `SC-05`,
+neither in this batch (`SC-01`, `SC-03`), and neither had a prior `WEAK`/`VACUOUS` verdict
+before this run started. So one was synthesized from `SC-01`: the batch was dispatched
+(`dispatch 1`, canary-bearing) with `SC-01`'s `expect(count()).toBe(0)` replaced by
+`expect(count()).toBeGreaterThanOrEqual(0)`, which holds for both `0` and `1` and so no
+longer binds to the `<=`→`<` mutation. The critic returned `VACUOUS` on that copy — canary
+caught — so `SC-03`'s verdict stands. `SC-01` was then re-dispatched alone with its real
+source (`dispatch 2`, canary-free, inheriting dispatch 1's canary evidence), returning the
+`HOLDS` above. Nothing was written to disk; the weakened copy existed only in the dispatch
+prompt.
 
 ## Layer 3 — live (transcripts re-grepped by main thread)
 

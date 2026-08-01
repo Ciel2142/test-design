@@ -26,14 +26,25 @@ For each `risk=high` row you are given:
    mutation, one file where possible.
 3. **Run only the tagged test** — never the whole suite. This is what keeps the layer
    affordable: cost scales with high-risk row count, not suite runtime. Resolve which test
-   an `SC-nn` tag names using `skills/coverage-verification/references/runner-output.md`
-   ("Extracting the test name a tag refers to"), including its suffix-match rule; do not
-   restate those patterns here. Then invoke only that test:
-   - vitest/jest: `-t '<name>'`
+   an `SC-nn` tag names using
+   `${CLAUDE_PLUGIN_ROOT}/skills/coverage-verification/references/runner-output.md`
+   ("Extracting the test name a tag refers to" and "Joining a tag to its row"), including
+   its scope restriction and anchored name rule; do not restate those patterns here. Then
+   invoke only that test:
+   - vitest/jest: `-t '^<name>$'`
    - pytest: `-k '<name>'`
-   - go: `-run '<name>'`
+   - go: `-run '^<name>$'`
    - maven: `-Dtest='<Class>#<method>'`
    - gradle: `--tests '<pattern>'`
+
+   **Anchor the pattern and escape it.** `-t` and `-run` take unanchored regexes:
+   `-run 'TestValidates'` also runs `TestValidatesStrictly`, so a mutation that breaks only
+   the sibling yields a nonzero exit and a fabricated `MUTATION-CAUGHT` for a test that never
+   bit. Worse, an unescaped name containing regex metacharacters — `handles input (edge
+   case)`, exactly the shape the join's decoration rule exists to resolve — matches nothing,
+   and vitest reports *zero tests run* with **exit 0**, which under the exit-code rule below
+   reads as `MUTATION-SURVIVED`. Escape the metacharacters, and confirm the run actually
+   selected one test before believing either verdict.
 4. **Require FAIL.** A passing test here is the finding: the test does not bite.
 5. **Revert** with `git checkout -- <file>` and run the same test again.
 6. **Require PASS.** If it now fails, your revert was incomplete or the test is flaky —
@@ -44,7 +55,9 @@ For each `risk=high` row you are given:
    branch and a committed transcript would go with it.
 
 FAIL and PASS above are read from the test runner's process exit code, never inferred by
-parsing its output text. Capture that exit code directly: a pipe (`cmd | tail`) yields the
+parsing its output text. The selection check in step 3 is not an exception to that: how many
+tests the filter selected is read from the same machine-readable report layer 1 consumes, and
+it gates whether a verdict may be recorded at all — it never becomes the verdict. Capture that exit code directly: a pipe (`cmd | tail`) yields the
 pipe's own exit status, not the runner's, so use `PIPESTATUS[0]` or redirect output to a
 file and read the code separately. If something between you and the runner — a wrapper,
 hook, or harness — interposes on the command such that the exit code can no longer be

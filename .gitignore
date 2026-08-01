@@ -1,5 +1,18 @@
 node_modules/
 *.log
 /tmp/
+
+# Design record for this plugin's own development. Kept on disk, never shipped:
+# `claude plugin install` copies every tracked file into the consumer's plugin
+# directory, and a plan/spec pair is not runtime.
+#
+# Narrow on purpose. `/docs/superpowers/` as a whole would also swallow
+# `docs/superpowers/coverage/`, which is where this plugin's own skills write their
+# artifacts — dogfooding test-design on test-design would then produce a coverage doc and
+# a verification report that silently could not be committed.
+/docs/superpowers/plans/
+/docs/superpowers/specs/
+/.superpowers/
+/.claude/
 fixtures/sample-project/coverage/
 fixtures/sample-project/.vitest-report.json
