@@ -66,56 +66,94 @@ and **the production diff with test files excluded**. A row whose tagged test do
 is still included, with `no source found at <path>` in place of the paste — that is what
 lets the critic return `MISSING` and lets the reconciliation below run at all.
 
+**Read each paste at the `file:name` binding layer 1 already resolved** — not from a fresh
+grep for the test name. Names repeat across files; the scope-restricted join in layer 1 is
+what settles which one a tag means, and re-looking it up here throws that away and can hand
+the critic a different file's test under this row's ID. A row layer 1 reported as
+`gap (ambiguous)` has no resolved binding and so has no paste: it is already blocking, and
+arrives as `no source found at <path>` like any other missing row.
+
+**Paste it verbatim and complete** — the whole test body, every assertion, unedited. Step 4's
+"never let raw suite output land in this context" is about a runner's failure output, not
+about the tests under review, and does not license trimming a test to fit. A dispatcher that
+drops the binding assertion earns a `VACUOUS` on a healthy row, and because the paste is
+authoritative the critic cannot notice.
+
+When a test genuinely will not fit, elide **only** code outside the test body — shared
+`beforeEach`, fixture builders, imports — and name each cut inline where it was made:
+`// elided: beforeEach at orders.test.ts:12-40`. Never elide an assertion, nor an arrange
+step the assertions read from. If the body alone still will not fit, dispatch that row by
+itself rather than trimming it.
+
+A critic reason naming a truncated or unmarked-incomplete paste is a **dispatch defect**:
+re-paste that row complete and re-dispatch it, and do not record the verdict it came with.
+
 Excluding test files from the diff is not tidiness. At the finishing-a-development-branch
 seam the branch diff normally *contains the new tests*, so a diff that included them would
 hand the critic the real source of every row alongside the pasted one — naming the
-synthesized canary below by inspection, no disk read required. Layer 2's question is about
-production code; test files in the diff add nothing and cost the canary.
+synthesized canaries below by inspection, no disk read required. Layer 2's question is about
+production code; test files in the diff add nothing and cost the canaries.
 
 Withholding the diff would leave the critic unable to answer
 its own question, since "would this fail if the mutation were applied" is a claim about
 production code. Its honesty comes from having no edit tools, not from having no
 information.
 
-**Inject one canary per batch:** a test you already know is weak. A batch that verdicts its
-canary `HOLDS` has all its verdicts voided and re-dispatches at a higher effort tier.
+**Inject two canaries per batch:** two tests you already know are weak. A batch that verdicts
+*either* canary `HOLDS` has all its verdicts voided and re-dispatches at a higher effort tier.
 Without this, an all-`HOLDS` critic passes forever after the one-time acceptance check.
 
-Source the canary in this order:
+Two rather than one, because of what a single canary leaves open. An all-`HOLDS` critic is
+caught outright either way. But a critic that reads nothing and sacrifices one arbitrary row
+as `WEAK` to look thorough is caught only when the canary is among the rows it stamped
+`HOLDS` — with one canary in a batch of N that is (N-1)/N, so it escapes 1/N of batches,
+20% at N=5. It cannot escape two: one sacrificed row still leaves the other canary stamped
+`HOLDS`. Sacrificing two rows escapes only if both land exactly on the canaries, 1/C(N,2).
+The residual is the same shape as before, one order smaller.
+
+A batch of fewer than 4 rows carries one canary, not two — at N=3, two canaries leave a
+single real row and the dispatch stops being a read of the batch at all. The report says
+which case each batch was.
+
+Source each canary in this order:
 
 1. **A naturally weak test** — one layer 1 flagged, or one a prior run verdicted `WEAK` or
    `VACUOUS` **on its real source**. Preferred: nothing is fabricated and the expected
    verdict is already known. A `WEAK`/`VACUOUS` earned by a weakened *copy* does not
    qualify: reusing it as a natural canary pastes the row's healthy real source, expects
    weakness, gets `HOLDS`, and voids the batch forever.
-2. **A synthesized one.** Pick any row in the batch and paste, in place of its real test
-   source, a copy weakened so it no longer binds to that row's `Bug it catches` — the
-   binding assertion replaced with a truthiness or `toBeDefined` check, or dropped. The
-   correct verdict for the paste is `WEAK` or `VACUOUS`; `HOLDS` voids the batch. That row
-   has now been verdicted on a copy rather than on its real source, so re-dispatch **that
-   row alone** with its real source to get its actual verdict. One extra single-row
-   dispatch per batch, not a second full batch.
+2. **A synthesized one.** Pick a row not already serving as this batch's other canary and
+   paste, in place of its real test source, a copy weakened so it no longer binds to that
+   row's `Bug it catches` — the binding assertion replaced with a truthiness or
+   `toBeDefined` check, or dropped. The correct verdict for the paste is `WEAK` or
+   `VACUOUS`; `HOLDS` voids the batch. That row has now been verdicted on a copy rather
+   than on its real source, so re-dispatch **that row alone** with its real source to get
+   its actual verdict. One extra single-row dispatch per *synthesized* canary — at most two
+   per batch, and none for a natural one, which is verdicted on its real source already.
+   Never a second full batch.
 
-   Vary the weakening. `coverage-critic` is told to hunt for exactly the forms named above,
-   so a batch in which one row and only one row asserts `toBeDefined()` identifies itself.
-   Weaken by loosening a boundary, asserting a mock instead of state, dropping to a shape
-   check — whatever the row's real assertion makes natural.
+   Vary the weakening, and vary it **between the two canaries as well**. `coverage-critic`
+   is told to hunt for exactly the forms named above, so a batch in which one row and only
+   one row asserts `toBeDefined()` identifies itself — and two rows weakened the same way
+   identify each other, which hands back the single-sacrifice escape the second canary
+   exists to close. Weaken by loosening a boundary, asserting a mock instead of state,
+   dropping to a shape check — whatever each row's real assertion makes natural.
 
-   If the row cannot be weakened without the copy still binding — a golden-file or
-   snapshot test, where the binding is the fixture and not an inline assertion — pick a
-   different row. If no row in the batch can be weakened, say so in the report and skip
-   batch-voiding for that batch. That fallback is now the narrow case it was always meant
-   to be, not the default.
+   If a row cannot be weakened without the copy still binding — a golden-file or snapshot
+   test, where the binding is the fixture and not an inline assertion — pick a different
+   row. If only one row in the batch can be weakened, carry one canary and say so. If none
+   can, say so in the report and skip batch-voiding for that batch. That fallback is the
+   narrow case it was always meant to be, not the default.
 
 Option 1 is unavailable on exactly the run where the guard matters most: a healthy first
 run has no flagged test and no prior verdicts, so a rule that stops at option 1 leaves the
 rubber-stamp critic unguarded in the common case. That is circular — the canary would
 require the signal layer 2 exists to produce.
 
-Two things make the synthetic canary work, and both are load-bearing:
+Two properties of the dispatch make a synthetic canary work, and both are load-bearing:
 
-- **Every row's source is pasted, not just the canary's.** A batch where one row arrives
-  inline and the rest arrive as file paths announces which row is the canary.
+- **Every row's source is pasted, not just the canaries'.** A batch where two rows arrive
+  inline and the rest arrive as file paths announces which rows are the canaries.
 - **The paste is authoritative** — `coverage-critic` verdicts the source it was given, not
   what it may find on disk. Stated in the agent, so re-reading the file gains nothing.
 
@@ -123,17 +161,20 @@ Never write the weakened copy to disk. Layer 2 has no tamper-check protocol, and
 synthetic test file in the working tree is indistinguishable from a real one to every later
 layer.
 
-**Every dispatch states whether it carries a canary.** The single-row re-dispatch above does
-not, and cannot — weakening its only row is what it exists to undo. A canary-free dispatch is
-legitimate exactly when it re-runs rows whose canary-bearing dispatch already caught its
-canary; it inherits that batch's evidence and names it. Without this the rule recurses: the
-re-dispatch needs a canary, synthesizing one needs another re-dispatch, forever. Say which
-kind each dispatch is in the prompt, because `coverage-critic` is told a canary is present
-and would otherwise conclude a healthy lone row must be the weak one.
+**Every dispatch states whether it carries canaries.** Whether, not how many: a critic told
+the count knows exactly how many rows a sacrifice strategy must cover. The single-row
+re-dispatches above carry none, and cannot — weakening their only row is what they exist to
+undo. A canary-free dispatch is legitimate exactly when it re-runs rows whose canary-bearing
+dispatch already caught its canaries; it inherits that batch's evidence and names it. Without
+this the rule recurses: the re-dispatch needs a canary, synthesizing one needs another
+re-dispatch, forever. Say which kind each dispatch is in the prompt, because
+`coverage-critic` is told canaries are present and would otherwise conclude a healthy lone
+row must be the weak one.
 
-The report names which row served as the canary for each batch, whether it was natural or
+The report names which rows served as canaries for each batch, whether each was natural or
 synthesized, and for a synthesized one, the weakening applied — a claimed catch with no
-named row and no named weakening is not auditable.
+named row and no named weakening is not auditable. It also names any batch that carried
+fewer than two, and why.
 
 Verdicts: `HOLDS`, `WEAK`, `VACUOUS`. `WEAK` and `VACUOUS` are blocking.
 
@@ -216,7 +257,8 @@ silently combine fresh subset results with stale inherited verdicts and present 
 as `PASS`. Dispatch granularity matters inside a single run: a canary'd row carries a verdict
 from the weakened copy and another from the re-dispatch of its real source, and a reader who
 cannot tell them apart cannot tell a planted weakness from a real finding. When a batch is
-voided, the re-dispatch it spawned is voided with it — its critic was never canary-tested.
+voided, the re-dispatches it spawned are voided with it — their critic was never
+canary-tested.
 
 ## Degradation
 
@@ -240,9 +282,12 @@ Format: [references/example-verification.md](references/example-verification.md)
 
 - [ ] Layer 1 ran in full, consuming machine-readable runner output
 - [ ] Every active row has a verdict from every applicable layer
-- [ ] Each canary-bearing layer-2 batch names its canary, natural or synthesized, and
-      reports it caught — with the weakening named if it was synthesized. A canary-free
-      dispatch names the canaried batch whose evidence it inherits
+- [ ] Each canary-bearing layer-2 batch names its canaries, natural or synthesized, and
+      reports them caught — with the weakening named for each synthesized one, and the
+      reason stated if the batch carried fewer than two. A canary-free dispatch names the
+      canaried batch whose evidence it inherits
+- [ ] Every layer-2 paste was taken from layer 1's resolved `file:name` binding and pasted
+      whole, with any elision outside the test body named inline
 - [ ] Layer 3 transcripts re-grepped by this thread, not trusted from the summary
 - [ ] Tamper check run before and after both layer 3 and layer 4
 - [ ] Every `risk=high` row has a layer 4 verdict

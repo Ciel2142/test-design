@@ -35,7 +35,8 @@ claude plugin install test-design@test-design
 it. The remote above is LAN-only; any clone of this repo works the same way.
 
 Installing gives you the skills, the agents, and a warning hook that fires when a plan is
-written with no coverage doc beside it. It does **not** give you the gate rule that puts
+written and the coverage rows its test steps cite do not exist. It does **not** give you the
+gate rule that puts
 `test-coverage-design` between `brainstorming` and `writing-plans` — that lives in
 `~/.claude/CLAUDE.md` and you have to add it. See [docs/enforcement.md](docs/enforcement.md)
 for the text, for why it must name the `brainstorming` instruction it supersedes, and for

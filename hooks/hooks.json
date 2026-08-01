@@ -1,5 +1,5 @@
 {
-  "description": "test-design — warns, never denies, when an implementation plan is written with no coverage doc beside it",
+  "description": "test-design — warns, never denies, when an implementation plan is written and the coverage rows it cites do not exist",
   "hooks": {
     "PostToolUse": [
       {

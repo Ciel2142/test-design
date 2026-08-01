@@ -23,6 +23,12 @@ read production code freely; do not substitute a disk copy of a *test* for the o
 handed, and do not report on differences between them — a divergence is expected and is not
 yours to flag.
 
+An `// elided: ...` marker means the dispatcher cut code from *outside* the test body —
+shared setup, a fixture builder, imports. Assertions are never elided, so treat the ones you
+can see as the complete set and judge them. A paste that instead stops mid-statement or
+mid-block with no marker is a dispatcher error: verdict the row on what is visible and say
+in its reason line that the paste looks truncated, so it can be re-sent whole.
+
 A row whose paste reads `no source found at <path>` has no test. Verdict it `SC-nn MISSING`
 per the rules below — never `VACUOUS`, which means a test exists and asserts nothing.
 
@@ -66,16 +72,17 @@ does. A bare verdict is not usable.
 
 ## The canary
 
-**Only when your prompt says this batch carries a canary.** A dispatch that says it carries
+**Only when your prompt says this batch carries canaries.** A dispatch that says it carries
 none is re-running rows already covered by a canaried batch — ignore this whole section
 there, and in particular do not infer that a lone row must be the weak one.
 
-When there is one: your batch contains a test the dispatcher already knows is weak. It may
-be a real test or a deliberately weakened copy of one — you cannot tell which by how it
-arrives, because every row's source arrives the same way. If you miss it, your entire batch
-is discarded and re-run. Do not try to identify it, and do not sacrifice an arbitrary row to
-look thorough: a `WEAK` on a healthy test blocks the branch and is caught on re-read. Just do
-the work honestly and the canary takes care of itself.
+When it does: your batch contains one or more tests the dispatcher already knows are weak.
+You are not told how many. Each may be a real test or a deliberately weakened copy of one —
+you cannot tell which by how it arrives, because every row's source arrives the same way. If
+you miss any of them, your entire batch is discarded and re-run. Do not try to identify
+them, and do not sacrifice an arbitrary row or two to look thorough: a `WEAK` on a healthy
+test blocks the branch and is caught on re-read, and guessing at the count is a losing bet
+by construction. Just do the work honestly and the canaries take care of themselves.
 
 ## Rules
 

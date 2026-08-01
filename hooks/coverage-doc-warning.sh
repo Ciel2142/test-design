@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# PostToolUse(Write) — warn when an implementation plan is written and no coverage doc
-# exists beside it.
+# PostToolUse(Write) — warn when an implementation plan is written and the coverage rows it
+# cites do not exist.
 #
 # Warning only, and structurally incapable of being anything else: PostToolUse runs after
 # the write has already happened, so exit 2 feeds this text back to Claude without denying
@@ -55,23 +55,56 @@ fi
 # no warning.
 [ -n "$root" ] && [ -d "$root" ] || exit 0
 
-for f in "$root"/docs/superpowers/coverage/*-coverage.md; do
-    [ -e "$f" ] && exit 0
-done
+# A relative `file_path` is relative to the session root, not to this hook's cwd.
+case "$file_path" in
+    /*) plan_file=$file_path ;;
+    *)  plan_file=$root/$file_path ;;
+esac
+[ -r "$plan_file" ] || exit 0
+
+# Correlate the plan with its OWN coverage rows, via the SC-IDs it cites. `writing-plans` is
+# told by test-coverage-design to cite them in the plan's test steps, so the plan names what
+# must exist. The alternative -- matching a filename slug -- guesses a naming convention
+# nothing enforces, and a slug that drifts between the two documents warns on a compliant
+# branch. The earlier "any *-coverage.md exists" check was silent from a repo's second
+# feature onward, including for a plan that genuinely skipped the stage.
+#
+# Reading the plan from disk, not from the payload: PostToolUse fires after the write, so the
+# file is there, and this stays correct for Write and for any future edit-shaped tool.
+plan_ids=$(grep -oE '\bSC-[0-9]+\b' "$plan_file" 2>/dev/null | sort -u)
+
+if [ -z "$plan_ids" ]; then
+    reason="the plan cites no SC-IDs"
+    looked="Looked for: SC-nn citations in the plan's own test steps"
+else
+    # Specs are a defining source too: a feature meeting test-coverage-design's floor rule
+    # (<=2 behaviors, no persistence, no concurrency, no external dependency) keeps its
+    # coverage table inline in the spec instead of a coverage doc. Omitting specs here would
+    # warn on every branch that followed that rule correctly.
+    defined=$(grep -hoE '\bSC-[0-9]+\b' \
+        "$root"/docs/superpowers/coverage/*-coverage.md \
+        "$root"/docs/superpowers/specs/*.md 2>/dev/null | sort -u)
+    undefined=$(comm -23 <(printf '%s\n' "$plan_ids") <(printf '%s\n' "$defined"))
+    [ -n "$undefined" ] || exit 0
+    reason="the plan cites SC-IDs that nothing defines: $(printf '%s' "$undefined" | tr '\n' ' ')"
+    looked="Looked in: $root/docs/superpowers/coverage/*-coverage.md
+           $root/docs/superpowers/specs/*.md"
+fi
 
 cat >&2 <<EOF
-test-design: no coverage doc found for this plan.
+test-design: this plan is not backed by a coverage design.
 
-Wrote:    $file_path
-Looked in: $root/docs/superpowers/coverage/*-coverage.md
+Wrote:  $file_path
+Reason: $reason
+$looked
 
 The sequence is brainstorming -> test-design:test-coverage-design -> writing-plans, so a
-plan normally arrives after a coverage doc exists and cites its SC-IDs. Two cases where
-this warning is expected and you should carry on:
+plan normally arrives after the coverage rows exist and its test steps cite their SC-IDs.
+Two cases where this warning is expected and you should carry on:
 
-  - the feature meets test-coverage-design's floor rule (<=2 behaviors, no persistence, no
-    concurrency, no external dependency), so its coverage table went inline into the spec
-  - the coverage doc is package-relative in a monorepo, somewhere other than the repo root
+  - the rows live somewhere this hook does not look: a package-relative coverage doc in a
+    monorepo, or a floor-rule table inline in a spec outside docs/superpowers/specs/
+  - the plan is a stub whose test steps are still to be written
 
 Otherwise the stage was skipped. Run test-design:test-coverage-design against the approved
 spec, then have the plan cite its SC-IDs.

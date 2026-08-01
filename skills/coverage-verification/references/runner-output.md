@@ -162,14 +162,28 @@ rarely the directory you ran the grep from.
 | TS/JS | test file path | the two absolute paths are the same file |
 | Go | package import path | `scope`'s trailing segments equal the tag file's directory relative to the module root (`go list -m` gives the module path; strip it from `scope`). A root-package test has an empty directory and matches the bare module path |
 | Python | dotted module, optionally `.Class` | `scope`, `.`→`/`, is a trailing-segment match for the tag file's path with `.py` stripped — `pytest`'s `classname` is relative to its **rootdir**, which in a monorepo sits above the sub-project, so exact equality fails on a correct suite |
-| Java/Kotlin | fully-qualified class | `scope` up to the first `$` equals or trailing-segment-matches the tag file's path below the source root (`src/test/java`, `.../kotlin`, `.../groovy`, `.../scala`, `src/jvmTest/...`), `/`→`.`, extension stripped |
+| Java/Kotlin | fully-qualified class | `scope` up to the first `$` equals the file's own `package` declaration joined to the name of the top-level type lexically enclosing the tag — `class`, `object`, `interface`, or a Spock `class ... extends Specification`. Read both off the file. Path fallback below when the file declares neither |
 | Rust | module path | `scope` starts with the tag file's path below `src/`, `/`→`::` and `.rs` stripped |
 
-Two JVM traps the `$` and trailing-segment rules exist for. JUnit 5 `@Nested` classes report
-as `OuterTest$InnerClass`, not `OuterTest.InnerClass` — a rule accepting only `.` gaps every
-nested test in the suite. And Kotlin, Groovy, and Scala permit a file name that differs from
-the class it declares, so the path cannot always derive the class: when it does not, the
-match fails and the row is a `gap (ambiguous)` to be resolved by hand, not a silent bind.
+Two JVM traps these rules exist for. JUnit 5 `@Nested` classes report as
+`OuterTest$InnerClass`, not `OuterTest.InnerClass` — a rule accepting only `.` gaps every
+nested test in the suite, which is why the comparison truncates at the first `$` and uses
+the *top-level* enclosing type rather than the innermost one.
+
+And Kotlin, Groovy, and Scala permit a file name that differs from the class it declares,
+and permit several top-level types in one file: `OrdersSpec.kt` declaring
+`class OrderValidationTest` is reported under `...OrderValidationTest` while its path derives
+`...OrdersSpec`. Reading the declared `package` and type off the file settles that exactly;
+deriving the class from the path cannot, and doing so sent every Spock and KMP suite to
+`gap (ambiguous)` — safe, since nothing was silently bound, but noisy enough to bury real
+findings. "Lexically enclosing" is what disambiguates a multi-type file: the tag sits inside
+exactly one top-level declaration, and that is the one the runner will report it under.
+
+**Path fallback**, when the file declares no package or no enclosing type (a Groovy script,
+a default-package test): `scope` up to the first `$` equals or trailing-segment-matches the
+tag file's path below the source root (`src/test/java`, `.../kotlin`, `.../groovy`,
+`.../scala`, `src/jvmTest/...`), `/`→`.`, extension stripped. If neither rule pins one scope,
+the row is `gap (ambiguous)` to be resolved by hand, not a silent bind.
 
 Rust is the one language with a name pattern above and **no emitter** under "Emitting the
 contract" — none is specified here because `cargo test`'s stable output is plain text

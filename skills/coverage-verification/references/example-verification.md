@@ -19,7 +19,7 @@ stale:     none
 `SC-02` is the case a grep-only layer 1 would have called covered: the tag is present and
 the suite is green, because a skipped test does not fail.
 
-## Layer 2 — adversarial read (canary synthesized from SC-01 — caught)
+## Layer 2 — adversarial read (1 canary, synthesized from SC-01 — caught)
 
 2 rows read: HOLDS 1 · WEAK 0 · VACUOUS 1 — real-source verdicts only; the canary copy's
 own `VACUOUS` is canary evidence, not a row verdict, and is excluded from this tally
@@ -33,7 +33,10 @@ SC-03 VACUOUS
   test never inspects
 ```
 
-Canary: no natural one was available — layer 1's flagged rows are `SC-02` and `SC-05`,
+Canaries: one, not the usual two — this batch holds 2 rows, below the 4-row threshold at
+which a second is injected, and two canaries here would leave nothing to read.
+
+No natural one was available — layer 1's flagged rows are `SC-02` and `SC-05`,
 neither in this batch (`SC-01`, `SC-03`), and neither had a prior `WEAK`/`VACUOUS` verdict
 before this run started. So one was synthesized from `SC-01`: the batch was dispatched
 (`dispatch 1`, canary-bearing) with `SC-01`'s `expect(count()).toBe(0)` replaced by
