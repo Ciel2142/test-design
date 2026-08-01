@@ -75,16 +75,44 @@ caught in both of its shapes, since such a plan either cites no IDs or cites IDs
 defines. Its silence is therefore usable as weak evidence for the denial-hook decision
 below, in a way the earlier any-doc-exists check's was not.
 
-## Not a *denial* hook, for now
+## Not a *denial* hook — decided, not deferred
 
-A hook could enforce this deterministically — Claude Code hooks run arbitrary commands, so
-one could perform the entire tag-and-runner-report check in `PreToolUse` and deny. The
-reason to defer that is the unknown false-denial rate: a gate that blocks legitimate work
-mid-flow gets disabled permanently, and that risk is unmeasured until the stage has real
-mileage.
+A hook could enforce this deterministically: Claude Code hooks run arbitrary commands, so
+one could perform the whole tag-and-runner-report check in `PreToolUse` and deny the write.
+This was left open pending a measurement of how often the stage is actually skipped, because
+a gate that blocks legitimate work mid-flow gets disabled permanently and never enforces
+anything again.
 
-The warning hook above is not subject to that argument — it has no false-denial rate to
-measure, because it denies nothing. Revisit the denial version after the dogfood phases,
-using what the warning hook reveals about how often the stage is genuinely skipped. Weight
-that evidence by the gap named above: a silent hook means no plan cited an undefined ID, not
-that every cited row was actually tested.
+**Measured 2026-08-01, and the answer is no.** `hooks/measure-skip-rate.sh` replays the
+warning hook's predicate over every superpowers plan on a machine, dating each by its git
+add rather than its mtime — mtime dates a plan by its last edit, which drags pre-stage plans
+into the window and reads every one of them as a skip.
+
+Over this machine: 723 plans across 77 repositories, of which 717 predate the stage
+existing. In the window where the stage was live — plans first committed on 2026-07-31 or
+later, the first full day after install:
+
+| Plans | Cite SC-IDs, all defined | Would warn | Would be falsely denied |
+|---|---|---|---|
+| 5 | 5 | 0 | 0 |
+
+Four repositories, 19 to 55 rows cited per plan. The skip rate in the measured window is
+zero, so a denial hook would have denied nothing and its only measurable effect would have
+been its own false-denial risk — which is not hypothetical: before the pattern was tightened
+to two digits, the predicate matched a bare `SC-0` inside a shell fragment one plan quoted
+and fired on a fully compliant document. One false fire in six is a rate a denial hook does
+not survive, and tightening the pattern removes that instance without removing the class.
+
+Read the number for what it is. n=5, one operator, all five written in sessions where the
+gate rule was already in `~/.claude/CLAUDE.md`. It measures whether the skill-text handoff
+plus that rule is sufficient *here*, not whether it is sufficient generally.
+
+**Trip condition.** Re-run `hooks/measure-skip-rate.sh <root> <since>` when the corpus has
+grown. Reopen the denial question if genuine skips reach 3 in a rolling window of 20
+post-stage plans (15%), where genuine means the plan cites no SC-IDs and the repository has
+no coverage rows for that feature anywhere — not merely that the hook fired. Below that, the
+warning plus the rule is doing the work and a denial buys determinism at the cost of the
+failure mode above.
+
+Weight any future reading by the gap named earlier: the hook greps. A silent run means no
+plan cited an undefined ID, not that every cited row was actually tested.

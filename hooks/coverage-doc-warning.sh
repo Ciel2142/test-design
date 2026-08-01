@@ -4,8 +4,8 @@
 #
 # Warning only, and structurally incapable of being anything else: PostToolUse runs after
 # the write has already happened, so exit 2 feeds this text back to Claude without denying
-# any tool call. That is the point. `docs/enforcement.md` defers a *denial* hook until the
-# false-denial rate is measured; this one has no such rate to measure.
+# any tool call. That is the point, and it is now the settled design rather than a stopgap:
+# `docs/enforcement.md` records the measurement that closed out the *denial* hook question.
 #
 # Fails open on anything it cannot read: empty or malformed payload, a `file_path` it
 # cannot resolve to a repo root — all exit 0 and say nothing. A broken warning must never
@@ -71,7 +71,12 @@ esac
 #
 # Reading the plan from disk, not from the payload: PostToolUse fires after the write, so the
 # file is there, and this stays correct for Write and for any future edit-shaped tool.
-plan_ids=$(grep -oE '\bSC-[0-9]+\b' "$plan_file" 2>/dev/null | sort -u)
+#
+# Two digits, not `[0-9]+`, because the documented ID format is `SC-nn`. The looser pattern
+# also matched inside a shell fragment a plan happened to quote -- `grep -E '^\| SC-0[235]'`
+# yields a bare `SC-0`, which nothing defines and which then warned on a compliant plan. That
+# was the only false fire across all 723 plans on this machine; see docs/enforcement.md.
+plan_ids=$(grep -oE '\bSC-[0-9]{2,}\b' "$plan_file" 2>/dev/null | sort -u)
 
 if [ -z "$plan_ids" ]; then
     reason="the plan cites no SC-IDs"
@@ -81,7 +86,7 @@ else
     # (<=2 behaviors, no persistence, no concurrency, no external dependency) keeps its
     # coverage table inline in the spec instead of a coverage doc. Omitting specs here would
     # warn on every branch that followed that rule correctly.
-    defined=$(grep -hoE '\bSC-[0-9]+\b' \
+    defined=$(grep -hoE '\bSC-[0-9]{2,}\b' \
         "$root"/docs/superpowers/coverage/*-coverage.md \
         "$root"/docs/superpowers/specs/*.md 2>/dev/null | sort -u)
     undefined=$(comm -23 <(printf '%s\n' "$plan_ids") <(printf '%s\n' "$defined"))
