@@ -52,6 +52,28 @@ no persistence. Appending the table to the spec instead."
     charged to this feature.
 11. Present to the user, get approval, write and commit.
 
+## The existing suite is not an input
+
+Rows come from the spec sweep. **Do not survey the tests that already exist** — no grep of
+the test tree for a behavior before sweeping it, no row pruned or downgraded because
+something that looks like it appears to be covered already. Step 10 runs the suite, but only
+to record which tests were already failing; that baseline is a failure list, not a coverage
+survey, and it never feeds the pruning rule in step 3.
+
+An existing test proves something is exercised. It does not prove this row's `Bug it
+catches` would be caught, and at design time nobody can tell the difference by reading it —
+that is the exact judgment layers 2 and 4 exist to make, by verdicting the test against the
+named mutation and by applying that mutation to the source. Deleting a row on inspection
+buys the answer without the measurement, and the cost is asymmetric: the row is gone, its ID
+was never issued, and no later layer can report on a row that does not exist. A redundant
+row, the other way around, is one merge in step 3 or one `## Retired` line at amendment.
+
+Reconciliation is post-factum by design. `coverage-verification` layer 1 greps for
+`covers: SC-nn`, so an already-written test that does cover a row is credited by tagging it
+— no new test needed — and layers 2 and 4 then verdict it like any other. That happens with
+the code in front of it and a mutation to apply, which is when the question is actually
+answerable.
+
 ## Row schema
 
 `| ID | Behavior | Bug it catches | Level | Expected | Risk |`
@@ -114,6 +136,7 @@ approval. Never renumber, never silently edit a row an implementer already tagge
 ## Definition of done
 
 - [ ] Behavior list confirmed by the user before sweeping
+- [ ] No row pruned or downgraded on the grounds that a test already exists
 - [ ] Every behavior group has a `Ruled out:` line citing spec or code facts
 - [ ] Axis 5 rule-outs name the absent shared resource
 - [ ] Every `Bug it catches` is a mutation, not a negated `Expected`

@@ -18,10 +18,39 @@ this feature."
 `superpowers:subagent-driven-development` as its final review, so no seam exists there.
 Consequence: a `BLOCKED` verdict arrives after SDD's own reviews have run.
 
-**Mode:** unattended, except that `PARTIAL` requires a human acknowledgement.
+**Mode:** approval-gated, then unattended. `PARTIAL` additionally requires a human
+acknowledgement.
 
 **Refuse to run** if the coverage doc is missing. There is no yardstick, and a report with
-no yardstick is worse than no report.
+no yardstick is worse than no report. Checked after the gate below, as the first act of
+layer 1.
+
+## Approval gate
+
+**Stop before doing anything.** Announce, say what the run will cost, and wait for the user
+to reply on an actual user turn. No coverage-doc read, no tag grep, no suite run, no
+dispatch before that reply. Every invocation carries the gate, including a re-run after a
+`BLOCKED` fix.
+
+The gate exists because of where this skill fires. At the
+`superpowers:finishing-a-development-branch` seam the thread has just carried an entire
+implementation, so verification starts with a context window that is already nearly full —
+and layer 2 pastes whole test bodies into that same thread, one row at a time. An auto-start
+spends what is left of the window on a run the user may have wanted in a fresh session, and
+a run that exhausts the window mid-flight leaves evidence that is partial and unreportable:
+the layers that did complete are not a verdict, and nothing about the ones that did not is
+recoverable without re-running them.
+
+State in the request: the branch, the coverage doc path this run expects, and that layers
+2–4 dispatch subagents. Do not state a row count — the doc has not been read, and a number
+invented to make the request concrete claims work that has not happened.
+
+Anything other than a go-ahead ends the run. Silence, a topic change, and an unrelated
+instruction are not approval.
+
+The report records the approval verbatim in its header, on the same footing as a `PARTIAL`
+acknowledgement — a run whose header cannot say who let it start is not auditable as
+gated.
 
 ## Layer 1 — trace (main thread)
 
@@ -280,6 +309,8 @@ Format: [references/example-verification.md](references/example-verification.md)
 
 ## Definition of done
 
+- [ ] Approval obtained on a user turn before any layer ran, recorded verbatim in the
+      report header
 - [ ] Layer 1 ran in full, consuming machine-readable runner output
 - [ ] Every active row has a verdict from every applicable layer
 - [ ] Each canary-bearing layer-2 batch names its canaries, natural or synthesized, and
