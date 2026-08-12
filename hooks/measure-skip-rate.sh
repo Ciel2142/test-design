@@ -25,6 +25,15 @@ while IFS= read -r plan_dir; do
         [ -n "$created" ] || created=$(date -r "$plan" +%F)
         [ -z "$since" ] || [ "$created" ">" "$since" ] || [ "$created" = "$since" ] || continue
 
+        # A recorded waiver is a decision, not a skip: the user declined the stage at the
+        # brainstorming seam, so counting it as YES(no-ids) would inflate the skip rate the
+        # denial-hook trip condition reads.
+        if grep -q 'Coverage: waived' "$plan" 2>/dev/null; then
+            printf '%s\t%s\t%s\t-\t-\twaived\n' \
+                "${repo_root##*/}" "$(basename "$plan")" "$created"
+            continue
+        fi
+
         cited=$(grep -oE '\bSC-[0-9]{2,}\b' "$plan" 2>/dev/null | sort -u)
         if [ -z "$cited" ]; then
             printf '%s\t%s\t%s\t0\t-\tYES(no-ids)\n' \

@@ -62,6 +62,13 @@ case "$file_path" in
 esac
 [ -r "$plan_file" ] || exit 0
 
+# A feature whose user declined coverage design at the brainstorming seam records the
+# waiver in the plan as this literal marker. Such a plan legitimately cites no SC-IDs, so
+# the checks below would warn on every one of them.
+if grep -q 'Coverage: waived' "$plan_file" 2>/dev/null; then
+    exit 0
+fi
+
 # Correlate the plan with its OWN coverage rows, via the SC-IDs it cites. `writing-plans` is
 # told by test-coverage-design to cite them in the plan's test steps, so the plan names what
 # must exist. The alternative -- matching a filename slug -- guesses a naming convention
@@ -111,7 +118,9 @@ Two cases where this warning is expected and you should carry on:
     monorepo, or a floor-rule table inline in a spec outside docs/superpowers/specs/
   - the plan is a stub whose test steps are still to be written
 
-Otherwise the stage was skipped. Run test-design:test-coverage-design against the approved
-spec, then have the plan cite its SC-IDs.
+If the user declined coverage design at the brainstorming seam, record the waiver in the
+plan as the literal line \`Coverage: waived (user decision, YYYY-MM-DD)\` and this hook
+stays silent. Otherwise the stage was skipped: run test-design:test-coverage-design against
+the approved spec, then have the plan cite its SC-IDs.
 EOF
 exit 2

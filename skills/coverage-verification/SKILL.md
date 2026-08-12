@@ -23,7 +23,10 @@ acknowledgement.
 
 **Refuse to run** if the coverage doc is missing. There is no yardstick, and a report with
 no yardstick is worse than no report. Checked after the gate below, as the first act of
-layer 1.
+layer 1. A plan carrying the literal marker `Coverage: waived` is a different case: the
+user declined coverage design at the brainstorming seam, so this skill is not invoked for
+that feature at all — the finishing handoff notes the waiver in one line instead of
+running it.
 
 ## Approval gate
 

@@ -26,18 +26,25 @@ Append to `~/.claude/CLAUDE.md`:
 
 `superpowers:brainstorming` states that the only skill it may invoke afterwards is
 `writing-plans` ("The ONLY skill you invoke after brainstorming is writing-plans").
-That rule is amended here. The sequence is:
+That rule is amended here. After the spec is approved:
 
-  brainstorming → test-design:test-coverage-design → writing-plans
+- Features meeting test-coverage-design's floor rule (≤2 behaviors, no persistence, no
+  concurrency, no external dependency): append the coverage table inline to the spec and
+  proceed directly to writing-plans, without asking.
+- Otherwise, ask the user (AskUserQuestion): design test coverage for this feature, or
+  skip it? If they choose coverage, the sequence is
 
-For features meeting test-coverage-design's floor rule (≤2 behaviors, no persistence, no
-concurrency, no external dependency), the coverage table is appended inline to the spec
-instead and brainstorming proceeds directly to writing-plans.
+    brainstorming → test-design:test-coverage-design → writing-plans
+
+  If they skip, proceed directly to writing-plans and record the literal line
+  `Coverage: waived (user decision, YYYY-MM-DD)` in the plan's header.
 
 At the end of implementation, `superpowers:subagent-driven-development` hands off to
-`finishing-a-development-branch`. Invoke `test-design:coverage-verification` at that
-handoff, before the branch is finished. A plan with no coverage doc, or a branch with no
-verification report, is incomplete.
+`finishing-a-development-branch`. For a feature with coverage rows (a coverage doc or an
+inline floor-rule table), invoke `test-design:coverage-verification` at that handoff,
+before the branch is finished — such a branch with no verification report is incomplete.
+For a waived feature, do not invoke it and do not re-ask: state in one line that
+verification is skipped because coverage was waived.
 ```
 
 ## The warning hook
@@ -46,7 +53,9 @@ verification report, is incomplete.
 `docs/superpowers/plans/` is written, the hook reads the SC-IDs the plan cites and checks
 that something defines them. It exits 2 — which feeds its message back to Claude — when the
 plan cites no SC-IDs at all, or cites IDs that appear in no
-`docs/superpowers/coverage/*-coverage.md` and no `docs/superpowers/specs/*.md`.
+`docs/superpowers/coverage/*-coverage.md` and no `docs/superpowers/specs/*.md`. A plan
+containing the literal marker `Coverage: waived` is exempt: the user declined the stage at
+the brainstorming seam, so its absent SC-IDs are the recorded decision, not a skip.
 
 Correlating on the plan's own citations, rather than on a filename slug, is what makes it a
 per-plan check. `test-coverage-design` instructs `writing-plans` to cite SC-IDs in the plan's
@@ -109,8 +118,10 @@ plus that rule is sufficient *here*, not whether it is sufficient generally.
 
 **Trip condition.** Re-run `hooks/measure-skip-rate.sh <root> <since>` when the corpus has
 grown. Reopen the denial question if genuine skips reach 3 in a rolling window of 20
-post-stage plans (15%), where genuine means the plan cites no SC-IDs and the repository has
-no coverage rows for that feature anywhere — not merely that the hook fired. Below that, the
+post-stage plans (15%), where genuine means the plan cites no SC-IDs, records no
+`Coverage: waived` marker, and the repository has no coverage rows for that feature
+anywhere — not merely that the hook fired. The script reports waived plans as their own
+`waived` row, outside both the compliant and the skip counts. Below that, the
 warning plus the rule is doing the work and a denial buys determinism at the cost of the
 failure mode above.
 

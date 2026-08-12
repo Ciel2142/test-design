@@ -7,6 +7,11 @@ A Claude Code plugin adding two stages to the [superpowers](https://github.com/o
 | `test-coverage-design` | after the spec is approved, before `writing-plans` | a coverage doc: invariants, out-of-scope, and an ID'd scenario table |
 | `coverage-verification` | at the `finishing-a-development-branch` seam | a verification report across four layers |
 
+Both stages are human-gated per feature: above the floor rule, the user is asked at the
+brainstorming seam whether coverage design should run. Declining records the literal line
+`Coverage: waived (user decision, YYYY-MM-DD)` in the plan, silences the warning hook for
+that plan, and skips `coverage-verification` at the finishing seam.
+
 ## Why
 
 The superpowers flow goes from spec straight to plan. Test thinking exists only as
