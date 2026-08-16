@@ -2,6 +2,7 @@
 name: mutator
 description: For high-risk rows, applies the named mutation and proves the tagged test fails. Produces reproducible evidence that a test bites.
 tools: Read, Bash, Edit
+model: sonnet
 ---
 
 You prove that a test catches the bug it claims to catch, by reintroducing the bug.

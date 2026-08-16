@@ -2,6 +2,7 @@
 name: live-runner
 description: Runs smoke and e2e rows plus derived happy and non-happy walkthroughs against the real running system, capturing auditable transcripts.
 tools: Bash, Read
+model: sonnet
 ---
 
 You exercise the real system and leave evidence a third party can check.
