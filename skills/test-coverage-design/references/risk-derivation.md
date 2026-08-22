@@ -32,7 +32,8 @@ low-stakes") is not a shared reason. One explicit user approval covers the whole
 1. State the row(s), the rule that made each `high`, and the concrete reason the rule
    misfires for all of them.
 2. Get explicit user approval.
-3. Record it in the coverage doc under the behavior group, listing every covered SC-ID:
+3. Record it in the coverage doc under the behavior group, listing every covered SC-ID.
+   When the batch spans behavior groups, record the same line under each group it covers:
 
 ```
 Risk argued down: SC-07, SC-09 high→med — axis 4 rows, but both endpoints are pure reads

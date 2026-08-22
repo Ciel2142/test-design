@@ -123,8 +123,8 @@ re-paste that row complete and re-dispatch it, and do not record the verdict it 
 Excluding test files from the diff is not tidiness. At the finishing-a-development-branch
 seam the branch diff normally *contains the new tests*, so a diff that included them would
 hand the critic the real source of every row alongside the pasted one — naming the
-synthesized canaries below by inspection, no disk read required. Layer 2's question is about
-production code; test files in the diff add nothing and cost the canaries.
+synthesized canary below by inspection, no disk read required. Layer 2's question is about
+production code; test files in the diff add nothing and cost the canary.
 
 Withholding the diff would leave the critic unable to answer
 its own question, since "would this fail if the mutation were applied" is a claim about
@@ -135,9 +135,10 @@ information.
 **the** canary `HOLDS` has all its verdicts voided and re-dispatches at a higher effort tier.
 Without this, an all-`HOLDS` critic passes forever after the one-time acceptance check.
 
-A critic that reads nothing and sacrifices one arbitrary row escapes only when the sacrifice
-lands on the canary, ~1/N of batches — the other (N-1)/N void the batch. The second canary
-bought 1/C(N,2) at one extra dispatch per batch and most of this section's prose.
+A critic that reads nothing and sacrifices a row escapes when it lands on the canary — ~1/N
+per dispatch attempt, N the batch's row count (coin flip at N=2). Voided batches retry at a
+higher tier, compounding against a persistent critic. The second canary bought 1/C(N,2) at one
+extra dispatch per batch and the rules needed to keep two canaries from identifying each other.
 
 Source each canary in this order:
 
