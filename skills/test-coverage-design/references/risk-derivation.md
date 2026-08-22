@@ -24,14 +24,21 @@ Deriving from the axis removes the discretion that makes that possible.
 The agent may propose lowering a row from `high` to `med`. It may never raise its own
 burden, and never lower one silently.
 
-1. State the row, the rule that made it `high`, and the concrete reason the rule misfires here.
+One proposal may cover multiple rows that share **one concrete misfire reason**; a
+single-row proposal is the degenerate case of this. The reason must apply to each listed
+row individually — bundling unrelated rows under a vague umbrella ("these all seem
+low-stakes") is not a shared reason. One explicit user approval covers the whole batch.
+
+1. State the row(s), the rule that made each `high`, and the concrete reason the rule
+   misfires for all of them.
 2. Get explicit user approval.
-3. Record it in the coverage doc under the behavior group:
+3. Record it in the coverage doc under the behavior group, listing every covered SC-ID:
 
 ```
-Risk argued down: SC-07 high→med — axis 4 row, but the endpoint is a pure read with no
-write path, so a duplicate call has no side effect to be idempotent about. Approved by user.
+Risk argued down: SC-07, SC-09 high→med — axis 4 rows, but both endpoints are pure reads
+with no write path, so a duplicate call has no side effect to be idempotent about. Approved
+by user.
 ```
 
 An argue-down with no recorded approval line is invalid; verification treats the row as
-`high`.
+`high` — including a row omitted from a batch's approval line.
