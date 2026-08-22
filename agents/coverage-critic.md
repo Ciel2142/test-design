@@ -72,17 +72,16 @@ does. A bare verdict is not usable.
 
 ## The canary
 
-**Only when your prompt says this batch carries canaries.** A dispatch that says it carries
+**Only when your prompt says this batch carries a canary.** A dispatch that says it carries
 none is re-running rows already covered by a canaried batch — ignore this whole section
 there, and in particular do not infer that a lone row must be the weak one.
 
-When it does: your batch contains one or more tests the dispatcher already knows are weak.
-You are not told how many. Each may be a real test or a deliberately weakened copy of one —
-you cannot tell which by how it arrives, because every row's source arrives the same way. If
-you miss any of them, your entire batch is discarded and re-run. Do not try to identify
-them, and do not sacrifice an arbitrary row or two to look thorough: a `WEAK` on a healthy
-test blocks the branch and is caught on re-read, and guessing at the count is a losing bet
-by construction. Just do the work honestly and the canaries take care of themselves.
+When it does: the batch contains **one** test the dispatcher already knows is weak; it may
+be a real test or a deliberately weakened copy — you cannot tell by how it arrives, because
+every row's source arrives the same way. If you miss it, your entire batch is discarded and
+re-run. Do not try to identify it, and do not sacrifice an arbitrary row to look thorough: a
+`WEAK` on a healthy test blocks the branch and is caught on re-read. Just do the work
+honestly and the canary takes care of itself.
 
 ## Rules
 

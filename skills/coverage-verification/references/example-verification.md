@@ -34,8 +34,7 @@ SC-03 VACUOUS
   test never inspects
 ```
 
-Canaries: one, not the usual two — this batch holds 2 rows, below the 4-row threshold at
-which a second is injected, and two canaries here would leave nothing to read.
+Canary: one, synthesized from SC-01.
 
 No natural one was available — layer 1's flagged rows are `SC-02` and `SC-05`,
 neither in this batch (`SC-01`, `SC-03`), and neither had a prior `WEAK`/`VACUOUS` verdict
