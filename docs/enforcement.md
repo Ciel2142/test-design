@@ -47,6 +47,16 @@ For a waived feature, do not invoke it and do not re-ask: state in one line that
 verification is skipped because coverage was waived.
 ```
 
+## Composing with wave-planning
+
+The canonical block above is deliberately generic — it is copy-paste installable into
+`~/.claude/CLAUDE.md` without the `wave-planning` plugin present.
+
+With `wave-planning` installed, the sequence becomes
+`brainstorming → test-design:test-coverage-design → wave-planning → (per wave: writing-plans → execute)`.
+The waiver line is recorded in **each wave plan's** header, and `coverage-verification`
+runs once, after the final wave — one feature branch spans all waves.
+
 ## The warning hook
 
 `hooks/coverage-doc-warning.sh`, wired as `PostToolUse` on `Write`. When a file under
