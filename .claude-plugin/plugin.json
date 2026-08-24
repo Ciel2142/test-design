@@ -1,7 +1,7 @@
 {
   "name": "test-design",
-  "version": "0.5.0",
-  "description": "Adds two stages to the superpowers flow: design test coverage before planning, verify it after implementation.",
+  "version": "0.6.0",
+  "description": "Opt-in test coverage design and verification for Superpowers feature work.",
   "author": {
     "name": "AT_VALukin"
   },

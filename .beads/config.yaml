@@ -1,4 +1,4 @@
 # Beads Project Configuration
-# issue_prefix: test-design
+issue_prefix: test-design
 # default_priority: 2
 # default_type: task

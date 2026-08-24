@@ -16,3 +16,5 @@ node_modules/
 /.claude/
 fixtures/sample-project/coverage/
 fixtures/sample-project/.vitest-report.json
+# br doctor per-run artifacts
+.doctor/

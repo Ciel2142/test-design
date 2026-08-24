@@ -4,13 +4,13 @@ A Claude Code plugin adding two stages to the [superpowers](https://github.com/o
 
 | Stage | When | What it produces |
 |---|---|---|
-| `test-coverage-design` | after the spec is approved, before `writing-plans` | a coverage doc: invariants, out-of-scope, and an ID'd scenario table |
+| `test-coverage-design` | after explicit opt-in, before `writing-plans` | a coverage source: invariants, out-of-scope, and an ID'd scenario table |
 | `coverage-verification` | at the `finishing-a-development-branch` seam | a verification report across four layers |
 
-Both stages are human-gated per feature: above the floor rule, the user is asked at the
-brainstorming seam whether coverage design should run. Declining records the literal line
-`Coverage: waived (user decision, YYYY-MM-DD)` in the plan, silences the warning hook for
-that plan, and skips `coverage-verification` at the finishing seam.
+The plugin is passive. Installing it does not prompt, amend planning, or run either stage.
+After a spec is approved, invoking `/test-design:test-coverage-design` opts that feature
+into both coverage design and final coverage verification. Features that do not opt in
+follow the normal Superpowers flow without waiver markers or warnings.
 
 ## Why
 
@@ -39,10 +39,10 @@ claude plugin install test-design@test-design
 `claude plugin marketplace add` takes the path to the clone, so substitute wherever you put
 it. The remote above is LAN-only; any clone of this repo works the same way.
 
-Installing gives you the skills, the agents, and a warning hook that fires when a plan is
-written and the coverage rows its test steps cite do not exist. It does **not** give you the
-gate rule that puts
-`test-coverage-design` between `brainstorming` and `writing-plans` — that lives in
-`~/.claude/CLAUDE.md` and you have to add it. See [docs/enforcement.md](docs/enforcement.md)
-for the text, for why it must name the `brainstorming` instruction it supersedes, and for
-what the hook does and does not cover.
+Installing gives you the skills and agents only. It registers no hook and requires no
+global `CLAUDE.md` rule. Ordinary plan writes receive no warning or denial.
+
+To opt one feature into the complete two-stage workflow, invoke
+`/test-design:test-coverage-design` after its spec is approved. See
+[docs/opt-in.md](docs/opt-in.md) for the resulting handoffs and `wave-planning`
+composition.

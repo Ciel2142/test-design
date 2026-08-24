@@ -1,37 +1,37 @@
 ---
 name: coverage-verification
-description: Use at the finishing-a-development-branch handoff - verifies every coverage scenario has a test that actually bites, across trace, adversarial read, live execution, and mutation
+description: Use only at the finishing-a-development-branch handoff when an explicit test-coverage-design opt-in produced approved SC rows
 ---
 
 # Coverage Verification
 
 ## Overview
 
-Measure the implementation against the coverage doc across four layers. Each layer's
-self-report is checked by something other than itself.
+Measure the implementation against its approved coverage source across four layers. The
+source is either a dedicated coverage doc or an inline SC table in the approved spec.
+Each layer's self-report is checked by something other than itself.
 
 **Announce at start:** "I'm using the coverage-verification skill to verify coverage for
 this feature."
 
-**When:** at the `superpowers:finishing-a-development-branch` handoff. Not before
-`requesting-code-review` — that skill runs *inside*
+**When:** only at the `superpowers:finishing-a-development-branch` handoff for a feature
+whose explicit `test-coverage-design` invocation produced an approved coverage source. Not
+before `requesting-code-review` — that skill runs *inside*
 `superpowers:subagent-driven-development` as its final review, so no seam exists there.
 Consequence: a `BLOCKED` verdict arrives after SDD's own reviews have run.
 
 **Mode:** approval-gated, then unattended. `PARTIAL` additionally requires a human
 acknowledgement.
 
-**Refuse to run** if the coverage doc is missing. There is no yardstick, and a report with
-no yardstick is worse than no report. Checked after the gate below, as the first act of
-layer 1. A plan carrying the literal marker `Coverage: waived` is a different case: the
-user declined coverage design at the brainstorming seam, so this skill is not invoked for
-that feature at all — the finishing handoff notes the waiver in one line instead of
-running it.
+**Do not run** if the feature has no approved coverage source. Absence means the feature
+did not opt in; leave the normal finishing flow untouched. Check the source after the gate
+below, as the first act of layer 1. There is no yardstick without it, and a report with no
+yardstick is worse than no report.
 
 ## Approval gate
 
 **Stop before doing anything.** Announce, say what the run will cost, and wait for the user
-to reply on an actual user turn. No coverage-doc read, no tag grep, no suite run, no
+to reply on an actual user turn. No coverage-source read, no tag grep, no suite run, no
 dispatch before that reply. Every invocation carries the gate, including a re-run after a
 `BLOCKED` fix.
 
@@ -44,8 +44,8 @@ a run that exhausts the window mid-flight leaves evidence that is partial and un
 the layers that did complete are not a verdict, and nothing about the ones that did not is
 recoverable without re-running them.
 
-State in the request: the branch, the coverage doc path this run expects, and that layers
-2–4 dispatch subagents. Do not state a row count — the doc has not been read, and a number
+State in the request: the branch, the coverage source path this run expects, and that layers
+2–4 dispatch subagents. Do not state a row count — the source has not been read, and a number
 invented to make the request concrete claims work that has not happened.
 
 Anything other than a go-ahead ends the run. Silence, a topic change, and an unrelated
@@ -57,7 +57,7 @@ gated.
 
 ## Layer 1 — trace (main thread)
 
-1. **Parse the coverage doc.** Collect active SC-IDs, retired SC-IDs, and each row's
+1. **Parse the coverage source.** Collect active SC-IDs, retired SC-IDs, and each row's
    `Level` and `Risk`.
 2. **Grep the tags,** scoped to the affected package:
    `grep -rn "covers: SC-" <test-dir>`
@@ -71,7 +71,7 @@ gated.
    Never join on the name alone: names repeat across files, so a name-only join can bind a
    tag to a different file's passing result while its own test is skipped.
 6. **Compare against the baseline** — the passed/failed/skipped counts and the
-   `## Baseline failures` list recorded in the coverage doc header.
+   `## Baseline failures` list recorded in the coverage source header.
 7. **Read the production diff for this branch.** Report any touched behavior with no SC row
    as `stale`.
 
@@ -82,7 +82,7 @@ Findings:
 | `gap` | Row has no tag, **or** its tagged test is reported `skipped`, **or** the test is absent from the run entirely, **or** the join is ambiguous. Report the last as `gap (ambiguous)` with its candidates, per [references/runner-output.md](references/runner-output.md) — it means the tag could not be pinned to one test, which is a different repair from a missing one |
 | `drift` | A tag cites an SC-ID that is neither active nor in `## Retired` |
 | `overclaim` | One test carries more than 2 SC-IDs. Each cited row must then be verdicted separately by layer 2 against a named assertion |
-| `stale` | The diff touches a behavior with no SC row — trigger to amend the doc |
+| `stale` | The diff touches a behavior with no SC row — trigger to amend the coverage source |
 | `red` | A test failing now that passed at baseline. Pre-existing failures are not this feature's `red` |
 
 A tag above a skipped test is the cheapest possible false pass: it satisfies a grep and
@@ -235,7 +235,7 @@ pre-existing uncommitted work.
 
 Verdicts: `MUTATION-CAUGHT`, `MUTATION-SURVIVED` (blocking), `MUTATION-UNAPPLIABLE`.
 
-`MUTATION-UNAPPLIABLE` is a coverage-doc defect — the row's `Bug it catches` was not
+`MUTATION-UNAPPLIABLE` is a coverage-design defect — the row's `Bug it catches` was not
 phrased as a code-level mutation. Report it as such; do not let the mutator invent a
 substitute.
 
@@ -287,8 +287,8 @@ canary-tested.
 | No run recipe, or dependencies unavailable | Layer 3 `SKIPPED` with attempt evidence → `PARTIAL` |
 | Suite exists but cannot execute here | Layers 1 and 4 trace-only → `PARTIAL` with attempt evidence |
 | No test suite at all (legacy repo) | Scope layer 1's gap set to rows whose behavior the diff touches. Do not hard-block on rows the feature never went near |
-| Pure refactor | Doc is the invariant set plus named characterization tests; layers 2–4 `N/A`; layer 1 requires zero new failures against baseline |
-| Coverage doc missing | Refuse to run |
+| Pure refactor | The source is the invariant set plus named characterization tests; layers 2–4 `N/A`; layer 1 requires zero new failures against baseline |
+| Coverage source missing | Do not invoke; the feature did not opt in |
 
 ## Artifact
 

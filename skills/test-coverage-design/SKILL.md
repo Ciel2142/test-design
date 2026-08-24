@@ -1,15 +1,18 @@
 ---
 name: test-coverage-design
-description: Use after a spec is approved and before writing an implementation plan - designs the test coverage the feature needs, as an ID'd scenario table that the plan and later verification both cite
+disable-model-invocation: true
+description: Design test coverage for an approved feature as an ID'd scenario table.
 ---
 
 # Test Coverage Design
 
 ## Overview
+Invoking this skill explicitly opts the current feature into test-design. Installation
+alone never changes the planning or implementation workflow.
 
-Decide what must be tested **before** tasks get drawn. Output is one coverage doc whose
-rows carry stable IDs that the plan's test steps cite and that `coverage-verification`
-later measures the implementation against.
+Decide what must be tested **before** tasks get drawn. Output is one approved coverage
+source whose rows carry stable IDs that the plan's test steps cite and that
+`coverage-verification` later measures the implementation against.
 
 **Announce at start:** "I'm using the test-coverage-design skill to design the coverage for
 this feature."
@@ -20,12 +23,14 @@ scope. Do not run it silently to completion.
 ## Floor rule — when to skip this stage
 
 If the feature has **≤2 behaviors and no persistence, no concurrency, and no external
-dependency**, do not produce a separate document. Append the scenario table inline to the
-spec at brainstorming's spec-review gate and proceed to `superpowers:writing-plans`.
+dependency**, do not produce a separate document. Append a `## Test coverage` section to
+the approved spec containing the scenario table, baseline commit, passed/failed/skipped
+counts, and `## Baseline failures`; present that amendment for approval, then proceed to
+`superpowers:writing-plans`.
 
 Below that size the rows are the plan's test steps restated, and a separate doc costs two
 human gates to re-derive them. Say which rule applied: "Floor rule applies — 2 behaviors,
-no persistence. Appending the table to the spec instead."
+no persistence. Appending the coverage source to the spec instead."
 
 ## Workflow
 
@@ -151,13 +156,15 @@ approval. Never renumber, never silently edit a row an implementer already tagge
 
 **REQUIRED SUB-SKILL:** `superpowers:writing-plans`. Tell it to cite SC-IDs in each task's
 test steps, so every row maps to a task and an uncovered row is visible as a plan gap.
+This opt-in also commits the feature to `coverage-verification` at the
+`finishing-a-development-branch` handoff.
 
 Also tell it to require, on every implemented test, a comment immediately above it
 containing the literal text `covers: SC-nn` — comma-separated for multiple IDs. More than 2
 IDs on one test is an `overclaim` finding at verification: the test must then carry a
 distinct, separately-nameable assertion per cited row, and layer 2 verdicts each row against
 its own. Two is where that stops being routine — a row and its boundary case legitimately
-share one test; a third row usually means the rows should have been merged in the doc, or the
+share one test; a third row usually means the rows should have been merged in the source, or the
 test split. `overclaim` blocks the branch while **unresolved**, and it is resolved either by
 layer 2 verdicting every cited row against a named assertion, or by merging or splitting so
 the tag drops to two. Do not read it as advisory. Only that substring is
