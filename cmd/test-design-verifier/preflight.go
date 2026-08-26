@@ -4,6 +4,8 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"path/filepath"
+	"strings"
 
 	"test-design/internal/coverage"
 	"test-design/internal/evidence"
@@ -39,13 +41,18 @@ type preflightOutput struct {
 
 func preflightHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer) *cliError {
 	repoRoot := flagString(fs, "repo")
+
+	if _, err := coverage.BuildRegistry(repoRoot); err != nil {
+		return &cliError{Code: "registry-error", Message: fmt.Sprintf("preflight: %v", err)}
+	}
+
 	sourcePath := flagString(fs, "source")
 	if sourcePath == "" {
 		return &cliError{Code: "missing-source", Message: "preflight: --source is required"}
 	}
-
-	if _, err := coverage.BuildRegistry(repoRoot); err != nil {
-		return &cliError{Code: "registry-error", Message: fmt.Sprintf("preflight: %v", err)}
+	relSource, cliErr := repoRelative(repoRoot, sourcePath)
+	if cliErr != nil {
+		return cliErr
 	}
 
 	src, err := coverage.ParseSource(sourcePath)
@@ -53,11 +60,11 @@ func preflightHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer) *c
 		return &cliError{Code: "parse-source-failed", Message: fmt.Sprintf("preflight: %v", err)}
 	}
 
-	layers, highRisk := computeLayers(src.Rows)
+	layers, highRisk := computeLayers(src.Rows, src.Retired)
 
 	out := preflightOutput{
 		Envelope:             evidence.Envelope{SchemaVersion: evidence.SchemaVersion, VerifierVersion: evidence.VerifierVersion},
-		Source:               src.Path,
+		Source:               relSource,
 		SourceSHA256:         src.SHA256,
 		BaselineCommit:       src.BaselineCommit,
 		BaselineEvidencePath: src.BaselineEvidencePath,
@@ -76,10 +83,46 @@ func preflightHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer) *c
 	return writeStdout(stdout, out)
 }
 
-func computeLayers(rows []coverage.Row) (layerCounts, int) {
+// repoRelative renders sourcePath in the verifier's one path vocabulary:
+// repo-root-relative and slash-separated, the form coverage.Owner.DocPath
+// carries and wave `trace` compares against.
+func repoRelative(repoRoot, sourcePath string) (string, *cliError) {
+	absRepo, err := filepath.Abs(repoRoot)
+	if err != nil {
+		return "", &cliError{Code: "invalid-repo", Message: fmt.Sprintf("preflight: resolve repo %s: %v", repoRoot, err)}
+	}
+	absSource, err := filepath.Abs(sourcePath)
+	if err != nil {
+		return "", &cliError{Code: "invalid-source", Message: fmt.Sprintf("preflight: resolve source %s: %v", sourcePath, err)}
+	}
+	rel, err := filepath.Rel(absRepo, absSource)
+	if err != nil {
+		return "", &cliError{
+			Code:    "source-outside-repo",
+			Message: fmt.Sprintf("preflight: source %s is not under repo %s: %v", sourcePath, repoRoot, err),
+		}
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", &cliError{
+			Code:    "source-outside-repo",
+			Message: fmt.Sprintf("preflight: source %s is not under repo %s", sourcePath, repoRoot),
+		}
+	}
+	return filepath.ToSlash(rel), nil
+}
+
+func computeLayers(rows []coverage.Row, retired []string) (layerCounts, int) {
+	retiredSet := make(map[string]bool, len(retired))
+	for _, id := range retired {
+		retiredSet[id] = true
+	}
+
 	var lc layerCounts
 	highRisk := 0
 	for _, r := range rows {
+		if retiredSet[r.ID] {
+			continue
+		}
 		lc.Layer1++
 		lc.Layer2++
 		if r.Level == "smoke" || r.Level == "e2e" {

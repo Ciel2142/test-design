@@ -1,6 +1,12 @@
 // Package coverage parses coverage-source Markdown documents: the header
 // lines, the ## Verification and ## Retired sections, and scenario tables
 // identified by header signature.
+//
+// Every document path this package attributes an ID to — Owner.DocPath and
+// the paths named in ownership, duplicate and retirement errors — is
+// repo-root-relative and slash-separated. That is the verifier's one path
+// vocabulary; downstream packages compare against it verbatim. Filesystem
+// access errors instead name the path actually opened.
 package coverage
 
 type RunnerConfig struct {

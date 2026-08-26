@@ -17,7 +17,8 @@ type Registry struct {
 	owners map[string]Owner
 }
 
-// Owner identifies the document that defines a scenario ID.
+// Owner identifies the document that defines a scenario ID. DocPath is
+// repo-root-relative and slash-separated.
 type Owner struct {
 	ID      string
 	DocPath string
@@ -29,10 +30,12 @@ var areaPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 // BuildRegistry scans docs/superpowers/coverage/*-coverage.md and
 // docs/superpowers/specs/*.md under repoRoot and harvests every scenario
 // ID they define, plus each document's retired IDs. A directory that does
-// not exist contributes nothing. An unreadable document that does exist is
-// a structured error naming its path. An ID defined by two documents, or
-// twice within one document, is a hard failure naming the ID and the
-// document path(s) involved.
+// not exist contributes nothing, and so does a document with no scenario
+// table in either header form — including its ## Retired section, which in
+// such a document is prose rather than an ID list. An unreadable document
+// that does exist is a structured error naming its path. An ID defined by
+// two documents, or twice within one document, is a hard failure naming the
+// ID and the document path(s) involved.
 func BuildRegistry(repoRoot string) (*Registry, error) {
 	owners := make(map[string]Owner)
 
@@ -73,13 +76,27 @@ func harvestDocument(repoRoot, path string, owners map[string]Owner) error {
 	if err != nil {
 		return fmt.Errorf("build registry: read %s: %w", path, err)
 	}
-	docPath, err := filepath.Rel(repoRoot, path)
+	rel, err := filepath.Rel(repoRoot, path)
 	if err != nil {
 		return fmt.Errorf("build registry: relativize %s: %w", path, err)
 	}
+	docPath := filepath.ToSlash(rel)
 	lines := strings.Split(string(data), "\n")
 
-	retired, err := parseRetiredSection(path, lines)
+	var scenarioBlocks []tableBlock
+	for _, b := range scanTables(lines) {
+		if scenarioHeaderSignature.matches(b.header) || oldScenarioHeaderSignature.matches(b.header) {
+			scenarioBlocks = append(scenarioBlocks, b)
+		}
+	}
+	// docs/superpowers/specs holds arbitrary design documents; only one that
+	// carries a scenario table is a coverage source whose ## Retired section
+	// is an id list rather than prose.
+	if len(scenarioBlocks) == 0 {
+		return nil
+	}
+
+	retired, err := parseRetiredSection(docPath, lines)
 	if err != nil {
 		return fmt.Errorf("build registry: %w", err)
 	}
@@ -89,10 +106,7 @@ func harvestDocument(repoRoot, path string, owners map[string]Owner) error {
 	}
 
 	seen := make(map[string]bool)
-	for _, b := range scanTables(lines) {
-		if !scenarioHeaderSignature.matches(b.header) && !oldScenarioHeaderSignature.matches(b.header) {
-			continue
-		}
+	for _, b := range scenarioBlocks {
 		for _, r := range b.rows {
 			if len(r.cells) == 0 || !idPattern.MatchString(r.cells[0]) {
 				continue
@@ -175,6 +189,9 @@ func (r *Registry) NextID(area string) (int, error) {
 
 func splitID(id string) (area string, num int) {
 	idx := strings.LastIndex(id, "SC-")
+	if idx < 0 {
+		return "", 0
+	}
 	area = strings.TrimSuffix(id[:idx], "/")
 	num, _ = strconv.Atoi(id[idx+len("SC-"):])
 	return area, num

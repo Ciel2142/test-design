@@ -29,6 +29,7 @@ func newNextIDFlags() *flag.FlagSet {
 	fs := flag.NewFlagSet("next-id", flag.ContinueOnError)
 	fs.String("area", "", "coverage area for the generated ID")
 	fs.String("repo", ".", "repository root")
+	addRequestFlag(fs)
 	return fs
 }
 
@@ -36,5 +37,10 @@ func newPreflightFlags() *flag.FlagSet {
 	fs := flag.NewFlagSet("preflight", flag.ContinueOnError)
 	fs.String("source", "", "coverage source markdown path")
 	fs.String("repo", ".", "repository root")
+	addRequestFlag(fs)
 	return fs
+}
+
+func addRequestFlag(fs *flag.FlagSet) {
+	fs.String("request", "", "path to a JSON request document, or - for stdin")
 }

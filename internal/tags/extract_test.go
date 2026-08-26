@@ -71,6 +71,28 @@ func TestExtractMarkerInsideLargerWordDoesNotMatch(t *testing.T) {
 	}
 }
 
+func TestExtractSecondMarkerOnOneLineKeepsBothIDsAndSurfacesTheStrayMarkerAsAToken(t *testing.T) {
+	got := Extract("// covers: SC-01 covers: orders/SC-02")
+	want := []string{"SC-01", "covers:", "orders/SC-02"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Extract = %v, want %v (no id may be dropped; the stray marker rides along as an unrecognized token rather than vanishing)", got, want)
+	}
+}
+
+func TestExtractBareMarkerYieldsNoTokensRatherThanAnEmptyID(t *testing.T) {
+	got := Extract("// covers:")
+	if len(got) != 0 {
+		t.Errorf("Extract = %v, want no tokens (a marker with nothing after it names no id)", got)
+	}
+}
+
+func TestExtractCommaOnlyListYieldsNoTokensRatherThanEmptyIDs(t *testing.T) {
+	got := Extract("// covers: , ,")
+	if len(got) != 0 {
+		t.Errorf("Extract = %v, want no tokens (separators alone name no id)", got)
+	}
+}
+
 func TestExtractMarkerAfterNonWordCharStillExtracts(t *testing.T) {
 	got := Extract("// covers: SC-01")
 	want := []string{"SC-01"}

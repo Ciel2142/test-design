@@ -12,9 +12,14 @@ node_modules/
 # a verification report that silently could not be committed.
 /docs/superpowers/plans/
 /docs/superpowers/specs/
+/docs/superpowers/waves/
 /.superpowers/
 /.claude/
 fixtures/sample-project/coverage/
 fixtures/sample-project/.vitest-report.json
 # br doctor per-run artifacts
 .doctor/
+
+# `go build ./cmd/...` drops the verifier binary here; the isolation protocol
+# hashes pre-existing untracked files.
+/test-design-verifier

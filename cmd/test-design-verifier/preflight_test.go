@@ -29,8 +29,9 @@ func TestPreflightHandler_ValidSourceReportsFullOutput(t *testing.T) {
 	}
 	got := decodePreflight(t, &stdout)
 
-	if got.Source != source {
-		t.Errorf("Source = %q, want %q", got.Source, source)
+	wantSource := "docs/superpowers/coverage/2026-08-26-widgets-coverage.md"
+	if got.Source != wantSource {
+		t.Errorf("Source = %q, want the repo-root-relative slash-separated form %q", got.Source, wantSource)
 	}
 	if got.SourceSHA256 == "" {
 		t.Errorf("SourceSHA256 empty")
@@ -137,8 +138,83 @@ func TestPreflightHandler_MissingSourceFlagRejected(t *testing.T) {
 		t.Errorf("stdout = %q, want empty", stdout.String())
 	}
 	got := decodeError(t, &stderr)
-	if got.Code == "" {
-		t.Errorf("cliError.Code empty, want a code")
+	if got.Code != "missing-source" {
+		t.Errorf("error code = %q, want %q", got.Code, "missing-source")
+	}
+}
+
+func TestPreflightHandler_RegistryCollisionSurfacesBeforeMissingSourceFlag(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	repo := filepath.Join("testdata", "collision-repo")
+	code := run([]string{"preflight", "--repo", repo}, nil, &stdout, &stderr)
+
+	if code != exitError {
+		t.Fatalf("exit code = %d, want %d", code, exitError)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("stdout = %q, want empty", stdout.String())
+	}
+	got := decodeError(t, &stderr)
+	if got.Code != "registry-error" {
+		t.Errorf("error code = %q, want %q (the registry is validated before --source)", got.Code, "registry-error")
+	}
+	if !strings.Contains(got.Message, "SC-03") {
+		t.Errorf("error message = %q, want it to name the colliding id SC-03", got.Message)
+	}
+}
+
+func TestPreflightHandler_RetiredRowExcludedFromLayerCounts(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	repo := filepath.Join("testdata", "retired-row-repo")
+	source := filepath.Join(repo, "docs", "superpowers", "coverage", "2026-08-26-retired-coverage.md")
+	code := run([]string{"preflight", "--repo", repo, "--source", source}, nil, &stdout, &stderr)
+
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d; stderr=%s", code, exitOK, stderr.String())
+	}
+	got := decodePreflight(t, &stdout)
+
+	// SC-02 sits in the scenario table and under ## Retired; only SC-01 is active.
+	if got.Layers.Layer1 != 1 || got.Layers.Layer2 != 1 {
+		t.Errorf("Layers = %+v, want layer1 1 and layer2 1 (retired SC-02 excluded)", got.Layers)
+	}
+	if got.Layers.Layer3 != 0 {
+		t.Errorf("Layers.Layer3 = %d, want 0 (retired SC-02 is the only e2e row)", got.Layers.Layer3)
+	}
+	if got.Layers.Layer4 != 0 {
+		t.Errorf("Layers.Layer4 = %d, want 0 (retired SC-02 is the only high-risk row)", got.Layers.Layer4)
+	}
+	if got.HighRiskCount != 0 {
+		t.Errorf("HighRiskCount = %d, want 0", got.HighRiskCount)
+	}
+	if got.LiveProfileRequired {
+		t.Errorf("LiveProfileRequired = true, want false (no active smoke or e2e row)")
+	}
+}
+
+func TestPreflightHandler_SourceOutsideRepoNamesBothPaths(t *testing.T) {
+	repo := t.TempDir()
+	outside := t.TempDir()
+	source := filepath.Join(outside, "2026-08-26-stray-coverage.md")
+	if err := os.WriteFile(source, []byte("# stray\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"preflight", "--repo", repo, "--source", source}, nil, &stdout, &stderr)
+
+	if code != exitError {
+		t.Fatalf("exit code = %d, want %d", code, exitError)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("stdout = %q, want empty", stdout.String())
+	}
+	got := decodeError(t, &stderr)
+	if got.Code != "source-outside-repo" {
+		t.Errorf("error code = %q, want %q", got.Code, "source-outside-repo")
+	}
+	if !strings.Contains(got.Message, source) || !strings.Contains(got.Message, repo) {
+		t.Errorf("error message = %q, want it to name both %q and %q", got.Message, source, repo)
 	}
 }
 

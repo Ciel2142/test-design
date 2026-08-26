@@ -33,6 +33,9 @@ func TestDecodeEnvelopeUnsupportedVersionNamesBoth(t *testing.T) {
 	if !strings.Contains(err.Error(), SchemaVersion) {
 		t.Errorf("DecodeEnvelope error %q does not name the version supported (%q)", err.Error(), SchemaVersion)
 	}
+	if env != (Envelope{}) {
+		t.Errorf("DecodeEnvelope on an unsupported version returned %+v, want zero Envelope", env)
+	}
 }
 
 func TestDecodeEnvelopeMissingSchemaVersionErrors(t *testing.T) {

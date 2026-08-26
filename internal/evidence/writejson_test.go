@@ -114,7 +114,7 @@ func TestWriteJSONDoesNotHTMLEscape(t *testing.T) {
 	}
 }
 
-func TestWriteJSONUnwritableDirectoryErrors(t *testing.T) {
+func TestWriteJSONMissingParentDirectoryErrors(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "missing-subdir", "doc.json")
 

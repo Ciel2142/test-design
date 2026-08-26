@@ -2,6 +2,7 @@ package coverage
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -301,6 +302,39 @@ func TestBuildRegistrySpecWithNoScenarioTableContributesNothing(t *testing.T) {
 	}
 	if got != 1 {
 		t.Errorf("NextID(\"\") = %d, want 1 (no scenario table anywhere in this fixture)", got)
+	}
+}
+
+func TestBuildRegistrySpecWithProseRetiredSectionAndNoTableContributesNothing(t *testing.T) {
+	root := filepath.Join("testdata", "registry-prose-retired")
+
+	reg, err := BuildRegistry(root)
+	if err != nil {
+		t.Fatalf("BuildRegistry: %v (a prose ## Retired bullet in a document with no scenario table must not be parsed as an id list)", err)
+	}
+
+	got, err := reg.NextID("")
+	if err != nil {
+		t.Fatalf("NextID(\"\"): %v", err)
+	}
+	if got != 1 {
+		t.Errorf("NextID(\"\") = %d, want 1", got)
+	}
+}
+
+func TestBuildRegistryMalformedRetiredBulletInScenarioDocumentIsAnError(t *testing.T) {
+	root := filepath.Join("testdata", "registry-bad-retired")
+
+	_, err := BuildRegistry(root)
+	if err == nil {
+		t.Fatalf("BuildRegistry returned nil error, want a hard failure: the document carries a scenario table, so its ## Retired section is an id list")
+	}
+	docPath := filepath.Join("docs", "superpowers", "coverage", "2026-01-01-bad-retired-coverage.md")
+	if !strings.Contains(err.Error(), docPath) {
+		t.Errorf("BuildRegistry error %q does not name the repo-relative document path %q", err.Error(), docPath)
+	}
+	if strings.Contains(err.Error(), root+string(filepath.Separator)+docPath) {
+		t.Errorf("BuildRegistry error %q names the scan-side path, want the repo-relative form only", err.Error())
 	}
 }
 

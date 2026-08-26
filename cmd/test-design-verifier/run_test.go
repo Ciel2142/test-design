@@ -3,9 +3,11 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func decodeError(t *testing.T, stderr *bytes.Buffer) cliError {
@@ -103,12 +105,21 @@ func TestRun_PreflightDispatchesToRealHandler(t *testing.T) {
 	}
 }
 
-func TestRun_StdinUnsupportedSchemaVersion(t *testing.T) {
+func writeRequestFile(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "request.json")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	return path
+}
+
+func TestRun_RequestUnsupportedSchemaVersion(t *testing.T) {
 	for _, op := range []string{"next-id", "preflight"} {
 		t.Run(op, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			stdin := strings.NewReader(`{"schemaVersion":"2"}`)
-			args := []string{op}
+			args := []string{op, "--request", "-"}
 			if op == "preflight" {
 				args = append(args, "--source", "coverage.md")
 			}
@@ -128,10 +139,10 @@ func TestRun_StdinUnsupportedSchemaVersion(t *testing.T) {
 	}
 }
 
-func TestRun_StdinMissingSchemaVersion(t *testing.T) {
+func TestRun_RequestFileUnsupportedSchemaVersion(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	stdin := strings.NewReader(`{"foo":"bar"}`)
-	code := run([]string{"next-id"}, stdin, &stdout, &stderr)
+	path := writeRequestFile(t, `{"schemaVersion":"2"}`)
+	code := run([]string{"next-id", "--request", path}, nil, &stdout, &stderr)
 
 	if code != exitError {
 		t.Errorf("exit code = %d, want %d", code, exitError)
@@ -145,10 +156,27 @@ func TestRun_StdinMissingSchemaVersion(t *testing.T) {
 	}
 }
 
-func TestRun_StdinMalformedJSON(t *testing.T) {
+func TestRun_RequestMissingSchemaVersion(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	stdin := strings.NewReader(`{"foo":"bar"}`)
+	code := run([]string{"next-id", "--request", "-"}, stdin, &stdout, &stderr)
+
+	if code != exitError {
+		t.Errorf("exit code = %d, want %d", code, exitError)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("stdout = %q, want empty", stdout.String())
+	}
+	got := decodeError(t, &stderr)
+	if got.Code != "unsupported-schema-version" {
+		t.Errorf("error code = %q, want %q", got.Code, "unsupported-schema-version")
+	}
+}
+
+func TestRun_RequestMalformedJSON(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	stdin := strings.NewReader("not json")
-	code := run([]string{"next-id"}, stdin, &stdout, &stderr)
+	code := run([]string{"next-id", "--request", "-"}, stdin, &stdout, &stderr)
 
 	if code != exitError {
 		t.Errorf("exit code = %d, want %d", code, exitError)
@@ -162,11 +190,61 @@ func TestRun_StdinMalformedJSON(t *testing.T) {
 	}
 }
 
-func TestRun_StdinValidSchemaVersionProceedsToOp(t *testing.T) {
+func TestRun_RequestEmptyDocumentIsRejected(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	stdin := strings.NewReader("")
+	code := run([]string{"next-id", "--request", "-"}, stdin, &stdout, &stderr)
+
+	if code != exitError {
+		t.Errorf("exit code = %d, want %d (an explicitly supplied empty request is not a valid document)", code, exitError)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("stdout = %q, want empty", stdout.String())
+	}
+	got := decodeError(t, &stderr)
+	if got.Code != "malformed-request" {
+		t.Errorf("error code = %q, want %q", got.Code, "malformed-request")
+	}
+}
+
+func TestRun_RequestFileUnreadableNamesPath(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	path := filepath.Join(t.TempDir(), "no-such-request.json")
+	code := run([]string{"next-id", "--request", path}, nil, &stdout, &stderr)
+
+	if code != exitError {
+		t.Errorf("exit code = %d, want %d", code, exitError)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("stdout = %q, want empty", stdout.String())
+	}
+	got := decodeError(t, &stderr)
+	if got.Code != "request-read-failed" {
+		t.Errorf("error code = %q, want %q", got.Code, "request-read-failed")
+	}
+	if !strings.Contains(got.Message, path) {
+		t.Errorf("error message = %q, want it to name %q", got.Message, path)
+	}
+}
+
+func TestRun_RequestFlagWithEmptyPathRejected(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"next-id", "--request", ""}, nil, &stdout, &stderr)
+
+	if code != exitError {
+		t.Errorf("exit code = %d, want %d", code, exitError)
+	}
+	got := decodeError(t, &stderr)
+	if got.Code != "missing-request-path" {
+		t.Errorf("error code = %q, want %q", got.Code, "missing-request-path")
+	}
+}
+
+func TestRun_RequestValidSchemaVersionProceedsToOp(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	repo := t.TempDir()
 	stdin := strings.NewReader(`{"schemaVersion":"1"}`)
-	code := run([]string{"next-id", "--repo", repo}, stdin, &stdout, &stderr)
+	code := run([]string{"next-id", "--repo", repo, "--request", "-"}, stdin, &stdout, &stderr)
 
 	if code != exitOK {
 		t.Fatalf("exit code = %d, want %d (version gate should have passed); stderr=%s", code, exitOK, stderr.String())
@@ -179,14 +257,13 @@ func TestRun_StdinValidSchemaVersionProceedsToOp(t *testing.T) {
 	}
 }
 
-func TestRun_StdinEmptyReaderSkipsVersionCheck(t *testing.T) {
+func TestRun_NoRequestFlagSkipsVersionCheck(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	repo := t.TempDir()
-	stdin := strings.NewReader("")
-	code := run([]string{"next-id", "--repo", repo}, stdin, &stdout, &stderr)
+	code := run([]string{"next-id", "--repo", repo}, strings.NewReader(`{"schemaVersion":"2"}`), &stdout, &stderr)
 
 	if code != exitOK {
-		t.Fatalf("exit code = %d, want %d (empty stdin should skip the version check); stderr=%s", code, exitOK, stderr.String())
+		t.Fatalf("exit code = %d, want %d (no --request means no request document); stderr=%s", code, exitOK, stderr.String())
 	}
 	if stderr.Len() != 0 {
 		t.Errorf("stderr = %q, want empty", stderr.String())
@@ -196,18 +273,52 @@ func TestRun_StdinEmptyReaderSkipsVersionCheck(t *testing.T) {
 	}
 }
 
-func TestRun_NilStdinSkipsVersionCheck(t *testing.T) {
+func TestRun_UnknownFlagIsReportedBeforeAnyRequestRead(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	repo := t.TempDir()
-	code := run([]string{"next-id", "--repo", repo}, nil, &stdout, &stderr)
+	code := run([]string{"next-id", "--bogus"}, neverClosingReader{}, &stdout, &stderr)
 
-	if code != exitOK {
-		t.Fatalf("exit code = %d, want %d (nil stdin should skip the version check); stderr=%s", code, exitOK, stderr.String())
+	if code != exitError {
+		t.Errorf("exit code = %d, want %d", code, exitError)
 	}
-	if stderr.Len() != 0 {
-		t.Errorf("stderr = %q, want empty", stderr.String())
+	got := decodeError(t, &stderr)
+	if got.Code != "unknown-flag" {
+		t.Errorf("error code = %q, want %q", got.Code, "unknown-flag")
 	}
-	if stdout.Len() == 0 {
-		t.Errorf("stdout is empty, want a JSON document")
+}
+
+// neverClosingReader stands in for an inherited pipe whose writer never
+// closes: the exact stdin a CI or agent harness hands a child process.
+type neverClosingReader struct{}
+
+func (neverClosingReader) Read([]byte) (int, error) {
+	select {}
+}
+
+type runResult struct {
+	code   int
+	stdout string
+	stderr string
+}
+
+func TestRun_InheritedOpenStdinPipeDoesNotBlockTheOperation(t *testing.T) {
+	repo := filepath.Join("testdata", "orders-repo")
+
+	done := make(chan runResult, 1)
+	go func() {
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"next-id", "--repo", repo}, neverClosingReader{}, &stdout, &stderr)
+		done <- runResult{code: code, stdout: stdout.String(), stderr: stderr.String()}
+	}()
+
+	select {
+	case got := <-done:
+		if got.code != exitOK {
+			t.Fatalf("exit code = %d, want %d; stderr=%s", got.code, exitOK, got.stderr)
+		}
+		if got.stdout == "" {
+			t.Errorf("stdout is empty, want a JSON document")
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("run did not return within 15s with an open stdin pipe: the CLI still reads stdin unbidden")
 	}
 }

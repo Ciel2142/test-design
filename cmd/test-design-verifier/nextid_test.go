@@ -120,8 +120,8 @@ func TestNextIDHandler_InvalidAreaFlagRejected(t *testing.T) {
 		t.Errorf("stdout = %q, want empty", stdout.String())
 	}
 	got := decodeError(t, &stderr)
-	if got.Code == "" {
-		t.Errorf("cliError.Code empty, want a code")
+	if got.Code != "invalid-area" {
+		t.Errorf("error code = %q, want %q", got.Code, "invalid-area")
 	}
 }
 
