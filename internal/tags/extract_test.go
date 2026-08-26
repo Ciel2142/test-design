@@ -63,3 +63,18 @@ func TestExtractMultipleMarkerLinesEachContribute(t *testing.T) {
 		t.Errorf("Extract = %v, want %v", got, want)
 	}
 }
+
+func TestExtractMarkerInsideLargerWordDoesNotMatch(t *testing.T) {
+	got := Extract("this recovers: SC-01")
+	if len(got) != 0 {
+		t.Errorf("Extract = %v, want no tokens", got)
+	}
+}
+
+func TestExtractMarkerAfterNonWordCharStillExtracts(t *testing.T) {
+	got := Extract("// covers: SC-01")
+	want := []string{"SC-01"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Extract = %v, want %v", got, want)
+	}
+}
