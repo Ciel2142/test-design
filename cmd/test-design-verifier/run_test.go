@@ -131,6 +131,9 @@ func TestRun_StdinMissingSchemaVersion(t *testing.T) {
 	if code != exitError {
 		t.Errorf("exit code = %d, want %d", code, exitError)
 	}
+	if stdout.Len() != 0 {
+		t.Errorf("stdout = %q, want empty", stdout.String())
+	}
 	got := decodeError(t, &stderr)
 	if got.Code != "unsupported-schema-version" {
 		t.Errorf("error code = %q, want %q", got.Code, "unsupported-schema-version")
@@ -162,6 +165,9 @@ func TestRun_StdinValidSchemaVersionProceedsToOp(t *testing.T) {
 	if code != exitError {
 		t.Errorf("exit code = %d, want %d", code, exitError)
 	}
+	if stdout.Len() != 0 {
+		t.Errorf("stdout = %q, want empty (stub handler writes nothing)", stdout.String())
+	}
 	got := decodeError(t, &stderr)
 	if got.Code != "not-implemented" {
 		t.Errorf("error code = %q, want %q (version gate should have passed)", got.Code, "not-implemented")
@@ -176,6 +182,9 @@ func TestRun_StdinEmptyReaderSkipsVersionCheck(t *testing.T) {
 	if code != exitError {
 		t.Errorf("exit code = %d, want %d", code, exitError)
 	}
+	if stdout.Len() != 0 {
+		t.Errorf("stdout = %q, want empty (stub handler writes nothing)", stdout.String())
+	}
 	got := decodeError(t, &stderr)
 	if got.Code != "not-implemented" {
 		t.Errorf("error code = %q, want %q (empty stdin should skip the version check)", got.Code, "not-implemented")
@@ -188,6 +197,9 @@ func TestRun_NilStdinSkipsVersionCheck(t *testing.T) {
 
 	if code != exitError {
 		t.Errorf("exit code = %d, want %d", code, exitError)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("stdout = %q, want empty (stub handler writes nothing)", stdout.String())
 	}
 	got := decodeError(t, &stderr)
 	if got.Code != "not-implemented" {
