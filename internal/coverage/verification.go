@@ -61,9 +61,14 @@ func parseVerificationSection(path string, lines []string) (verificationFields, 
 
 	raw := make(map[string]string)
 	for _, line := range section {
-		if key, value, ok := parseBulletKV(line); ok {
-			raw[key] = value
+		key, value, ok := parseBulletKV(line)
+		if !ok {
+			continue
 		}
+		if _, dup := raw[key]; dup {
+			return verificationFields{}, fmt.Errorf("parse source %s: verification key %q: duplicate", path, key)
+		}
+		raw[key] = value
 	}
 
 	var vf verificationFields

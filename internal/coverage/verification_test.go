@@ -1,6 +1,9 @@
 package coverage
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func fullVerificationLines(overrides map[string]string) []string {
 	values := map[string]string{
@@ -124,4 +127,41 @@ func TestParseVerificationSectionEmptyReportGlobsIsValid(t *testing.T) {
 	if len(vf.Runner.ReportGlobs) != 0 {
 		t.Errorf("Runner.ReportGlobs = %v, want empty", vf.Runner.ReportGlobs)
 	}
+}
+
+// key present, value blank — override map in fullVerificationLines deletes
+// the key instead, so that path can't cover "present but empty".
+func blankBulletValue(lines []string, key string) []string {
+	out := make([]string, len(lines))
+	copy(out, lines)
+	prefix := "- " + key + ":"
+	for i, line := range out {
+		if strings.HasPrefix(strings.TrimSpace(line), prefix) {
+			out[i] = "- " + key + ": "
+		}
+	}
+	return out
+}
+
+func TestParseVerificationSectionPresentButEmptyValueErrorsNamingKey(t *testing.T) {
+	requiredStringKeys := []string{"runner-kind", "runner-root", "baseline-evidence", "baseline-sha256"}
+	for _, key := range requiredStringKeys {
+		t.Run(key, func(t *testing.T) {
+			lines := blankBulletValue(fullVerificationLines(nil), key)
+			_, err := parseVerificationSection("path.md", lines)
+			wantErrContains(t, err, "path.md")
+			wantErrContains(t, err, key)
+		})
+	}
+}
+
+func TestParseVerificationSectionDuplicateKeyErrorsNamingKeyAndPath(t *testing.T) {
+	lines := fullVerificationLines(nil)
+	// must land before the closing heading, else outside ## Verification
+	closing := len(lines) - 1
+	lines = append(lines[:closing], append([]string{"- runner-kind: junit-xml"}, lines[closing:]...)...)
+
+	_, err := parseVerificationSection("path.md", lines)
+	wantErrContains(t, err, "path.md")
+	wantErrContains(t, err, "runner-kind")
 }

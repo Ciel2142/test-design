@@ -36,6 +36,14 @@ func TestParseRowAcceptsWellFormedRow(t *testing.T) {
 	}
 }
 
+func TestParseRowRejectsWrongColumnCount(t *testing.T) {
+	_, err := parseRow("path.md", tableRow{
+		cells: []string{"SC-01", "b", "e", "unit", "m"},
+		line:  4,
+	})
+	wantErrContains(t, err, "expected 6 columns, got 5")
+}
+
 func TestParseRowRejectsMalformedID(t *testing.T) {
 	_, err := parseRow("path.md", tableRow{
 		cells: []string{"SC-abc", "b", "e", "unit", "m", "low"},
