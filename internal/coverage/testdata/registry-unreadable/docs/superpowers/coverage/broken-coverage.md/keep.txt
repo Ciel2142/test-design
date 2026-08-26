@@ -1,0 +1,3 @@
+Placeholder so git tracks this directory. broken-coverage.md is itself a
+directory (not a file) so BuildRegistry's os.ReadFile on it fails, proving
+an unreadable registry document is a structured error naming the path.
