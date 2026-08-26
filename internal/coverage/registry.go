@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -133,6 +134,22 @@ func claimOwner(owners map[string]Owner, seen map[string]bool, id, docPath strin
 func (r *Registry) Owner(id string) (Owner, bool) {
 	o, ok := r.owners[id]
 	return o, ok
+}
+
+// Areas returns every area the registry has seen at least one ID for
+// (active or retired), sorted so the unprefixed area ("") sorts first.
+func (r *Registry) Areas() []string {
+	seen := make(map[string]bool)
+	for id := range r.owners {
+		area, _ := splitID(id)
+		seen[area] = true
+	}
+	areas := make([]string, 0, len(seen))
+	for a := range seen {
+		areas = append(areas, a)
+	}
+	sort.Strings(areas)
+	return areas
 }
 
 // NextID returns one greater than the highest scenario number seen for

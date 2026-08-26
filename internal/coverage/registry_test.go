@@ -141,6 +141,59 @@ func TestNextIDRejectsInvalidArea(t *testing.T) {
 	}
 }
 
+func TestAreasSortedWithUnprefixedFirst(t *testing.T) {
+	root := filepath.Join("testdata", "registry-basic")
+
+	reg, err := BuildRegistry(root)
+	if err != nil {
+		t.Fatalf("BuildRegistry: %v", err)
+	}
+
+	got := reg.Areas()
+	want := []string{"", "orders"}
+	if len(got) != len(want) {
+		t.Fatalf("Areas() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("Areas()[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestAreasIncludesAreaOwnedOnlyByARetiredID(t *testing.T) {
+	root := filepath.Join("testdata", "registry-basic")
+
+	reg, err := BuildRegistry(root)
+	if err != nil {
+		t.Fatalf("BuildRegistry: %v", err)
+	}
+
+	// SC-04 retired, no active row in "" area — area must still show.
+	found := false
+	for _, a := range reg.Areas() {
+		if a == "" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("Areas() = %v, want unprefixed area present via retired SC-04", reg.Areas())
+	}
+}
+
+func TestAreasEmptyRegistryYieldsEmptySlice(t *testing.T) {
+	root := filepath.Join("testdata", "registry-empty")
+
+	reg, err := BuildRegistry(root)
+	if err != nil {
+		t.Fatalf("BuildRegistry: %v", err)
+	}
+
+	if got := reg.Areas(); len(got) != 0 {
+		t.Errorf("Areas() = %v, want empty", got)
+	}
+}
+
 func TestBuildRegistryCrossDocumentCollisionNamesBothPaths(t *testing.T) {
 	root := filepath.Join("testdata", "registry-cross-collision")
 

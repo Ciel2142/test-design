@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -68,33 +69,37 @@ func TestRun_UnknownFlag(t *testing.T) {
 	}
 }
 
-func TestRun_KnownOperationsRegistered(t *testing.T) {
-	cases := []struct {
-		op   string
-		args []string
-	}{
-		{"next-id", []string{"next-id"}},
-		{"preflight", []string{"preflight", "--source", "coverage.md"}},
-	}
-	for _, c := range cases {
-		t.Run(c.op, func(t *testing.T) {
-			var stdout, stderr bytes.Buffer
-			code := run(c.args, nil, &stdout, &stderr)
+func TestRun_NextIDDispatchesToRealHandler(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	repo := t.TempDir()
+	code := run([]string{"next-id", "--repo", repo}, nil, &stdout, &stderr)
 
-			if code != exitError {
-				t.Errorf("exit code = %d, want %d", code, exitError)
-			}
-			if stdout.Len() != 0 {
-				t.Errorf("stdout = %q, want empty", stdout.String())
-			}
-			got := decodeError(t, &stderr)
-			if got.Code == "unknown-operation" || got.Code == "unknown-flag" {
-				t.Errorf("error code = %q, op %q should be recognized with valid flags", got.Code, c.op)
-			}
-			if got.Code != "not-implemented" {
-				t.Errorf("error code = %q, want %q", got.Code, "not-implemented")
-			}
-		})
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d; stderr=%s", code, exitOK, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("stderr = %q, want empty", stderr.String())
+	}
+	if stdout.Len() == 0 {
+		t.Errorf("stdout is empty, want a JSON document")
+	}
+}
+
+func TestRun_PreflightDispatchesToRealHandler(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	repo := t.TempDir()
+	source := filepath.Join(repo, "missing-coverage.md")
+	code := run([]string{"preflight", "--repo", repo, "--source", source}, nil, &stdout, &stderr)
+
+	if code != exitError {
+		t.Fatalf("exit code = %d, want %d", code, exitError)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("stdout = %q, want empty", stdout.String())
+	}
+	got := decodeError(t, &stderr)
+	if got.Code == "unknown-operation" || got.Code == "unknown-flag" || got.Code == "not-implemented" {
+		t.Errorf("error code = %q, want a real preflight error, not a dispatch/stub error", got.Code)
 	}
 }
 
@@ -159,50 +164,50 @@ func TestRun_StdinMalformedJSON(t *testing.T) {
 
 func TestRun_StdinValidSchemaVersionProceedsToOp(t *testing.T) {
 	var stdout, stderr bytes.Buffer
+	repo := t.TempDir()
 	stdin := strings.NewReader(`{"schemaVersion":"1"}`)
-	code := run([]string{"next-id"}, stdin, &stdout, &stderr)
+	code := run([]string{"next-id", "--repo", repo}, stdin, &stdout, &stderr)
 
-	if code != exitError {
-		t.Errorf("exit code = %d, want %d", code, exitError)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d (version gate should have passed); stderr=%s", code, exitOK, stderr.String())
 	}
-	if stdout.Len() != 0 {
-		t.Errorf("stdout = %q, want empty (stub handler writes nothing)", stdout.String())
+	if stderr.Len() != 0 {
+		t.Errorf("stderr = %q, want empty", stderr.String())
 	}
-	got := decodeError(t, &stderr)
-	if got.Code != "not-implemented" {
-		t.Errorf("error code = %q, want %q (version gate should have passed)", got.Code, "not-implemented")
+	if stdout.Len() == 0 {
+		t.Errorf("stdout is empty, want a JSON document")
 	}
 }
 
 func TestRun_StdinEmptyReaderSkipsVersionCheck(t *testing.T) {
 	var stdout, stderr bytes.Buffer
+	repo := t.TempDir()
 	stdin := strings.NewReader("")
-	code := run([]string{"next-id"}, stdin, &stdout, &stderr)
+	code := run([]string{"next-id", "--repo", repo}, stdin, &stdout, &stderr)
 
-	if code != exitError {
-		t.Errorf("exit code = %d, want %d", code, exitError)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d (empty stdin should skip the version check); stderr=%s", code, exitOK, stderr.String())
 	}
-	if stdout.Len() != 0 {
-		t.Errorf("stdout = %q, want empty (stub handler writes nothing)", stdout.String())
+	if stderr.Len() != 0 {
+		t.Errorf("stderr = %q, want empty", stderr.String())
 	}
-	got := decodeError(t, &stderr)
-	if got.Code != "not-implemented" {
-		t.Errorf("error code = %q, want %q (empty stdin should skip the version check)", got.Code, "not-implemented")
+	if stdout.Len() == 0 {
+		t.Errorf("stdout is empty, want a JSON document")
 	}
 }
 
 func TestRun_NilStdinSkipsVersionCheck(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"next-id"}, nil, &stdout, &stderr)
+	repo := t.TempDir()
+	code := run([]string{"next-id", "--repo", repo}, nil, &stdout, &stderr)
 
-	if code != exitError {
-		t.Errorf("exit code = %d, want %d", code, exitError)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d (nil stdin should skip the version check); stderr=%s", code, exitOK, stderr.String())
 	}
-	if stdout.Len() != 0 {
-		t.Errorf("stdout = %q, want empty (stub handler writes nothing)", stdout.String())
+	if stderr.Len() != 0 {
+		t.Errorf("stderr = %q, want empty", stderr.String())
 	}
-	got := decodeError(t, &stderr)
-	if got.Code != "not-implemented" {
-		t.Errorf("error code = %q, want %q (nil stdin should skip the version check)", got.Code, "not-implemented")
+	if stdout.Len() == 0 {
+		t.Errorf("stdout is empty, want a JSON document")
 	}
 }

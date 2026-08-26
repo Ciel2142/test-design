@@ -2,7 +2,6 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"io"
 )
 
@@ -18,11 +17,11 @@ type opSpec struct {
 var ops = map[string]opSpec{
 	"next-id": {
 		newFlags: newNextIDFlags,
-		handler:  notImplementedHandler("next-id"),
+		handler:  nextIDHandler,
 	},
 	"preflight": {
 		newFlags: newPreflightFlags,
-		handler:  notImplementedHandler("preflight"),
+		handler:  preflightHandler,
 	},
 }
 
@@ -38,13 +37,4 @@ func newPreflightFlags() *flag.FlagSet {
 	fs.String("source", "", "coverage source markdown path")
 	fs.String("repo", ".", "repository root")
 	return fs
-}
-
-func notImplementedHandler(op string) opHandler {
-	return func(fs *flag.FlagSet, requestBody []byte, stdout io.Writer) *cliError {
-		return &cliError{
-			Code:    "not-implemented",
-			Message: fmt.Sprintf("operation %q is not yet implemented", op),
-		}
-	}
 }
