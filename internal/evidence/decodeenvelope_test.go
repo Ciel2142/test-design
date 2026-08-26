@@ -54,4 +54,7 @@ func TestDecodeEnvelopeMalformedJSONErrors(t *testing.T) {
 	if err == nil {
 		t.Fatalf("DecodeEnvelope returned nil error with %+v, want error", env)
 	}
+	if !strings.Contains(err.Error(), "decode envelope") {
+		t.Errorf("DecodeEnvelope error %q does not name the decode failure", err.Error())
+	}
 }
