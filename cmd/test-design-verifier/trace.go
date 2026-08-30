@@ -13,6 +13,7 @@ import (
 	"test-design/internal/coverage"
 	"test-design/internal/evidence"
 	"test-design/internal/gotestjson"
+	"test-design/internal/jvmsource"
 	"test-design/internal/runrecord"
 	"test-design/internal/trace"
 	"test-design/internal/worktree"
@@ -146,17 +147,36 @@ func traceOp(req *verifyRequest, stdout io.Writer, between func()) *cliError {
 	defer func() { _ = dispose() }()
 
 	suiteDir := filepath.Join(wt.Path, filepath.FromSlash(src.Runner.Root))
-	modulePath, cliErr := readModulePath(suiteDir)
-	if cliErr != nil {
-		return cliErr
+	var modulePath string
+	var sites []trace.TagSite
+	if src.Runner.Kind == "go" {
+		modulePath, cliErr = readModulePath(suiteDir)
+		if cliErr != nil {
+			return cliErr
+		}
+		sites, err = trace.ScanTags(suiteDir, modulePath)
+		if err != nil {
+			return &cliError{Code: "scan-tags-failed", Message: fmt.Sprintf("trace: %v", err)}
+		}
+	} else {
+		jvmSites, err := jvmsource.ScanTags(suiteDir)
+		if err != nil {
+			return &cliError{Code: "scan-tags-failed", Message: fmt.Sprintf("trace: %v", err)}
+		}
+		for _, s := range jvmSites {
+			sites = append(sites, trace.TagSite{
+				ImportPath: s.ClassName,
+				TestName:   s.Method,
+				File:       s.File,
+				Line:       s.Line,
+				IDs:        s.IDs,
+				Ambiguous:  s.Ambiguous,
+				Detail:     s.Detail,
+			})
+		}
 	}
 
-	sites, err := trace.ScanTags(suiteDir, modulePath)
-	if err != nil {
-		return &cliError{Code: "scan-tags-failed", Message: fmt.Sprintf("trace: %v", err)}
-	}
-
-	sr, cliErr := runSuite("trace", suiteDir, runDir, src.Runner.Command)
+	sr, cliErr := runSuiteFor("trace", src, wt.Path, runDir)
 	if cliErr != nil {
 		return cliErr
 	}
@@ -187,6 +207,13 @@ func traceOp(req *verifyRequest, stdout io.Writer, between func()) *cliError {
 	results, findings, classes, err := trace.Join(src, reg, sites, sr.report)
 	if err != nil {
 		return &cliError{Code: "join-failed", Message: fmt.Sprintf("trace: %v", err)}
+	}
+
+	for _, fam := range sr.unsupported {
+		findings = append(findings, trace.Finding{
+			Kind:   "ambiguity",
+			Detail: fmt.Sprintf("unsupported identity %s %q: %s", fam.Identity.ClassName, fam.Cases[0].RawName, fam.Identity.Unsupported),
+		})
 	}
 
 	var newFailures []traceNewFailure

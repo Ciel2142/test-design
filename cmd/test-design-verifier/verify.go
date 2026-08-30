@@ -17,6 +17,7 @@ import (
 	"test-design/internal/coverage"
 	"test-design/internal/evidence"
 	"test-design/internal/gotestjson"
+	"test-design/internal/junitxml"
 	"test-design/internal/jvmrun"
 	"test-design/internal/runrecord"
 )
@@ -182,6 +183,7 @@ func describeDirty(repoRoot string) string {
 
 type suiteRun struct {
 	report             *gotestjson.Report
+	unsupported        []junitxml.Family
 	exitStatus         int
 	startedAt          string
 	finishedAt         string
@@ -210,6 +212,7 @@ func runSuiteFor(op string, src *coverage.Source, wtPath, runDir string) (*suite
 		return nil, &cliError{Code: code, Message: fmt.Sprintf("%s: %v", op, err)}
 	}
 	sr := &suiteRun{
+		unsupported:        res.Unsupported,
 		exitStatus:         res.ExitStatus,
 		startedAt:          res.StartedAt,
 		finishedAt:         res.FinishedAt,
