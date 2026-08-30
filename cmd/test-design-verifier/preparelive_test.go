@@ -133,6 +133,29 @@ func TestPrepareLive_NoApplicableRowsRefused(t *testing.T) {
 	}
 }
 
+func TestPrepareLive_NoLiveProfileHeaderRefused(t *testing.T) {
+	repo := fixtureRepo(t)
+	addSmokeRow(t, repo)
+
+	code, stdout, stderr := runVerifyOp(t, "prepare-live", prepareLiveRequestJSON(t, repo, "live-no-header"))
+
+	if code != exitError {
+		t.Fatalf("exit code = %d, want %d; stdout=%s", code, exitError, stdout)
+	}
+	got := decodeCLIError(t, stderr)
+	if got.Code != "profile-unavailable" {
+		t.Errorf("error code = %q, want profile-unavailable", got.Code)
+	}
+	attemptPath := filepath.Join(verifierRunsDir(t), "live-no-header", "live-attempt.json")
+	if !strings.Contains(stderr, attemptPath) {
+		t.Errorf("stderr = %q, want it to name the attempt-evidence path %s", stderr, attemptPath)
+	}
+	assertAttemptEvidence(t, attemptPath, "live-no-header", "", "no live-profile configured")
+	if left := verifierWorktrees(t); len(left) != 0 {
+		t.Errorf("worktrees registered = %v, want the failure path to have disposed of it", left)
+	}
+}
+
 func TestPrepareLive_MissingProfileRefused(t *testing.T) {
 	repo := fixtureRepo(t)
 	addSmokeRow(t, repo)

@@ -144,6 +144,26 @@ func TestExecuteStepStartFailureIsDistinctError(t *testing.T) {
 	}
 }
 
+func TestExecuteStepStartFailureErrorIsRedacted(t *testing.T) {
+	const secretValue = "secretvalue"
+	step := Step{
+		Expectation: "missing binary with a secret argv",
+		Command:     []string{"/no/such/binary-td-live-test", "--token=" + secretValue},
+	}
+	runDir := t.TempDir()
+
+	_, err := ExecuteStep(step, []string{}, runDir, runDir)
+	if err == nil {
+		t.Fatal("ExecuteStep() error = nil, want a start-failure error")
+	}
+	if strings.Contains(err.Error(), secretValue) {
+		t.Errorf("ExecuteStep() error = %q, want the token value redacted", err.Error())
+	}
+	if !strings.Contains(err.Error(), "--token=REDACTED") {
+		t.Errorf("ExecuteStep() error = %q, want it to name the redacted command", err.Error())
+	}
+}
+
 func TestExecuteStepEmptyCommandErrors(t *testing.T) {
 	step := Step{Expectation: "empty", Command: nil}
 	runDir := t.TempDir()

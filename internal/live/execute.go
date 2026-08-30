@@ -90,7 +90,7 @@ func ExecuteStep(step Step, env []string, dir, runDir string) (*StepResult, erro
 	case runErr == nil:
 	case errors.As(runErr, &exitErr):
 	default:
-		return nil, fmt.Errorf("execute step: run %s in %s: %w", strings.Join(step.Command, " "), dir, runErr)
+		return nil, fmt.Errorf("execute step: run %s in %s: %w", strings.Join(redactCommand(step.Command), " "), dir, runErr)
 	}
 
 	stdoutPath := filepath.Join(runDir, stdoutRawFile)

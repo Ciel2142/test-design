@@ -130,10 +130,10 @@ func executeLiveHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer) 
 	return executeLiveOp(req, stdout, nil)
 }
 
-// executeLiveOp is the execute-live op body. between runs after the worktree is
-// disposed of and before the final Compare; it is nil in production and exists
-// so a test can mutate the original repository at exactly the moment the op is
-// blind to it.
+// executeLiveOp is the execute-live op body. The between hook runs after the
+// worktree is disposed of and before the final Compare; it is nil in
+// production and exists so a test can mutate the original repository at
+// exactly the moment the op is blind to it.
 func executeLiveOp(req *executeLiveRequest, stdout io.Writer, between func()) *cliError {
 	src, cliErr := loadVerifiedSource("execute-live", req.RepoRoot, req.CoverageSource)
 	if cliErr != nil {

@@ -250,6 +250,10 @@ func TestExecuteLive_FixtureWalkthroughVerdicts(t *testing.T) {
 	}
 
 	ev := readLiveEvidence(t, out.EvidencePath)
+
+	// runs before Fatalf-bearing assertions below so a mismatch can't skip it
+	assertNoCanaryUnder(t, prep.RunDir)
+
 	if ev.SchemaVersion == "" {
 		t.Error("evidence schemaVersion is empty")
 	}
@@ -303,7 +307,6 @@ func TestExecuteLive_FixtureWalkthroughVerdicts(t *testing.T) {
 		t.Error("evidence snapshotEqual = false, want the completed run stamped after the compare")
 	}
 
-	assertNoCanaryUnder(t, prep.RunDir)
 	if _, err := os.Stat(prep.WorktreePath); !os.IsNotExist(err) {
 		t.Errorf("worktree at %s survived, want it removed after the run", prep.WorktreePath)
 	}
@@ -421,6 +424,39 @@ func TestExecuteLive_StartFailureMarksBoundRowsInconclusive(t *testing.T) {
 	}
 	if len(ev.CleanupSteps) == 0 {
 		t.Error("cleanup steps = none, want cleanup to run on every path after start began")
+	}
+}
+
+func TestExecuteLive_StartFailureRedactsSecretInExecutionErrors(t *testing.T) {
+	const secretValue = "secretvalue"
+	repo := liveFixtureRepo(t)
+	commitLiveProfileOverride(t, repo, map[string]any{
+		"start": [][]string{{"/nonexistent/live-fixture-start", "--token=" + secretValue}},
+	})
+	prep := preparedLive(t, repo, "live-start-fail-secret")
+	tracePath := writeGapTraceEvidence(t, "SC-13")
+	planPath := filepath.Join(repo, filepath.FromSlash(liveFixturePlanPath))
+
+	code, stdout, stderr := runVerifyOp(t, "execute-live",
+		executeLiveRequestJSON(t, repo, prep.RunDir, planPath, tracePath))
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+	var out executeLiveOutput
+	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
+		t.Fatalf("stdout did not decode: %v\nstdout=%s", err, stdout)
+	}
+
+	ev := readLiveEvidence(t, out.EvidencePath)
+	if len(ev.ExecutionErrors) == 0 {
+		t.Fatal("executionErrors = none, want the start failure recorded")
+	}
+	joined := strings.Join(ev.ExecutionErrors, "\n")
+	if strings.Contains(joined, secretValue) {
+		t.Errorf("executionErrors = %v, want the token value redacted", ev.ExecutionErrors)
+	}
+	if !strings.Contains(joined, "--token=REDACTED") {
+		t.Errorf("executionErrors = %v, want it to name the redacted command", ev.ExecutionErrors)
 	}
 }
 
