@@ -26,7 +26,7 @@ func (c *Controller) Create(commit string) (*Worktree, error) {
 		return nil, fmt.Errorf("create worktree %s: %w", commit, err)
 	}
 
-	if _, err := runGit(c.repoRoot, "worktree", "add", "--detach", path, commit); err != nil {
+	if _, err := c.runGit("worktree", "add", "--detach", path, commit); err != nil {
 		_ = os.RemoveAll(path)
 		return nil, fmt.Errorf("create worktree %s: %w", commit, err)
 	}
@@ -38,7 +38,7 @@ func (c *Controller) Create(commit string) (*Worktree, error) {
 // dirty. On any path Remove leaves the original repository's working tree,
 // index, and refs untouched.
 func (c *Controller) Remove(w *Worktree) error {
-	if _, err := runGit(c.repoRoot, "worktree", "remove", "--force", w.Path); err != nil {
+	if _, err := c.runGit("worktree", "remove", "--force", w.Path); err != nil {
 		return fmt.Errorf("remove worktree %s: %w", w.Path, err)
 	}
 	return nil
@@ -61,8 +61,27 @@ func (c *Controller) Quarantine(w *Worktree) (string, error) {
 
 	// The quarantined directory is the evidence that matters; a stale admin
 	// entry left behind by a prune failure is not.
-	_, _ = runGit(c.repoRoot, "worktree", "prune")
+	_, _ = c.runGit("worktree", "prune")
 	return dest, nil
+}
+
+// Dispose retires w: it tries Remove first; on Remove failure it falls back
+// to Quarantine so the worktree survives inspection rather than vanishing.
+// It returns nil only when Remove succeeds. On Remove failure followed by a
+// successful Quarantine, it returns an error naming the surviving
+// quarantine path. When both Remove and Quarantine fail, it returns an
+// error naming w's in-place path — the worktree is never silently lost.
+func (c *Controller) Dispose(w *Worktree) error {
+	removeErr := c.Remove(w)
+	if removeErr == nil {
+		return nil
+	}
+
+	quarantined, quarantineErr := c.Quarantine(w)
+	if quarantineErr == nil {
+		return fmt.Errorf("dispose worktree %s: remove failed (%w); quarantined at %s", w.Path, removeErr, quarantined)
+	}
+	return fmt.Errorf("dispose worktree %s: remove failed (%w); quarantine also failed (%w); worktree remains at %s", w.Path, removeErr, quarantineErr, quarantined)
 }
 
 func (c *Controller) worktreesDir() string {

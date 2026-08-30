@@ -1,7 +1,9 @@
 package worktree
 
 import (
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -9,6 +11,60 @@ import (
 
 	"test-design/internal/evidence"
 )
+
+func TestTakeSnapshotUnbornHeadReturnsSentinel(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	mustGit(t, dir, "init", "-q")
+
+	ctrl, err := NewController(dir)
+	if err != nil {
+		t.Fatalf("NewController: %v", err)
+	}
+
+	snap, err := ctrl.TakeSnapshot()
+	if err == nil {
+		t.Fatalf("TakeSnapshot on a fresh, commit-less repo = %+v, nil, want an error", snap)
+	}
+	if !errors.Is(err, ErrUnbornHead) {
+		t.Errorf("TakeSnapshot error = %v, want it to wrap ErrUnbornHead", err)
+	}
+}
+
+func TestTakeSnapshotUnmergedIndexReturnsSentinel(t *testing.T) {
+	dir := newTestRepo(t)
+	mustGit(t, dir, "checkout", "-q", "-b", "other")
+	if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("branch content\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	mustGit(t, dir, "add", "tracked.txt")
+	mustGit(t, dir, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "-m", "branch change")
+
+	mustGit(t, dir, "checkout", "-q", "master")
+	if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("master content\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	mustGit(t, dir, "add", "tracked.txt")
+	mustGit(t, dir, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "-m", "master change")
+
+	mergeCmd := exec.Command("git", "-c", "user.name=Test", "-c", "user.email=test@example.com", "merge", "-q", "--no-edit", "other")
+	mergeCmd.Dir = dir
+	_ = mergeCmd.Run() // conflict expected; exit status intentionally ignored
+
+	ctrl, err := NewController(dir)
+	if err != nil {
+		t.Fatalf("NewController: %v", err)
+	}
+
+	snap, err := ctrl.TakeSnapshot()
+	if err == nil {
+		t.Fatalf("TakeSnapshot on a conflicted merge = %+v, nil, want an error", snap)
+	}
+	if !errors.Is(err, ErrUnmergedIndex) {
+		t.Errorf("TakeSnapshot error = %v, want it to wrap ErrUnmergedIndex", err)
+	}
+}
 
 func TestTakeSnapshotCapturesHeadCommit(t *testing.T) {
 	dir := newTestRepo(t)
@@ -73,6 +129,65 @@ func TestTakeSnapshotStagedOnlyChangeIsNotClean(t *testing.T) {
 	}
 }
 
+func TestTakeSnapshotDanglingUntrackedSymlinkDoesNotError(t *testing.T) {
+	dir := newTestRepo(t)
+	ctrl, err := NewController(dir)
+	if err != nil {
+		t.Fatalf("NewController: %v", err)
+	}
+
+	link := filepath.Join(dir, "dangling")
+	if err := os.Symlink(filepath.Join(dir, "does-not-exist"), link); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+
+	snap, err := ctrl.TakeSnapshot()
+	if err != nil {
+		t.Fatalf("TakeSnapshot with a dangling untracked symlink present: %v", err)
+	}
+	if _, ok := snap.untrackedHashes["dangling"]; !ok {
+		t.Errorf("untrackedHashes missing %q, has %v", "dangling", snap.untrackedHashes)
+	}
+}
+
+func TestCompareChangedUntrackedSymlinkTargetIsUnequal(t *testing.T) {
+	dir := newTestRepo(t)
+	ctrl, err := NewController(dir)
+	if err != nil {
+		t.Fatalf("NewController: %v", err)
+	}
+
+	link := filepath.Join(dir, "dangling")
+	if err := os.Symlink(filepath.Join(dir, "target-a"), link); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+
+	before, err := ctrl.TakeSnapshot()
+	if err != nil {
+		t.Fatalf("TakeSnapshot before: %v", err)
+	}
+
+	if err := os.Remove(link); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(dir, "target-b"), link); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+
+	after, err := ctrl.TakeSnapshot()
+	if err != nil {
+		t.Fatalf("TakeSnapshot after: %v", err)
+	}
+
+	equal, differing := Compare(before, after)
+	if equal {
+		t.Fatalf("Compare() equal = true, want false after changing the untracked symlink's target")
+	}
+	if !reflect.DeepEqual(differing, []string{"dangling"}) {
+		t.Errorf("Compare() differing = %v, want [dangling]", differing)
+	}
+}
+
 func TestTakeSnapshotUntrackedFileRecordsPathAndHash(t *testing.T) {
 	dir := newTestRepo(t)
 	ctrl, err := NewController(dir)
@@ -126,7 +241,7 @@ func TestTwoSnapshotsOfUntouchedRepoAreEqual(t *testing.T) {
 	}
 }
 
-func TestTakeSnapshotDoesNotMutateRepo(t *testing.T) {
+func TestTakeSnapshotLeavesStatusUnchanged(t *testing.T) {
 	dir := newTestRepo(t)
 	ctrl, err := NewController(dir)
 	if err != nil {

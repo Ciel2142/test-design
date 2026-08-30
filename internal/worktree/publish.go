@@ -1,13 +1,26 @@
 package worktree
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"test-design/internal/evidence"
+)
+
+var (
+	// ErrDirtyBeforeSnapshot is wrapped into Publish's error when before is
+	// not clean: Publish's single-shot-per-snapshot contract requires the
+	// caller's own before-snapshot to already match HEAD, or a dirty->dirty
+	// Compare could mask a real concurrent change.
+	ErrDirtyBeforeSnapshot = errors.New("before snapshot is not clean")
+	// ErrDuplicatePublishPath is wrapped into Publish's error when files
+	// names the same RepoRelPath more than once.
+	ErrDuplicatePublishPath = errors.New("duplicate publish RepoRelPath")
 )
 
 // PublishFile names one file to publish: RepoRelPath is its destination
@@ -26,11 +39,22 @@ type PublishRecord struct {
 }
 
 // Publish is the only function in this package permitted to write inside the
-// original repository. It first re-verifies the repository still matches
-// before (refusing on any concurrent change, writing nothing), then
-// validates every RepoRelPath before writing any file, then writes each
-// file's content and returns one PublishRecord per file.
+// original repository. It is single-shot per snapshot: before must be a
+// clean snapshot (typically the one TakeSnapshot returned right before this
+// run started), and calling Publish a second time with the same before
+// treats the first call's own outputs as a concurrent change. It first
+// re-verifies the repository still matches before (refusing on any
+// concurrent change, writing nothing), then validates every RepoRelPath
+// before writing any file, then writes each file's content and returns one
+// PublishRecord per file.
 func (c *Controller) Publish(before *Snapshot, files []PublishFile) ([]PublishRecord, error) {
+	if !before.Clean() {
+		return nil, fmt.Errorf("publish: %w", ErrDirtyBeforeSnapshot)
+	}
+	if dup := duplicateRepoRelPath(files); dup != "" {
+		return nil, fmt.Errorf("publish: %q: %w", dup, ErrDuplicatePublishPath)
+	}
+
 	after, err := c.TakeSnapshot()
 	if err != nil {
 		return nil, fmt.Errorf("publish: %w", err)
@@ -72,6 +96,9 @@ func (c *Controller) resolvePublishTarget(repoRelPath string) (string, error) {
 	cleaned := filepath.Clean(repoRelPath)
 	if cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("publish target %q escapes repository root: traverses above it", repoRelPath)
+	}
+	if firstComponent(cleaned) == ".git" {
+		return "", fmt.Errorf("publish target %q refers to .git, which the snapshot gate never covers", repoRelPath)
 	}
 
 	target := filepath.Join(c.repoRoot, cleaned)
@@ -117,7 +144,7 @@ func publishFile(target, sourcePath string) error {
 	}
 	defer src.Close()
 
-	dst, err := os.Create(target)
+	dst, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|syscall.O_NOFOLLOW, 0o644)
 	if err != nil {
 		return err
 	}
@@ -126,6 +153,24 @@ func publishFile(target, sourcePath string) error {
 		return err
 	}
 	return dst.Close()
+}
+
+func duplicateRepoRelPath(files []PublishFile) string {
+	seen := make(map[string]struct{}, len(files))
+	for _, f := range files {
+		if _, ok := seen[f.RepoRelPath]; ok {
+			return f.RepoRelPath
+		}
+		seen[f.RepoRelPath] = struct{}{}
+	}
+	return ""
+}
+
+func firstComponent(cleaned string) string {
+	if idx := strings.IndexRune(cleaned, filepath.Separator); idx >= 0 {
+		return cleaned[:idx]
+	}
+	return cleaned
 }
 
 func repoRelPaths(files []PublishFile) []string {

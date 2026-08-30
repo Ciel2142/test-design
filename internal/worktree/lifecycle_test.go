@@ -8,6 +8,49 @@ import (
 	"testing"
 )
 
+func TestCreateDoesNotRunRepoHooks(t *testing.T) {
+	dir := newTestRepo(t)
+	hooksDir := filepath.Join(dir, ".git", "hooks")
+	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	evidence := filepath.Join(dir, "hook-ran.txt")
+	hookScript := "#!/bin/sh\necho ran > " + evidence + "\n"
+	hookPath := filepath.Join(hooksDir, "post-checkout")
+	if err := os.WriteFile(hookPath, []byte(hookScript), 0o755); err != nil {
+		t.Fatalf("WriteFile hook: %v", err)
+	}
+
+	ctrl, err := NewController(dir)
+	if err != nil {
+		t.Fatalf("NewController: %v", err)
+	}
+	before, err := ctrl.TakeSnapshot()
+	if err != nil {
+		t.Fatalf("TakeSnapshot before: %v", err)
+	}
+
+	w, err := ctrl.Create("HEAD")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := ctrl.Remove(w); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+
+	if _, err := os.Stat(evidence); !os.IsNotExist(err) {
+		t.Errorf("post-checkout hook ran (evidence at %q, stat err = %v), want it never invoked", evidence, err)
+	}
+
+	after, err := ctrl.TakeSnapshot()
+	if err != nil {
+		t.Fatalf("TakeSnapshot after: %v", err)
+	}
+	if equal, differing := Compare(before, after); !equal {
+		t.Errorf("Compare() equal = false after Create+Remove with a repo hook present, want true; differing = %v", differing)
+	}
+}
+
 func TestCreateAtHEADIsDetachedUnderVerifierRoot(t *testing.T) {
 	dir := newTestRepo(t)
 	ctrl, err := NewController(dir)
@@ -136,6 +179,9 @@ func TestRemoveDirtyWorktreeSucceeds(t *testing.T) {
 }
 
 func TestRemoveFailureFallsBackToQuarantine(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: chmod-based permission checks don't apply")
+	}
 	dir := newTestRepo(t)
 	if err := os.Mkdir(filepath.Join(dir, "sub"), 0o755); err != nil {
 		t.Fatalf("Mkdir: %v", err)
@@ -197,7 +243,84 @@ func TestRemoveFailureFallsBackToQuarantine(t *testing.T) {
 	}
 }
 
+func TestDisposeHappyPathRemovesWorktree(t *testing.T) {
+	dir := newTestRepo(t)
+	ctrl, err := NewController(dir)
+	if err != nil {
+		t.Fatalf("NewController: %v", err)
+	}
+	w, err := ctrl.Create("HEAD")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if err := ctrl.Dispose(w); err != nil {
+		t.Fatalf("Dispose: %v", err)
+	}
+	if _, err := os.Stat(w.Path); !os.IsNotExist(err) {
+		t.Errorf("worktree dir %q still exists after Dispose, stat err = %v", w.Path, err)
+	}
+}
+
+func TestDisposeQuarantinesOnRemoveFailureAndNamesSurvivingPath(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: chmod-based permission checks don't apply")
+	}
+	dir := newTestRepo(t)
+	if err := os.Mkdir(filepath.Join(dir, "sub"), 0o755); err != nil {
+		t.Fatalf("Mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "sub", "nested.txt"), []byte("nested\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	mustGit(t, dir, "add", "sub/nested.txt")
+	mustGit(t, dir, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "-m", "add sub")
+
+	ctrl, err := NewController(dir)
+	if err != nil {
+		t.Fatalf("NewController: %v", err)
+	}
+	w, err := ctrl.Create("HEAD")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	nested := filepath.Join(w.Path, "sub")
+	if err := os.Chmod(nested, 0o500); err != nil {
+		t.Fatalf("Chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(nested, 0o700) })
+
+	err = ctrl.Dispose(w)
+	if err == nil {
+		t.Fatalf("Dispose(%q) = nil, want an error naming the surviving quarantine path", w.Path)
+	}
+
+	quarantineBase := ctrl.quarantineDir()
+	if !strings.Contains(err.Error(), quarantineBase) {
+		t.Errorf("Dispose error = %v, want it to name a path under quarantine dir %q", err, quarantineBase)
+	}
+	entries, rerr := os.ReadDir(quarantineBase)
+	if rerr != nil {
+		t.Fatalf("ReadDir(%q): %v", quarantineBase, rerr)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("quarantine dir has %d entries, want 1", len(entries))
+	}
+	survivingPath := filepath.Join(quarantineBase, entries[0].Name())
+	t.Cleanup(func() { _ = os.Chmod(filepath.Join(survivingPath, "sub"), 0o700) })
+	if !strings.Contains(err.Error(), survivingPath) {
+		t.Errorf("Dispose error = %v, want it to name the surviving path %q", err, survivingPath)
+	}
+	if _, statErr := os.Stat(survivingPath); statErr != nil {
+		t.Errorf("surviving quarantine path %q does not exist: %v", survivingPath, statErr)
+	}
+}
+
 func TestQuarantineMoveFailureReturnsOriginalPathWithNamedError(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: chmod-based permission checks don't apply")
+	}
 	dir := newTestRepo(t)
 	ctrl, err := NewController(dir)
 	if err != nil {

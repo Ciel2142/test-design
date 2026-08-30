@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -26,6 +27,7 @@ var (
 type Controller struct {
 	repoRoot string
 	tempRoot string
+	hooksDir string
 }
 
 // NewController resolves repoRoot to a Git work-tree root and establishes a
@@ -40,7 +42,11 @@ func NewController(repoRoot string) (*Controller, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Controller{repoRoot: resolvedRoot, tempRoot: tempRoot}, nil
+	hooksDir := filepath.Join(tempRoot, "hooks")
+	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
+		return nil, fmt.Errorf("new controller: create hooks dir: %w", err)
+	}
+	return &Controller{repoRoot: resolvedRoot, tempRoot: tempRoot, hooksDir: hooksDir}, nil
 }
 
 func resolveWorkTreeRoot(repoRoot string) (string, error) {
@@ -103,9 +109,37 @@ func isWithin(base, target string) bool {
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
+// gitEnvOverrideVars retarget git at a repository other than cmd.Dir; a
+// caller's inherited value would silently redirect the controller's git
+// invocations at a different repository.
+var gitEnvOverrideVars = []string{
+	"GIT_DIR",
+	"GIT_WORK_TREE",
+	"GIT_INDEX_FILE",
+	"GIT_OBJECT_DIRECTORY",
+	"GIT_COMMON_DIR",
+	"GIT_ALTERNATE_OBJECT_DIRECTORIES",
+	"GIT_NAMESPACE",
+	"GIT_CEILING_DIRECTORIES",
+}
+
+func filteredGitEnv() []string {
+	env := os.Environ()
+	filtered := make([]string, 0, len(env))
+	for _, kv := range env {
+		name, _, _ := strings.Cut(kv, "=")
+		if slices.Contains(gitEnvOverrideVars, name) {
+			continue
+		}
+		filtered = append(filtered, kv)
+	}
+	return filtered
+}
+
 func runGit(dir string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
+	cmd.Env = filteredGitEnv()
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -113,4 +147,12 @@ func runGit(dir string, args ...string) (string, error) {
 		return "", fmt.Errorf("git %s (in %s): %w: %s", strings.Join(args, " "), dir, err, strings.TrimSpace(stderr.String()))
 	}
 	return stdout.String(), nil
+}
+
+// runGit runs git in the controller's repository with an empty,
+// verifier-owned hooks path, so repo-supplied hooks (e.g. post-checkout on
+// `worktree add`) never execute.
+func (c *Controller) runGit(args ...string) (string, error) {
+	full := append([]string{"-c", "core.hooksPath=" + c.hooksDir}, args...)
+	return runGit(c.repoRoot, full...)
 }

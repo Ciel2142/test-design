@@ -20,6 +20,8 @@ func mustGit(t *testing.T, dir string, args ...string) string {
 
 func newTestRepo(t *testing.T) string {
 	t.Helper()
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	dir := t.TempDir()
 	mustGit(t, dir, "init", "-q")
 	if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("original\n"), 0o644); err != nil {

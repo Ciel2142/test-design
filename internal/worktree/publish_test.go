@@ -1,6 +1,7 @@
 package worktree
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -149,6 +150,104 @@ func TestPublishRefusesPathEscapingRepoRoot(t *testing.T) {
 	}
 }
 
+func TestPublishRefusesDirtyBeforeSnapshot(t *testing.T) {
+	dir := newTestRepo(t)
+	if err := os.WriteFile(filepath.Join(dir, "scratch.txt"), []byte("scratch\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	ctrl, err := NewController(dir)
+	if err != nil {
+		t.Fatalf("NewController: %v", err)
+	}
+
+	before, err := ctrl.TakeSnapshot()
+	if err != nil {
+		t.Fatalf("TakeSnapshot: %v", err)
+	}
+	if before.Clean() {
+		t.Fatalf("test fixture invalid: before-snapshot is clean")
+	}
+
+	src := writePublishSource(t, t.TempDir(), "published.txt", "content\n")
+	records, err := ctrl.Publish(before, []PublishFile{{RepoRelPath: "published.txt", SourcePath: src}})
+	if err == nil {
+		t.Fatalf("Publish(dirty before) = %+v, nil, want an error", records)
+	}
+	if !errors.Is(err, ErrDirtyBeforeSnapshot) {
+		t.Errorf("Publish error = %v, want it to wrap ErrDirtyBeforeSnapshot", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "published.txt")); !os.IsNotExist(statErr) {
+		t.Errorf("published.txt exists after refused Publish, stat err = %v", statErr)
+	}
+}
+
+func TestPublishRefusesDuplicateRepoRelPath(t *testing.T) {
+	dir := newTestRepo(t)
+	ctrl, err := NewController(dir)
+	if err != nil {
+		t.Fatalf("NewController: %v", err)
+	}
+	before, err := ctrl.TakeSnapshot()
+	if err != nil {
+		t.Fatalf("TakeSnapshot: %v", err)
+	}
+
+	srcDir := t.TempDir()
+	srcA := writePublishSource(t, srcDir, "a.txt", "first\n")
+	srcB := writePublishSource(t, srcDir, "b.txt", "second\n")
+
+	records, err := ctrl.Publish(before, []PublishFile{
+		{RepoRelPath: "dup.txt", SourcePath: srcA},
+		{RepoRelPath: "dup.txt", SourcePath: srcB},
+	})
+	if err == nil {
+		t.Fatalf("Publish(duplicate RepoRelPath) = %+v, nil, want an error", records)
+	}
+	if !errors.Is(err, ErrDuplicatePublishPath) {
+		t.Errorf("Publish error = %v, want it to wrap ErrDuplicatePublishPath", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "dup.txt")); !os.IsNotExist(statErr) {
+		t.Errorf("dup.txt exists after refused Publish, stat err = %v", statErr)
+	}
+}
+
+func TestPublishRefusesDotGitTarget(t *testing.T) {
+	dir := newTestRepo(t)
+	ctrl, err := NewController(dir)
+	if err != nil {
+		t.Fatalf("NewController: %v", err)
+	}
+	before, err := ctrl.TakeSnapshot()
+	if err != nil {
+		t.Fatalf("TakeSnapshot: %v", err)
+	}
+
+	src := writePublishSource(t, t.TempDir(), "config", "[bogus]\n")
+	tests := []struct {
+		name string
+		rel  string
+	}{
+		{"direct", ".git/config"},
+		{"traversal that cleans into .git", "docs/../.git/config"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			records, err := ctrl.Publish(before, []PublishFile{{RepoRelPath: tt.rel, SourcePath: src}})
+			if err == nil {
+				t.Fatalf("Publish(%q) = %+v, nil, want an error for a target under .git", tt.rel, records)
+			}
+		})
+	}
+
+	original, err := os.ReadFile(filepath.Join(dir, ".git", "config"))
+	if err != nil {
+		t.Fatalf("ReadFile(.git/config): %v", err)
+	}
+	if strings.Contains(string(original), "bogus") {
+		t.Errorf(".git/config was overwritten: %s", original)
+	}
+}
+
 func TestPublishRefusesSymlinkEscapingRepoRoot(t *testing.T) {
 	dir := newTestRepo(t)
 	outsideDir := t.TempDir()
@@ -180,6 +279,38 @@ func TestPublishRefusesSymlinkEscapingRepoRoot(t *testing.T) {
 	escaped := filepath.Join(outsideDir, "escape.txt")
 	if _, statErr := os.Stat(escaped); !os.IsNotExist(statErr) {
 		t.Errorf("file created at symlink target %q, stat err = %v", escaped, statErr)
+	}
+}
+
+func TestPublishRefusesDanglingSymlinkAtFinalComponent(t *testing.T) {
+	dir := newTestRepo(t)
+	outsideDir := t.TempDir()
+
+	link := filepath.Join(dir, "dangling")
+	escapeTarget := filepath.Join(outsideDir, "escape.txt")
+	if err := os.Symlink(escapeTarget, link); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+	mustGit(t, dir, "add", "dangling")
+	mustGit(t, dir, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "-m", "add dangling symlink")
+
+	ctrl, err := NewController(dir)
+	if err != nil {
+		t.Fatalf("NewController: %v", err)
+	}
+	before, err := ctrl.TakeSnapshot()
+	if err != nil {
+		t.Fatalf("TakeSnapshot: %v", err)
+	}
+
+	src := writePublishSource(t, t.TempDir(), "payload.txt", "payload\n")
+	records, err := ctrl.Publish(before, []PublishFile{{RepoRelPath: "dangling", SourcePath: src}})
+	if err == nil {
+		t.Fatalf("Publish(%+v) = %+v, nil, want an error for a dangling symlink at the final path component", records, records)
+	}
+
+	if _, statErr := os.Stat(escapeTarget); !os.IsNotExist(statErr) {
+		t.Errorf("file created at symlink target %q outside the repo, stat err = %v", escapeTarget, statErr)
 	}
 }
 
