@@ -1,0 +1,31 @@
+{"Time":"2026-08-30T14:54:16.951264171+03:00","Action":"start","Package":"happyfixture"}
+{"Time":"2026-08-30T14:54:16.955276187+03:00","Action":"run","Package":"happyfixture","Test":"TestPass"}
+{"Time":"2026-08-30T14:54:16.955306324+03:00","Action":"output","Package":"happyfixture","Test":"TestPass","Output":"=== RUN   TestPass\n"}
+{"Time":"2026-08-30T14:54:16.95543322+03:00","Action":"output","Package":"happyfixture","Test":"TestPass","Output":"--- PASS: TestPass (0.00s)\n"}
+{"Time":"2026-08-30T14:54:16.955440243+03:00","Action":"pass","Package":"happyfixture","Test":"TestPass","Elapsed":0}
+{"Time":"2026-08-30T14:54:16.955443359+03:00","Action":"run","Package":"happyfixture","Test":"TestFail"}
+{"Time":"2026-08-30T14:54:16.955444772+03:00","Action":"output","Package":"happyfixture","Test":"TestFail","Output":"=== RUN   TestFail\n"}
+{"Time":"2026-08-30T14:54:16.955446625+03:00","Action":"output","Package":"happyfixture","Test":"TestFail","Output":"    happy_test.go:9: boom\n"}
+{"Time":"2026-08-30T14:54:16.955448769+03:00","Action":"output","Package":"happyfixture","Test":"TestFail","Output":"--- FAIL: TestFail (0.00s)\n"}
+{"Time":"2026-08-30T14:54:16.955468176+03:00","Action":"fail","Package":"happyfixture","Test":"TestFail","Elapsed":0}
+{"Time":"2026-08-30T14:54:16.955472715+03:00","Action":"run","Package":"happyfixture","Test":"TestSkip"}
+{"Time":"2026-08-30T14:54:16.955474257+03:00","Action":"output","Package":"happyfixture","Test":"TestSkip","Output":"=== RUN   TestSkip\n"}
+{"Time":"2026-08-30T14:54:16.95547576+03:00","Action":"output","Package":"happyfixture","Test":"TestSkip","Output":"    happy_test.go:13: skipping\n"}
+{"Time":"2026-08-30T14:54:16.955477914+03:00","Action":"output","Package":"happyfixture","Test":"TestSkip","Output":"--- SKIP: TestSkip (0.00s)\n"}
+{"Time":"2026-08-30T14:54:16.955479227+03:00","Action":"skip","Package":"happyfixture","Test":"TestSkip","Elapsed":0}
+{"Time":"2026-08-30T14:54:16.95548061+03:00","Action":"run","Package":"happyfixture","Test":"TestParent"}
+{"Time":"2026-08-30T14:54:16.955483585+03:00","Action":"output","Package":"happyfixture","Test":"TestParent","Output":"=== RUN   TestParent\n"}
+{"Time":"2026-08-30T14:54:16.955485288+03:00","Action":"run","Package":"happyfixture","Test":"TestParent/childOK"}
+{"Time":"2026-08-30T14:54:16.95548639+03:00","Action":"output","Package":"happyfixture","Test":"TestParent/childOK","Output":"=== RUN   TestParent/childOK\n"}
+{"Time":"2026-08-30T14:54:16.955487833+03:00","Action":"output","Package":"happyfixture","Test":"TestParent/childOK","Output":"--- PASS: TestParent/childOK (0.00s)\n"}
+{"Time":"2026-08-30T14:54:16.955489657+03:00","Action":"pass","Package":"happyfixture","Test":"TestParent/childOK","Elapsed":0}
+{"Time":"2026-08-30T14:54:16.955490829+03:00","Action":"run","Package":"happyfixture","Test":"TestParent/childFail"}
+{"Time":"2026-08-30T14:54:16.955491881+03:00","Action":"output","Package":"happyfixture","Test":"TestParent/childFail","Output":"=== RUN   TestParent/childFail\n"}
+{"Time":"2026-08-30T14:54:16.955493193+03:00","Action":"output","Package":"happyfixture","Test":"TestParent/childFail","Output":"    happy_test.go:20: child boom\n"}
+{"Time":"2026-08-30T14:54:16.955494546+03:00","Action":"output","Package":"happyfixture","Test":"TestParent/childFail","Output":"--- FAIL: TestParent/childFail (0.00s)\n"}
+{"Time":"2026-08-30T14:54:16.955495778+03:00","Action":"fail","Package":"happyfixture","Test":"TestParent/childFail","Elapsed":0}
+{"Time":"2026-08-30T14:54:16.955497251+03:00","Action":"output","Package":"happyfixture","Test":"TestParent","Output":"--- FAIL: TestParent (0.00s)\n"}
+{"Time":"2026-08-30T14:54:16.955498513+03:00","Action":"fail","Package":"happyfixture","Test":"TestParent","Elapsed":0}
+{"Time":"2026-08-30T14:54:16.955499726+03:00","Action":"output","Package":"happyfixture","Output":"FAIL\n"}
+{"Time":"2026-08-30T14:54:16.955948442+03:00","Action":"output","Package":"happyfixture","Output":"FAIL\thappyfixture\t0.003s\n"}
+{"Time":"2026-08-30T14:54:16.95597374+03:00","Action":"fail","Package":"happyfixture","Elapsed":0.005}
