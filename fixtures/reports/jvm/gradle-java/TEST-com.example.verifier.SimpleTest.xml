@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.verifier.SimpleTest" tests="4" skipped="1" failures="2" errors="0" timestamp="2026-08-30T13:44:08.070Z" hostname="valukin" time="0.01">
+  <properties/>
+  <testcase name="failingAssertionTest()" classname="com.example.verifier.SimpleTest" time="0.002">
+    <failure message="org.opentest4j.AssertionFailedError: expected: &lt;5&gt; but was: &lt;4&gt;" type="org.opentest4j.AssertionFailedError">org.opentest4j.AssertionFailedError: expected: &lt;5&gt; but was: &lt;4&gt;
+	at org.junit.jupiter.api.AssertionFailureBuilder.build(AssertionFailureBuilder.java:151)
+	at org.junit.jupiter.api.AssertionFailureBuilder.buildAndThrow(AssertionFailureBuilder.java:132)
+	at org.junit.jupiter.api.AssertEquals.failNotEqual(AssertEquals.java:197)
+	at org.junit.jupiter.api.AssertEquals.assertEquals(AssertEquals.java:150)
+	at org.junit.jupiter.api.AssertEquals.assertEquals(AssertEquals.java:145)
+	at org.junit.jupiter.api.Assertions.assertEquals(Assertions.java:531)
+	at com.example.verifier.SimpleTest.failingAssertionTest(SimpleTest.java:18)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:565)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+</failure>
+  </testcase>
+  <testcase name="disabledTest()" classname="com.example.verifier.SimpleTest" time="0.001">
+    <skipped/>
+  </testcase>
+  <testcase name="throwingExceptionTest()" classname="com.example.verifier.SimpleTest" time="0.002">
+    <failure message="java.lang.IllegalStateException: boom" type="java.lang.IllegalStateException">java.lang.IllegalStateException: boom
+	at com.example.verifier.SimpleTest.throwingExceptionTest(SimpleTest.java:23)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:565)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1604)
+</failure>
+  </testcase>
+  <testcase name="passingTest()" classname="com.example.verifier.SimpleTest" time="0.002"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

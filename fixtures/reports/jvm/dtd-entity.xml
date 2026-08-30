@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE testsuite [
+  <!ENTITY xxe SYSTEM "file:///etc/passwd">
+]>
+<testsuite name="com.example.verifier.DtdEntityTest" tests="1" failures="0" errors="0" skipped="0" time="0.001">
+  <properties/>
+  <testcase name="passingTest" classname="com.example.verifier.DtdEntityTest" time="0.001"/>
+  <system-out>&xxe;</system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

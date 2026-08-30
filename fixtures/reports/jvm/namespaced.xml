@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<j:testsuite xmlns:j="https://example.com/junit-report" name="com.example.verifier.NamespacedTest" tests="1" failures="0" errors="0" skipped="0" time="0.001">
+  <j:properties/>
+  <j:testcase name="passingTest" classname="com.example.verifier.NamespacedTest" time="0.001"/>
+  <j:system-out><![CDATA[]]></j:system-out>
+  <j:system-err><![CDATA[]]></j:system-err>
+</j:testsuite>

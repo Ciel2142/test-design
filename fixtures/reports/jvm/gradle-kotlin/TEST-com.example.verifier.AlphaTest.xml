@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.verifier.AlphaTest" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-08-30T13:45:48.735Z" hostname="valukin" time="0.022">
+  <properties/>
+  <testcase name="sharedMethod()" classname="com.example.verifier.AlphaTest" time="0.009"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>
