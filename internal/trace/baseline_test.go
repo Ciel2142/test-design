@@ -73,6 +73,30 @@ func TestWriteBaselineSortsIdentitiesForByteIdenticalOutput(t *testing.T) {
 	}
 }
 
+func TestWriteBaselineCountsKeysAreCamelCase(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "baseline.json")
+	if err := WriteBaseline(path, newBaselineFixture()); err != nil {
+		t.Fatalf("WriteBaseline: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+
+	for _, wantKey := range []string{`"passed":`, `"failed":`, `"skipped":`} {
+		if !strings.Contains(string(data), wantKey) {
+			t.Errorf("baseline document missing camelCase counts key %s: %s", wantKey, data)
+		}
+	}
+	for _, unwantedKey := range []string{`"Passed":`, `"Failed":`, `"Skipped":`} {
+		if strings.Contains(string(data), unwantedKey) {
+			t.Errorf("baseline document has PascalCase counts key %s, want camelCase: %s", unwantedKey, data)
+		}
+	}
+}
+
 func TestWriteBaselineDoesNotMutateCallersIdentitySlices(t *testing.T) {
 	dir := t.TempDir()
 	b := newBaselineFixture()

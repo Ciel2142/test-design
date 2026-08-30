@@ -13,7 +13,9 @@ import (
 )
 
 type Counts struct {
-	Passed, Failed, Skipped int
+	Passed  int `json:"passed"`
+	Failed  int `json:"failed"`
+	Skipped int `json:"skipped"`
 }
 
 // RunnerFailure is a package-level failure with no associated test identity:
