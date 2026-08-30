@@ -35,6 +35,10 @@ var ops = map[string]opSpec{
 		newFlags: newPrepareMutationFlags,
 		handler:  prepareMutationHandler,
 	},
+	"prepare-live": {
+		newFlags: newPrepareLiveFlags,
+		handler:  prepareLiveHandler,
+	},
 	"evaluate-mutation": {
 		newFlags: newEvaluateMutationFlags,
 		handler:  evaluateMutationHandler,
@@ -77,6 +81,12 @@ func newPrepareMutationFlags() *flag.FlagSet {
 
 func newEvaluateMutationFlags() *flag.FlagSet {
 	fs := flag.NewFlagSet("evaluate-mutation", flag.ContinueOnError)
+	addRequestFlag(fs)
+	return fs
+}
+
+func newPrepareLiveFlags() *flag.FlagSet {
+	fs := flag.NewFlagSet("prepare-live", flag.ContinueOnError)
 	addRequestFlag(fs)
 	return fs
 }
