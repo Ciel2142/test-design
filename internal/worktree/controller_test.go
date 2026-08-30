@@ -63,4 +63,12 @@ func TestNewControllerRefusesTempRootInsideRepo(t *testing.T) {
 	if err == nil {
 		t.Fatalf("NewController(%q) = %+v, want error when TMPDIR resolves inside repo", dir, ctrl)
 	}
+
+	entries, rerr := os.ReadDir(nestedTemp)
+	if rerr != nil {
+		t.Fatalf("ReadDir(%q): %v", nestedTemp, rerr)
+	}
+	if len(entries) != 0 {
+		t.Errorf("NewController wrote %v inside repo-contained TMPDIR %q, want nothing created", entries, nestedTemp)
+	}
 }

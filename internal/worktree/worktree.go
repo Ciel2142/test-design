@@ -50,16 +50,16 @@ func resolveWorkTreeRoot(repoRoot string) (string, error) {
 
 	abs, err := filepath.Abs(repoRoot)
 	if err != nil {
-		return "", fmt.Errorf("new controller %s: %w", repoRoot, ErrNotGitWorktree)
+		return "", fmt.Errorf("new controller %s: %w: %w", repoRoot, ErrNotGitWorktree, err)
 	}
 	resolved, err := filepath.EvalSymlinks(abs)
 	if err != nil {
-		return "", fmt.Errorf("new controller %s: %w", repoRoot, ErrNotGitWorktree)
+		return "", fmt.Errorf("new controller %s: %w: %w", repoRoot, ErrNotGitWorktree, err)
 	}
 
 	out, err := runGit(resolved, "rev-parse", "--show-toplevel")
 	if err != nil {
-		return "", fmt.Errorf("new controller %s: %w", repoRoot, ErrNotGitWorktree)
+		return "", fmt.Errorf("new controller %s: %w: %w", repoRoot, ErrNotGitWorktree, err)
 	}
 	top, err := filepath.EvalSymlinks(strings.TrimSpace(out))
 	if err != nil {
@@ -72,19 +72,24 @@ func resolveWorkTreeRoot(repoRoot string) (string, error) {
 }
 
 func newVerifierTempRoot(repoRoot string) (string, error) {
-	dir, err := os.MkdirTemp("", "test-design-verifier-")
+	base := os.TempDir()
+	absBase, err := filepath.Abs(base)
+	if err != nil {
+		return "", fmt.Errorf("new controller: resolve temp base %s: %w", base, err)
+	}
+	resolvedBase, err := filepath.EvalSymlinks(absBase)
+	if err != nil {
+		return "", fmt.Errorf("new controller: resolve temp base %s: %w", base, err)
+	}
+	if isWithin(repoRoot, resolvedBase) {
+		return "", fmt.Errorf("new controller: temp base %s resolves inside repository %s", resolvedBase, repoRoot)
+	}
+
+	dir, err := os.MkdirTemp(resolvedBase, "test-design-verifier-")
 	if err != nil {
 		return "", fmt.Errorf("new controller: create temp root: %w", err)
 	}
-	resolved, err := filepath.EvalSymlinks(dir)
-	if err != nil {
-		return "", fmt.Errorf("new controller: resolve temp root %s: %w", dir, err)
-	}
-	if isWithin(repoRoot, resolved) {
-		os.RemoveAll(dir)
-		return "", fmt.Errorf("new controller: temp root %s resolves inside repository %s", resolved, repoRoot)
-	}
-	return resolved, nil
+	return dir, nil
 }
 
 func isWithin(base, target string) bool {
@@ -105,7 +110,7 @@ func runGit(dir string, args ...string) (string, error) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("git %s (in %s): %v: %s", strings.Join(args, " "), dir, err, strings.TrimSpace(stderr.String()))
+		return "", fmt.Errorf("git %s (in %s): %w: %s", strings.Join(args, " "), dir, err, strings.TrimSpace(stderr.String()))
 	}
 	return stdout.String(), nil
 }

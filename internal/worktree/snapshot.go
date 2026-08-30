@@ -61,7 +61,7 @@ func (s *Snapshot) Clean() bool {
 
 func untrackedPaths(porcelain string) []string {
 	var paths []string
-	for _, line := range strings.Split(porcelain, "\n") {
+	for line := range strings.SplitSeq(porcelain, "\n") {
 		path, ok := strings.CutPrefix(line, "?? ")
 		if !ok {
 			continue
