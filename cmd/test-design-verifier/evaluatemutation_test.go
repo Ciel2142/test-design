@@ -38,12 +38,33 @@ func preparedMutation(t *testing.T, repo, runID, rowID string) prepareMutationOu
 	return out
 }
 
+// ordersGoTail is Reserve and ReserveBatch verbatim as committed in the
+// fixture, appended unchanged by every helper that rewrites orders.go so the
+// diff stays isolated to the function each helper targets.
+const ordersGoTail = `
+func Reserve(qty int) error {
+	if qty <= 0 {
+		return fmt.Errorf("reservation quantity must be positive")
+	}
+	return nil
+}
+
+func ReserveBatch(qtys []int) error {
+	for _, qty := range qtys {
+		if qty <= 0 {
+			return fmt.Errorf("reservation quantity must be positive")
+		}
+	}
+	return nil
+}
+`
+
 // mutateOrdersGuard rewrites orders.go's ValidateQuantity body to bodySrc,
 // producing a single-hunk diff against the guard function.
 func mutateOrdersGuard(t *testing.T, worktreePath, bodySrc string) {
 	t.Helper()
 	path := filepath.Join(worktreePath, "orders", "orders.go")
-	content := "package orders\n\nimport \"fmt\"\n\nfunc ValidateQuantity(qty int) error {\n" + bodySrc + "\n}\n"
+	content := "package orders\n\nimport \"fmt\"\n\nfunc ValidateQuantity(qty int) error {\n" + bodySrc + "\n}\n" + ordersGoTail
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}

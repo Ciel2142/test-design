@@ -28,6 +28,7 @@ Baseline: BASELINE_COMMIT · 0 passed, 0 failed, 0 skipped
 | SC-03 | backorder quantity policy is defined | ValidateQuantity documents the backorder exception | unit | rule intentionally not yet implemented | low |
 | SC-04 | quantity ceiling is enforced | ValidateQuantity rejects quantities above the configured maximum | unit | ceiling check omitted | med |
 | SC-09 | duplicate test name isolation across packages | orders and payments may each define TestSameName without collision | unit | import-path scoping omitted from binding | low |
+| SC-10 | reservation quantity guard rejects non-positive input | Reserve rejects qty <= 0 | unit | reservation guard uses `<` instead of `<=` | high |
 
 ### Behavior: payment validation
 

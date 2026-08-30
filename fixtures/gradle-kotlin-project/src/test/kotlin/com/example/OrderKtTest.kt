@@ -1,5 +1,6 @@
 package com.example
 
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Assertions.fail
 import org.junit.jupiter.api.DisplayName
@@ -24,5 +25,12 @@ class OrderKtTest {
     // covers: SC-03
     fun displayNamed() {
         assertTrue(true)
+    }
+
+    @Test
+    // covers: SC-04
+    fun validatesQuantityDeliberately() {
+        assertTrue(Orders.isValidQuantity(3))
+        assertFalse(Orders.isValidQuantity(0))
     }
 }

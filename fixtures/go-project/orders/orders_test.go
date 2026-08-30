@@ -49,3 +49,13 @@ func TestOrdersGapPlaceholder(t *testing.T) {
 		t.Fatalf("ValidateQuantity(7) = %v, want nil", err)
 	}
 }
+
+// covers: SC-10
+func TestReserveGuard(t *testing.T) {
+	if err := Reserve(5); err != nil {
+		t.Fatalf("Reserve(5) = %v, want nil", err)
+	}
+	if err := Reserve(0); err == nil {
+		t.Fatal("Reserve(0) = nil, want error")
+	}
+}

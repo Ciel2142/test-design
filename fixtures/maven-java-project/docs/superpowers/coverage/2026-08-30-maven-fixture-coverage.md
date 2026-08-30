@@ -25,3 +25,4 @@ Baseline: BASELINE_COMMIT · 0 passed, 0 failed, 0 skipped
 | SC-04 | a nested class test binds by Outer$Inner | OuterTest$InnerTest.nestedPasses passes | unit | nesting flattened | low |
 | SC-05 | parameterized invocations collapse to one family | ParamTest.allPositive passes for all values | unit | one invocation seeded to fail | low |
 | SC-06 | an uncited row is reported as a gap | no test cites SC-06 | unit | deliberately uncited | low |
+| SC-07 | quantity validation guard rejects non-positive input | Orders.isValidQuantity rejects qty <= 0 | unit | guard uses `<` instead of `<=` | high |

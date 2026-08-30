@@ -141,6 +141,7 @@ func TestE2E_FixturePipeline(t *testing.T) {
 	wantFinding(t, ev, "drift", "", "unknown ID SC-77")
 	wantFinding(t, ev, "ambiguity", "", "orders/orders_test.go:45")
 	wantRowResult(t, ev, "SC-09", "passed")
+	wantRowResult(t, ev, "SC-10", "passed")
 
 	if _, ok := rowResultFor(ev, "SC-90"); ok {
 		t.Error("retired SC-90 produced a RowResult, want none")
@@ -149,7 +150,7 @@ func TestE2E_FixturePipeline(t *testing.T) {
 		t.Errorf("tagClasses = %v, want SC-77 classified unknown", ev.TagClasses)
 	}
 
-	activeRows := []string{"SC-01", "SC-02", "SC-03", "SC-04", "SC-05", "SC-06", "SC-07", "SC-08", "SC-09"}
+	activeRows := []string{"SC-01", "SC-02", "SC-03", "SC-04", "SC-05", "SC-06", "SC-07", "SC-08", "SC-09", "SC-10"}
 	accounted := map[string]bool{}
 	for _, r := range ev.RowResults {
 		if accounted[r.RowID] {
