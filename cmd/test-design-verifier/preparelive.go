@@ -146,19 +146,7 @@ func prepareLiveHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer) 
 }
 
 func hasApplicableLiveRows(src *coverage.Source) bool {
-	retired := make(map[string]bool, len(src.Retired))
-	for _, id := range src.Retired {
-		retired[id] = true
-	}
-	for _, row := range src.Rows {
-		if retired[row.ID] {
-			continue
-		}
-		if row.Level == "smoke" || row.Level == "e2e" {
-			return true
-		}
-	}
-	return false
+	return len(applicableLiveRows(src)) > 0
 }
 
 // failProfileUnavailable writes attempt evidence first: a run that never

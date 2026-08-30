@@ -1,0 +1,36 @@
+{
+  "schemaVersion": "1",
+  "steps": [
+    {
+      "expectation": "the happy walkthrough reaches the ready marker",
+      "command": ["echo", "live-fixture-ready"],
+      "predicates": [
+        {"form": "exit-code", "value": "0"},
+        {"form": "matches", "stream": "stdout", "value": "live-fixture-ready"}
+      ],
+      "scBindings": ["SC-11"]
+    },
+    {
+      "expectation": "the non-happy walkthrough is refused",
+      "command": ["echo", "live-fixture-accepted"],
+      "predicates": [
+        {"form": "matches", "stream": "stdout", "value": "live-fixture-refused"}
+      ],
+      "scBindings": ["SC-12"]
+    },
+    {
+      "expectation": "the walkthrough process cannot read a non-allowlisted secret",
+      "command": ["printenv", "LIVE_FIXTURE_CANARY"],
+      "predicates": [{"form": "exit-code", "value": "1"}],
+      "scBindings": ["SC-11"]
+    }
+  ],
+  "cleanup": [
+    {
+      "expectation": "the walkthrough's own marker file is removed",
+      "command": ["rm", "-f", "walkthrough-marker.txt"],
+      "predicates": [{"form": "exit-code", "value": "0"}],
+      "scBindings": []
+    }
+  ]
+}

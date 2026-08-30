@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "1",
+  "classification": "local",
+  "start": [["touch", "scratch-{run-id}.txt"]],
+  "health": [["ls", "scratch-{run-id}.txt"]],
+  "walkthrough": [["echo", "live-fixture-ready"], ["printenv", "LIVE_FIXTURE_CANARY"]],
+  "cleanup": [
+    ["rm", "-f", "scratch-{run-id}.txt"],
+    ["find", ".", "-maxdepth", "1", "-name", "scratch-{run-id}.txt"]
+  ],
+  "cleanupEvidence": [
+    {"form": "exit-code", "value": "0"},
+    {"form": "not-matches", "stream": "stdout", "value": "scratch-"}
+  ],
+  "envAllowlist": ["PATH"],
+  "resourcePrefixes": ["scratch-{run-id}"],
+  "endpoints": []
+}
