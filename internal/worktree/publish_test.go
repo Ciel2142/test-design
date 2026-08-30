@@ -125,13 +125,15 @@ func TestPublishRefusesPathEscapingRepoRoot(t *testing.T) {
 	}
 
 	src := writePublishSource(t, t.TempDir(), "escape.txt", "escape\n")
+	absTarget := filepath.Join(t.TempDir(), "escape.txt")
 
 	tests := []struct {
-		name string
-		rel  string
+		name          string
+		rel           string
+		absentAbsPath string
 	}{
-		{"relative traversal", "../escape.txt"},
-		{"absolute path", filepath.Join(t.TempDir(), "escape.txt")},
+		{"relative traversal", "../escape.txt", filepath.Join(filepath.Dir(dir), "escape.txt")},
+		{"absolute path", absTarget, absTarget},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -140,11 +142,44 @@ func TestPublishRefusesPathEscapingRepoRoot(t *testing.T) {
 				t.Fatalf("Publish(%q) = %+v, nil, want an error", tt.rel, records)
 			}
 
-			outsidePath := filepath.Join(filepath.Dir(dir), "escape.txt")
-			if _, statErr := os.Stat(outsidePath); !os.IsNotExist(statErr) {
-				t.Errorf("file created outside repo at %q, stat err = %v", outsidePath, statErr)
+			if _, statErr := os.Stat(tt.absentAbsPath); !os.IsNotExist(statErr) {
+				t.Errorf("file created at %q, stat err = %v", tt.absentAbsPath, statErr)
 			}
 		})
+	}
+}
+
+func TestPublishRefusesSymlinkEscapingRepoRoot(t *testing.T) {
+	dir := newTestRepo(t)
+	outsideDir := t.TempDir()
+
+	link := filepath.Join(dir, "linkdir")
+	if err := os.Symlink(outsideDir, link); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+	mustGit(t, dir, "add", "linkdir")
+	mustGit(t, dir, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "-m", "add symlinked dir")
+
+	ctrl, err := NewController(dir)
+	if err != nil {
+		t.Fatalf("NewController: %v", err)
+	}
+
+	before, err := ctrl.TakeSnapshot()
+	if err != nil {
+		t.Fatalf("TakeSnapshot: %v", err)
+	}
+
+	src := writePublishSource(t, t.TempDir(), "payload.txt", "payload\n")
+	rel := filepath.Join("linkdir", "escape.txt")
+	records, err := ctrl.Publish(before, []PublishFile{{RepoRelPath: rel, SourcePath: src}})
+	if err == nil {
+		t.Fatalf("Publish(%q) = %+v, nil, want an error for a symlink escaping the repo root", rel, records)
+	}
+
+	escaped := filepath.Join(outsideDir, "escape.txt")
+	if _, statErr := os.Stat(escaped); !os.IsNotExist(statErr) {
+		t.Errorf("file created at symlink target %q, stat err = %v", escaped, statErr)
 	}
 }
 

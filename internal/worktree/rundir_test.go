@@ -57,3 +57,34 @@ func TestNewRunDirDuplicateRunIDErrors(t *testing.T) {
 		t.Errorf("runs dir entries = %v after duplicate NewRunDir, want exactly the first call's directory", entries)
 	}
 }
+
+func TestNewRunDirRefusesRunIDEscapingVerifierRoot(t *testing.T) {
+	ctrl, err := NewController(newTestRepo(t))
+	if err != nil {
+		t.Fatalf("NewController: %v", err)
+	}
+
+	tests := []struct {
+		name  string
+		runID string
+	}{
+		{"parent traversal", "../escape"},
+		{"multi-component path", filepath.Join("a", "b")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir, err := ctrl.NewRunDir(tt.runID)
+			if err == nil {
+				t.Fatalf("NewRunDir(%q) = %q, nil, want an error", tt.runID, dir)
+			}
+
+			escaped := filepath.Join(filepath.Dir(ctrl.tempRoot), "escape")
+			if _, statErr := os.Stat(escaped); !os.IsNotExist(statErr) {
+				t.Errorf("NewRunDir(%q) created %q outside the verifier root, stat err = %v", tt.runID, escaped, statErr)
+			}
+			if _, statErr := os.Stat(filepath.Join(ctrl.runsDir(), "a")); !os.IsNotExist(statErr) {
+				t.Errorf("NewRunDir(%q) created a nested path under runs dir, stat err = %v", tt.runID, statErr)
+			}
+		})
+	}
+}
