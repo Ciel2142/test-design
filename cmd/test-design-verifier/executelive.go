@@ -60,6 +60,9 @@ type liveEvidence struct {
 	RawArtifacts    []liveRawArtifact  `json:"rawArtifacts"`
 	StartedAt       string             `json:"startedAt"`
 	FinishedAt      string             `json:"finishedAt"`
+	// stamped only after the compare; blocked run leaves evidence behind and
+	// finalize must not read it as a good run
+	SnapshotEqual bool `json:"snapshotEqual"`
 }
 
 type executeLiveOutput struct {
@@ -221,6 +224,11 @@ func executeLiveOp(req *executeLiveRequest, stdout io.Writer, between func()) *c
 			Message: fmt.Sprintf("execute-live: original repository changed during verification: %s; commit or discard the concurrent change, then rerun",
 				strings.Join(differing, ", ")),
 		}
+	}
+
+	ev.SnapshotEqual = true
+	if err := evidence.WriteJSON(evidencePath, &ev); err != nil {
+		return &cliError{Code: "evidence-write-failed", Message: fmt.Sprintf("execute-live: stamp snapshot equality: %v", err)}
 	}
 
 	out := executeLiveOutput{

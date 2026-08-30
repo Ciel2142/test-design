@@ -299,6 +299,9 @@ func TestExecuteLive_FixtureWalkthroughVerdicts(t *testing.T) {
 	if len(ev.ExecutionErrors) != 0 {
 		t.Errorf("executionErrors = %v, want none on the happy path", ev.ExecutionErrors)
 	}
+	if !ev.SnapshotEqual {
+		t.Error("evidence snapshotEqual = false, want the completed run stamped after the compare")
+	}
 
 	assertNoCanaryUnder(t, prep.RunDir)
 	if _, err := os.Stat(prep.WorktreePath); !os.IsNotExist(err) {
@@ -582,6 +585,85 @@ func TestExecuteLive_SnapshotMismatchDetected(t *testing.T) {
 	want := "sneaked.txt; commit or discard the concurrent change, then rerun"
 	if !strings.Contains(cliErr.Message, want) {
 		t.Errorf("message = %q, want it to contain %q", cliErr.Message, want)
+	}
+
+	// The blocked run still leaves its evidence behind; the unstamped
+	// snapshotEqual is what keeps finalize from reading it as a good run.
+	ev := readLiveEvidence(t, filepath.Join(prep.RunDir, liveEvidenceFile))
+	if ev.SnapshotEqual {
+		t.Error("evidence snapshotEqual = true after a snapshot mismatch, want it left unstamped")
+	}
+	if len(ev.RowVerdicts) == 0 {
+		t.Error("blocked evidence has no row verdicts, want the run it did perform still recorded")
+	}
+}
+
+// TestExecuteLive_WorstVerdictWinsAcrossSteps locks the merge order for a row
+// bound to several steps: FAIL beats INCONCLUSIVE beats PASS, and a later
+// passing step never upgrades an earlier verdict.
+func TestExecuteLive_WorstVerdictWinsAcrossSteps(t *testing.T) {
+	repo := liveFixtureRepo(t)
+	commitLiveProfileOverride(t, repo, map[string]any{
+		"walkthrough": [][]string{{"echo", "live-fixture-ready"}, {"/nonexistent/live-fixture-step"}},
+	})
+	prep := preparedLive(t, repo, "live-worst-wins")
+	tracePath := writeGapTraceEvidence(t, "SC-13")
+	planPath := writePlanFile(t, map[string]any{
+		"schemaVersion": "1",
+		"steps": []map[string]any{
+			{
+				"expectation": "both rows start from a passing step",
+				"command":     []string{"echo", "live-fixture-ready"},
+				"predicates":  []map[string]string{{"form": "exit-code", "value": "0"}},
+				"scBindings":  []string{"SC-11", "SC-12"},
+			},
+			{
+				"expectation": "SC-11 also has an unmet expectation",
+				"command":     []string{"echo", "live-fixture-accepted"},
+				"predicates": []map[string]string{
+					{"form": "matches", "stream": "stdout", "value": "live-fixture-refused"},
+				},
+				"scBindings": []string{"SC-11"},
+			},
+			{
+				"expectation": "SC-12 also has a step that cannot run at all",
+				"command":     []string{"/nonexistent/live-fixture-step"},
+				"predicates":  []map[string]string{{"form": "exit-code", "value": "0"}},
+				"scBindings":  []string{"SC-12"},
+			},
+			{
+				"expectation": "a later passing step must not upgrade either row",
+				"command":     []string{"echo", "live-fixture-ready"},
+				"predicates":  []map[string]string{{"form": "exit-code", "value": "0"}},
+				"scBindings":  []string{"SC-11", "SC-12"},
+			},
+		},
+	})
+
+	code, stdout, stderr := runVerifyOp(t, "execute-live",
+		executeLiveRequestJSON(t, repo, prep.RunDir, planPath, tracePath))
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+	var out executeLiveOutput
+	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
+		t.Fatalf("stdout did not decode: %v\nstdout=%s", err, stdout)
+	}
+
+	got := verdictsByRow(out.RowVerdicts)
+	if got["SC-11"] != "LIVE-FAIL" {
+		t.Errorf("verdict for SC-11 = %q, want LIVE-FAIL to beat the two passing steps", got["SC-11"])
+	}
+	if got["SC-12"] != "LIVE-INCONCLUSIVE" {
+		t.Errorf("verdict for SC-12 = %q, want LIVE-INCONCLUSIVE to beat the two passing steps", got["SC-12"])
+	}
+
+	ev := readLiveEvidence(t, out.EvidencePath)
+	if len(ev.Steps) != 3 {
+		t.Errorf("walkthrough steps = %+v, want the step that never started absent from the transcripts", ev.Steps)
+	}
+	if len(ev.ExecutionErrors) != 1 {
+		t.Errorf("executionErrors = %v, want exactly the failed process start recorded", ev.ExecutionErrors)
 	}
 }
 
