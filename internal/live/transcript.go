@@ -35,8 +35,11 @@ var (
 func ReduceTranscript(step Step, res *StepResult, parentEnv []string, allowlist []string) (*ReducedStep, error) {
 	pass, failed := EvaluatePredicates(step.Predicates, res)
 	decisive := decisiveOutput(step.Predicates, failed, res)
+	command := redactCommand(step.Command)
 
-	if err := redactionBarrier(decisive, parentEnv, allowlist); err != nil {
+	// redactCommand misses secrets in plain argv slots (e.g. `mysql -p <value>`);
+	// barrier must scan the command too, not just decisive.
+	if err := redactionBarrier(decisive+"\n"+strings.Join(command, " "), parentEnv, allowlist); err != nil {
 		return nil, err
 	}
 
@@ -47,7 +50,7 @@ func ReduceTranscript(step Step, res *StepResult, parentEnv []string, allowlist 
 
 	return &ReducedStep{
 		Expectation: step.Expectation,
-		Command:     redactCommand(step.Command),
+		Command:     command,
 		ExitStatus:  res.ExitStatus,
 		Decisive:    decisive,
 		Result:      result,

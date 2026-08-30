@@ -202,6 +202,34 @@ func TestReduceTranscriptRedactionBarrierSkipsShortValues(t *testing.T) {
 	}
 }
 
+func TestReduceTranscriptRedactionBarrierCatchesSecretInUnmatchedArgvSlot(t *testing.T) {
+	const secretName = "DB_PASSWORD"
+	const secretValue = "sup3r-secret-value" // len>=6; "-p" not a name pattern redactCommand catches
+
+	step := Step{
+		Expectation: "connects to db",
+		Command:     []string{"mysql", "-p", secretValue},
+		Predicates:  []Predicate{{Form: "exit-code", Value: "0"}},
+	}
+	res := &StepResult{ExitStatus: 0, Combined: []byte("connected")}
+	parentEnv := []string{secretName + "=" + secretValue}
+	allowlist := []string{}
+
+	rs, err := ReduceTranscript(step, res, parentEnv, allowlist)
+	if err == nil {
+		t.Fatal("ReduceTranscript() error = nil, want a redaction barrier error for a secret in an argv slot redactCommand's name patterns miss")
+	}
+	if rs != nil {
+		t.Errorf("ReduceTranscript() reduced step = %+v, want nil on redaction barrier error", rs)
+	}
+	if !strings.Contains(err.Error(), secretName) {
+		t.Errorf("error = %q, want it to name the variable %q", err.Error(), secretName)
+	}
+	if strings.Contains(err.Error(), secretValue) {
+		t.Errorf("error = %q, must never contain the secret value", err.Error())
+	}
+}
+
 func TestReduceTranscriptNeverContainsCanaryValue(t *testing.T) {
 	const canaryValue = "planted-canary-leak-value"
 	step := Step{
