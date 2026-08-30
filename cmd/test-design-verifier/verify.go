@@ -41,7 +41,7 @@ func decodeVerifyRequest(op string, requestBody []byte) (*verifyRequest, *cliErr
 	if req.CoverageSource == "" {
 		return nil, &cliError{Code: "missing-coverage-source", Message: fmt.Sprintf("%s: coverageSource is required", op)}
 	}
-	rel, cliErr := repoRelSource(op, req.CoverageSource)
+	rel, cliErr := confinedRelPath(op, "coverageSource", "source-outside-repo", req.CoverageSource)
 	if cliErr != nil {
 		return nil, cliErr
 	}
@@ -49,18 +49,23 @@ func decodeVerifyRequest(op string, requestBody []byte) (*verifyRequest, *cliErr
 	return &req, nil
 }
 
-func repoRelSource(op, coverageSource string) (string, *cliError) {
-	if filepath.IsAbs(coverageSource) {
+// confinedRelPath guards a join: coverageSource onto the repo root,
+// runner-root onto the worktree.
+func confinedRelPath(op, field, code, value string) (string, *cliError) {
+	if value == "" {
+		return "", &cliError{Code: code, Message: fmt.Sprintf("%s: %s is empty", op, field)}
+	}
+	if filepath.IsAbs(value) {
 		return "", &cliError{
-			Code:    "source-outside-repo",
-			Message: fmt.Sprintf("%s: coverageSource %q escapes repository root: absolute path", op, coverageSource),
+			Code:    code,
+			Message: fmt.Sprintf("%s: %s %q escapes its root: absolute path", op, field, value),
 		}
 	}
-	cleaned := filepath.Clean(coverageSource)
+	cleaned := filepath.Clean(value)
 	if cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
 		return "", &cliError{
-			Code:    "source-outside-repo",
-			Message: fmt.Sprintf("%s: coverageSource %q escapes repository root: traverses above it", op, coverageSource),
+			Code:    code,
+			Message: fmt.Sprintf("%s: %s %q escapes its root: traverses above it", op, field, value),
 		}
 	}
 	return filepath.ToSlash(cleaned), nil
@@ -91,6 +96,11 @@ func loadVerifiedSource(op, repoRoot, coverageSource string) (*coverage.Source, 
 			Message: fmt.Sprintf("%s: go suite command must include -count=1", op),
 		}
 	}
+	root, cliErr := confinedRelPath(op, "runner-root", "runner-root-outside-worktree", src.Runner.Root)
+	if cliErr != nil {
+		return nil, cliErr
+	}
+	src.Runner.Root = root
 	return src, nil
 }
 
@@ -143,7 +153,6 @@ func describeDirty(repoRoot string) string {
 type suiteRun struct {
 	report             *gotestjson.Report
 	exitStatus         int
-	rawPath            string
 	startedAt          string
 	finishedAt         string
 	normalizationError string
@@ -196,7 +205,6 @@ func runSuite(op, dir, runDir string, command []string) (*suiteRun, *cliError) {
 
 	sr := &suiteRun{
 		exitStatus: cmd.ProcessState.ExitCode(),
-		rawPath:    rawPath,
 		startedAt:  started.Format(time.RFC3339Nano),
 		finishedAt: finished.Format(time.RFC3339Nano),
 	}
@@ -210,10 +218,10 @@ func runSuite(op, dir, runDir string, command []string) (*suiteRun, *cliError) {
 	return sr, nil
 }
 
-// elapsedPattern matches go test's per-package elapsed times, which vary run to
-// run. They ride along inside RunnerFailure.Detail; leaving them there would put
-// a timing value inside a finding, where evidence must be reproducible.
-var elapsedPattern = regexp.MustCompile(`[0-9]+\.[0-9]+s`)
+// elapsedPattern matches only go test's trailing per-package result line
+// ("FAIL\tpkg\t0.003s"), whose timing varies run to run. Anchored to that line
+// so a duration quoted inside a panic or build message survives verbatim.
+var elapsedPattern = regexp.MustCompile(`(?m)^((?:ok|FAIL|\?)[ \t]+\S+[ \t]+)[0-9]+\.[0-9]+s[ \t]*$`)
 
 // canonicalizeReport makes a normalized report reproducible: go test emits
 // packages in completion order, so both records and package-level failures are
@@ -229,7 +237,7 @@ func canonicalizeReport(rep *gotestjson.Report) {
 		return rep.Records[i].Status < rep.Records[j].Status
 	})
 	for i := range rep.Failures {
-		rep.Failures[i].Detail = elapsedPattern.ReplaceAllString(rep.Failures[i].Detail, "<elapsed>")
+		rep.Failures[i].Detail = elapsedPattern.ReplaceAllString(rep.Failures[i].Detail, "${1}<elapsed>")
 	}
 	sort.SliceStable(rep.Failures, func(i, j int) bool {
 		if rep.Failures[i].Package != rep.Failures[j].Package {

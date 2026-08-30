@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"test-design/internal/evidence"
 	"test-design/internal/trace"
 )
 
@@ -93,7 +94,7 @@ func TestBaseline_CoverageSourceOutsideRepoRefused(t *testing.T) {
 	if code != exitError {
 		t.Fatalf("exit code = %d, want %d", code, exitError)
 	}
-	if !strings.Contains(stderr, "escapes repository root") {
+	if !strings.Contains(stderr, "coverageSource") || !strings.Contains(stderr, "escapes its root") {
 		t.Errorf("stderr = %q, want an escape refusal", stderr)
 	}
 }
@@ -154,6 +155,15 @@ func TestBaseline_E2EPublishesEvidenceBesideCoverageDoc(t *testing.T) {
 	if b.NormalizationError != "" {
 		t.Errorf("normalizationError = %q, want empty", b.NormalizationError)
 	}
+	normalized := filepath.Join(out.RunDir, normalizedFile)
+	wantReportSHA, err := evidence.SHA256File(normalized)
+	if err != nil {
+		t.Fatalf("baseline run dir has no normalized report: %v", err)
+	}
+	if b.ReportSHA256 != wantReportSHA {
+		t.Errorf("reportSha256 = %q, want the canonical normalized report's hash %q", b.ReportSHA256, wantReportSHA)
+	}
+
 	want := trace.BaselineIdentity{Scope: "fixturemod/orders", Name: "TestValidateQuantityRejectsZero"}
 	if !slices.Contains(b.Failed, want) {
 		t.Errorf("baseline Failed = %v, want it to contain the seeded deliberate failure %v", b.Failed, want)

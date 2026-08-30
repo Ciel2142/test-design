@@ -97,13 +97,13 @@ func baselineHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer) *cl
 		ExitStatus:         sr.exitStatus,
 		NormalizationError: sr.normalizationError,
 	}
-	reportSHA, err := evidence.SHA256File(sr.rawPath)
-	if err != nil {
-		return &cliError{Code: "run-dir-write-failed", Message: fmt.Sprintf("baseline: %v", err)}
-	}
-	b.ReportSHA256 = reportSHA
-
 	if sr.report != nil {
+		canonicalizeReport(sr.report)
+		reportSHA, cliErr := writeNormalizedReport("baseline", runDir, sr.report)
+		if cliErr != nil {
+			return cliErr
+		}
+		b.ReportSHA256 = reportSHA
 		b.Counts = sr.report.Counts
 		b.Failed = identities(sr.report.Records, runrecord.Failed)
 		b.Skipped = identities(sr.report.Records, runrecord.Skipped)
