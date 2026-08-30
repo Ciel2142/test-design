@@ -71,10 +71,7 @@ func NormalizeFile(r io.Reader) (*Document, error) {
 			}
 		case xml.StartElement:
 			if foundRoot {
-				if err := dec.Skip(); err != nil {
-					return nil, fmt.Errorf("junitxml: %w", err)
-				}
-				continue
+				return nil, fmt.Errorf("junitxml: unexpected second top-level element %q after root", t.Name.Local)
 			}
 			if !suiteLocalNames[t.Name.Local] {
 				return nil, fmt.Errorf("junitxml: root element must be testsuite or testsuites, got %q", t.Name.Local)
@@ -98,6 +95,31 @@ func rejectDTDOrEntity(d xml.Directive) error {
 		return fmt.Errorf("junitxml: rejected DTD/entity directive: %s", strings.TrimSpace(string(d)))
 	}
 	return nil
+}
+
+// like dec.Skip(), but dec.Skip() lets a directive hide in the subtree.
+func skipChecked(dec *xml.Decoder) error {
+	depth := 0
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return fmt.Errorf("junitxml: %w", err)
+		}
+
+		switch t := tok.(type) {
+		case xml.Directive:
+			if err := rejectDTDOrEntity(t); err != nil {
+				return err
+			}
+		case xml.StartElement:
+			depth++
+		case xml.EndElement:
+			if depth == 0 {
+				return nil
+			}
+			depth--
+		}
+	}
 }
 
 func parseSuite(dec *xml.Decoder, cases *[]Case) error {
@@ -125,8 +147,8 @@ func parseSuite(dec *xml.Decoder, cases *[]Case) error {
 				}
 				*cases = append(*cases, c)
 			default:
-				if err := dec.Skip(); err != nil {
-					return fmt.Errorf("junitxml: %w", err)
+				if err := skipChecked(dec); err != nil {
+					return err
 				}
 			}
 		case xml.EndElement:
@@ -169,17 +191,17 @@ func parseTestCase(dec *xml.Decoder, start xml.StartElement) (Case, error) {
 			switch {
 			case failStatusLocalNames[t.Name.Local]:
 				sawFailed = true
-				if err := dec.Skip(); err != nil {
-					return Case{}, fmt.Errorf("junitxml: %w", err)
+				if err := skipChecked(dec); err != nil {
+					return Case{}, err
 				}
 			case skipStatusLocalNames[t.Name.Local]:
 				sawSkipped = true
-				if err := dec.Skip(); err != nil {
-					return Case{}, fmt.Errorf("junitxml: %w", err)
+				if err := skipChecked(dec); err != nil {
+					return Case{}, err
 				}
 			case ignorableLocalNames[t.Name.Local]:
-				if err := dec.Skip(); err != nil {
-					return Case{}, fmt.Errorf("junitxml: %w", err)
+				if err := skipChecked(dec); err != nil {
+					return Case{}, err
 				}
 			default:
 				return Case{}, fmt.Errorf("junitxml: unrecognized status representation %q in testcase %q", t.Name.Local, rawName)

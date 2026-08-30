@@ -389,3 +389,78 @@ func TestNormalizeFileUnknownRootElementErrors(t *testing.T) {
 		t.Errorf("NormalizeFile returned %+v alongside error, want nil *Document", doc)
 	}
 }
+
+func TestNormalizeFileDoctypeInsideFailureChildRejected(t *testing.T) {
+	input := `<testsuite name="s" tests="1"><testcase classname="pkg.A" name="one">` +
+		`<failure><!DOCTYPE evil [<!ENTITY x "y">]></failure></testcase></testsuite>`
+	doc, err := NormalizeFile(strings.NewReader(input))
+	if err == nil {
+		t.Fatalf("NormalizeFile returned nil error with %+v, want error", doc)
+	}
+	if doc != nil {
+		t.Errorf("NormalizeFile returned %+v alongside error, want nil *Document", doc)
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "doctype") {
+		t.Errorf("error = %q, want it to name DOCTYPE", err.Error())
+	}
+}
+
+func TestNormalizeFileDoctypeInsideSkippedChildRejected(t *testing.T) {
+	input := `<testsuite name="s" tests="1"><testcase classname="pkg.A" name="one">` +
+		`<skipped><!DOCTYPE evil [<!ENTITY x "y">]></skipped></testcase></testsuite>`
+	doc, err := NormalizeFile(strings.NewReader(input))
+	if err == nil {
+		t.Fatalf("NormalizeFile returned nil error with %+v, want error", doc)
+	}
+	if doc != nil {
+		t.Errorf("NormalizeFile returned %+v alongside error, want nil *Document", doc)
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "doctype") {
+		t.Errorf("error = %q, want it to name DOCTYPE", err.Error())
+	}
+}
+
+func TestNormalizeFileDoctypeInsideSystemOutChildRejected(t *testing.T) {
+	input := `<testsuite name="s" tests="1"><testcase classname="pkg.A" name="one">` +
+		`<system-out><!DOCTYPE evil [<!ENTITY x "y">]></system-out></testcase></testsuite>`
+	doc, err := NormalizeFile(strings.NewReader(input))
+	if err == nil {
+		t.Fatalf("NormalizeFile returned nil error with %+v, want error", doc)
+	}
+	if doc != nil {
+		t.Errorf("NormalizeFile returned %+v alongside error, want nil *Document", doc)
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "doctype") {
+		t.Errorf("error = %q, want it to name DOCTYPE", err.Error())
+	}
+}
+
+func TestNormalizeFileDoctypeInsideUnknownSuiteChildRejected(t *testing.T) {
+	input := `<testsuite name="s" tests="1"><unrecognized-suite-child>` +
+		`<!DOCTYPE evil [<!ENTITY x "y">]></unrecognized-suite-child></testsuite>`
+	doc, err := NormalizeFile(strings.NewReader(input))
+	if err == nil {
+		t.Fatalf("NormalizeFile returned nil error with %+v, want error", doc)
+	}
+	if doc != nil {
+		t.Errorf("NormalizeFile returned %+v alongside error, want nil *Document", doc)
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "doctype") {
+		t.Errorf("error = %q, want it to name DOCTYPE", err.Error())
+	}
+}
+
+func TestNormalizeFileSecondTopLevelTestsuiteErrorsWithoutDroppingCases(t *testing.T) {
+	input := `<testsuite name="a" tests="1"><testcase classname="pkg.A" name="one"/></testsuite>` +
+		`<testsuite name="b" tests="1"><testcase classname="pkg.B" name="two"/></testsuite>`
+	doc, err := NormalizeFile(strings.NewReader(input))
+	if err == nil {
+		t.Fatalf("NormalizeFile returned nil error with %+v, want error", doc)
+	}
+	if doc != nil {
+		t.Errorf("NormalizeFile returned %+v alongside error, want nil *Document", doc)
+	}
+	if !strings.Contains(err.Error(), "testsuite") {
+		t.Errorf("error = %q, want it to name the second top-level element %q", err.Error(), "testsuite")
+	}
+}
