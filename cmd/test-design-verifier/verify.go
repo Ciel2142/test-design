@@ -81,19 +81,42 @@ func loadVerifiedSource(op, repoRoot, coverageSource string) (*coverage.Source, 
 	}
 	src.Path = coverageSource
 
-	if src.Runner.Kind != "go" {
-		return nil, &cliError{
-			Code:    "unsupported-runner-kind",
-			Message: fmt.Sprintf("%s: unsupported runner kind %s", op, src.Runner.Kind),
-		}
-	}
 	if len(src.Runner.Command) == 0 {
 		return nil, &cliError{Code: "empty-runner-command", Message: fmt.Sprintf("%s: runner command is empty", op)}
 	}
-	if !slices.Contains(src.Runner.Command, "-count=1") {
+	switch src.Runner.Kind {
+	case "go":
+		if !slices.Contains(src.Runner.Command, "-count=1") {
+			return nil, &cliError{
+				Code:    "missing-count-one",
+				Message: fmt.Sprintf("%s: go suite command must include -count=1", op),
+			}
+		}
+	case "maven", "gradle":
+		if src.Runner.Kind == "gradle" &&
+			!slices.Contains(src.Runner.Command, "--rerun") && !slices.Contains(src.Runner.Command, "--rerun-tasks") {
+			return nil, &cliError{
+				Code:    "missing-rerun-flag",
+				Message: fmt.Sprintf("%s: gradle suite command must include --rerun or --rerun-tasks", op),
+			}
+		}
+		if len(src.Runner.ReportGlobs) == 0 {
+			return nil, &cliError{
+				Code:    "missing-report-globs",
+				Message: fmt.Sprintf("%s: %s runner requires non-empty report-globs", op, src.Runner.Kind),
+			}
+		}
+		for i, glob := range src.Runner.ReportGlobs {
+			confined, cliErr := confinedRelPath(op, "report-globs", "report-glob-escapes-root", glob)
+			if cliErr != nil {
+				return nil, cliErr
+			}
+			src.Runner.ReportGlobs[i] = confined
+		}
+	default:
 		return nil, &cliError{
-			Code:    "missing-count-one",
-			Message: fmt.Sprintf("%s: go suite command must include -count=1", op),
+			Code:    "unsupported-runner-kind",
+			Message: fmt.Sprintf("%s: unsupported runner kind %s", op, src.Runner.Kind),
 		}
 	}
 	root, cliErr := confinedRelPath(op, "runner-root", "runner-root-outside-worktree", src.Runner.Root)
