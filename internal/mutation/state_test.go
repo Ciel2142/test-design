@@ -16,7 +16,11 @@ func sampleState() *State {
 		Identity:     Identity{Scope: "fixturemod/orders", Name: "TestValidateQuantityRejectsZero"},
 		WorktreePath: "/tmp/wt-example",
 		Snapshot:     json.RawMessage(`{"headCommit":"abc123"}`),
-		Sites:        []SiteOutcome{{Site: "orders.go:12", Outcome: "caught", DiffPath: "sites/1.diff"}},
+		Sites: []SiteOutcome{{
+			Site: "orders.go:12", Outcome: "caught", DiffPath: "sites/1.diff",
+			MutatedRunDir: "sites/1-mutated", MutatedExitStatus: 1,
+			CleanRunDir: "sites/1-clean", CleanExitStatus: 0,
+		}},
 	}
 }
 

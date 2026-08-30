@@ -25,9 +25,13 @@ type State struct {
 }
 
 type SiteOutcome struct {
-	Site     string `json:"site"`
-	Outcome  string `json:"outcome"` // caught | survived
-	DiffPath string `json:"diffPath"`
+	Site              string `json:"site"`
+	Outcome           string `json:"outcome"` // caught | survived
+	DiffPath          string `json:"diffPath"`
+	MutatedRunDir     string `json:"mutatedRunDir"`
+	MutatedExitStatus int    `json:"mutatedExitStatus"`
+	CleanRunDir       string `json:"cleanRunDir"`
+	CleanExitStatus   int    `json:"cleanExitStatus"`
 }
 
 // WriteState persists st to <runDir>/mutation-state.json, stamping
