@@ -29,11 +29,17 @@ func prepareLiveRequestJSON(t *testing.T, repo, runID string) string {
 	return string(body)
 }
 
-// addLiveProfileHeader points the coverage doc's live-profile bullet at profileName.
-func addLiveProfileHeader(t *testing.T, repo, profileName string) {
+// live-profile header carries a full repo-relative path, not a bare name
+// (internal/coverage/testdata/valid-source.md:14).
+func liveProfilePath(name string) string {
+	return ".test-design/live-profiles/" + name + ".json"
+}
+
+// addLiveProfileHeader points the coverage doc's live-profile bullet at profileRelPath.
+func addLiveProfileHeader(t *testing.T, repo, profileRelPath string) {
 	t.Helper()
 	rewriteFixtureDoc(t, repo, func(s string) string {
-		return strings.Replace(s, liveFinalCommandLine, liveFinalCommandLine+"\n- live-profile: "+profileName, 1)
+		return strings.Replace(s, liveFinalCommandLine, liveFinalCommandLine+"\n- live-profile: "+profileRelPath, 1)
 	})
 	mustGit(t, repo, "add", "-A")
 	mustGit(t, repo, "commit", "-q", "-m", "point coverage doc at a live profile")
@@ -130,7 +136,8 @@ func TestPrepareLive_NoApplicableRowsRefused(t *testing.T) {
 func TestPrepareLive_MissingProfileRefused(t *testing.T) {
 	repo := fixtureRepo(t)
 	addSmokeRow(t, repo)
-	addLiveProfileHeader(t, repo, "does-not-exist")
+	profilePath := liveProfilePath("does-not-exist")
+	addLiveProfileHeader(t, repo, profilePath)
 
 	code, stdout, stderr := runVerifyOp(t, "prepare-live", prepareLiveRequestJSON(t, repo, "live-missing-profile"))
 
@@ -145,7 +152,7 @@ func TestPrepareLive_MissingProfileRefused(t *testing.T) {
 	if !strings.Contains(stderr, attemptPath) {
 		t.Errorf("stderr = %q, want it to name the attempt-evidence path %s", stderr, attemptPath)
 	}
-	assertAttemptEvidence(t, attemptPath, "live-missing-profile", "does-not-exist", "does-not-exist.json")
+	assertAttemptEvidence(t, attemptPath, "live-missing-profile", profilePath, profilePath)
 	if left := verifierWorktrees(t); len(left) != 0 {
 		t.Errorf("worktrees registered = %v, want the failure path to have disposed of it", left)
 	}
@@ -154,7 +161,8 @@ func TestPrepareLive_MissingProfileRefused(t *testing.T) {
 func TestPrepareLive_InvalidProfileRefused(t *testing.T) {
 	repo := fixtureRepo(t)
 	addSmokeRow(t, repo)
-	addLiveProfileHeader(t, repo, "fixture-production")
+	profilePath := liveProfilePath("fixture-production")
+	addLiveProfileHeader(t, repo, profilePath)
 	writeLiveProfileFixture(t, repo, "fixture-production", map[string]any{"classification": "production"})
 
 	code, stdout, stderr := runVerifyOp(t, "prepare-live", prepareLiveRequestJSON(t, repo, "live-invalid-profile"))
@@ -170,7 +178,7 @@ func TestPrepareLive_InvalidProfileRefused(t *testing.T) {
 		t.Errorf("stderr = %q, want it to embed the unsupported-classification refusal", stderr)
 	}
 	attemptPath := filepath.Join(verifierRunsDir(t), "live-invalid-profile", "live-attempt.json")
-	assertAttemptEvidence(t, attemptPath, "live-invalid-profile", "fixture-production", "unsupported-classification")
+	assertAttemptEvidence(t, attemptPath, "live-invalid-profile", profilePath, "unsupported-classification")
 	if left := verifierWorktrees(t); len(left) != 0 {
 		t.Errorf("worktrees registered = %v, want the failure path to have disposed of it", left)
 	}
@@ -179,7 +187,8 @@ func TestPrepareLive_InvalidProfileRefused(t *testing.T) {
 func TestPrepareLive_PathTraversingProfileNameRefused(t *testing.T) {
 	repo := fixtureRepo(t)
 	addSmokeRow(t, repo)
-	addLiveProfileHeader(t, repo, "../../etc/evil")
+	const traversal = "../../etc/evil.json"
+	addLiveProfileHeader(t, repo, traversal)
 
 	code, stdout, stderr := runVerifyOp(t, "prepare-live", prepareLiveRequestJSON(t, repo, "live-traversal"))
 
@@ -190,9 +199,11 @@ func TestPrepareLive_PathTraversingProfileNameRefused(t *testing.T) {
 	if got.Code != "profile-unavailable" {
 		t.Errorf("error code = %q, want profile-unavailable", got.Code)
 	}
-	if !strings.Contains(stderr, "not a single path component") {
-		t.Errorf("stderr = %q, want it to refuse the path-shaped profile name", stderr)
+	if !strings.Contains(stderr, "live-profile-outside-repo") || !strings.Contains(stderr, "escapes its root") {
+		t.Errorf("stderr = %q, want it to embed confinedRelPath's live-profile-outside-repo refusal", stderr)
 	}
+	attemptPath := filepath.Join(verifierRunsDir(t), "live-traversal", "live-attempt.json")
+	assertAttemptEvidence(t, attemptPath, "live-traversal", traversal, "escapes its root")
 	if left := verifierWorktrees(t); len(left) != 0 {
 		t.Errorf("worktrees registered = %v, want the failure path to have disposed of it", left)
 	}
@@ -201,7 +212,7 @@ func TestPrepareLive_PathTraversingProfileNameRefused(t *testing.T) {
 func TestPrepareLive_GoFixtureHappyPath(t *testing.T) {
 	repo := fixtureRepo(t)
 	addSmokeRow(t, repo)
-	addLiveProfileHeader(t, repo, "fixture-local")
+	addLiveProfileHeader(t, repo, liveProfilePath("fixture-local"))
 	writeLiveProfileFixture(t, repo, "fixture-local", nil)
 
 	code, stdout, stderr := runVerifyOp(t, "prepare-live", prepareLiveRequestJSON(t, repo, "live-happy"))

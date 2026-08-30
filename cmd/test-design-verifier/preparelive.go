@@ -95,12 +95,10 @@ func prepareLiveHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer) 
 	if src.LiveProfile == "" {
 		return failProfileUnavailable(runDir, req.RunID, "", errors.New("no live-profile configured for coverage source "+src.Path))
 	}
-	// live-profile is repo content, not a trusted path: reject anything that
-	// would let it escape .test-design/live-profiles via Join's ".." cleanup.
-	if strings.ContainsAny(src.LiveProfile, "/\\") || strings.Contains(src.LiveProfile, "..") {
-		return failProfileUnavailable(runDir, req.RunID, src.LiveProfile, fmt.Errorf("live-profile %q is not a single path component", src.LiveProfile))
+	profileRelPath, confineErr := confinedRelPath("prepare-live", "live-profile", "live-profile-outside-repo", src.LiveProfile)
+	if confineErr != nil {
+		return failProfileUnavailable(runDir, req.RunID, src.LiveProfile, fmt.Errorf("%s: %s", confineErr.Code, confineErr.Message))
 	}
-	profileRelPath := filepath.ToSlash(filepath.Join(".test-design", "live-profiles", src.LiveProfile+".json"))
 	profileAbsPath := filepath.Join(req.RepoRoot, filepath.FromSlash(profileRelPath))
 
 	profile, err := live.LoadProfile(profileAbsPath)
