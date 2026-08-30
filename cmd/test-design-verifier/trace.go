@@ -265,9 +265,6 @@ const (
 // not verify is a named condition in the evidence, which finalize turns into
 // PARTIAL rather than a verdict.
 func loadBaselineCondition(repoRoot string, src *coverage.Source) (*trace.Baseline, string) {
-	if src.BaselineEvidencePath == "" {
-		return nil, baselineMissing
-	}
 	path := filepath.Join(repoRoot, filepath.FromSlash(src.BaselineEvidencePath))
 	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {

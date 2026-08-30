@@ -142,7 +142,7 @@ func scanFile(path, worktreeRoot, modulePath string) ([]TagSite, error) {
 			Line:       line,
 			IDs:        ids,
 			Ambiguous:  true,
-			Detail:     fmt.Sprintf("%s:%d: %s", relFile, line, unboundReason(astFile, cg)),
+			Detail:     unboundReason(astFile, cg),
 		})
 	}
 

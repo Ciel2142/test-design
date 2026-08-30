@@ -58,7 +58,10 @@ func Join(src *coverage.Source, reg *coverage.Registry, sites []TagSite, rep *go
 
 	for _, site := range sites {
 		if site.Ambiguous {
-			findings = append(findings, Finding{Kind: "ambiguity", Detail: site.Detail})
+			findings = append(findings, Finding{
+				Kind:   "ambiguity",
+				Detail: fmt.Sprintf("%s:%d: %s", site.File, site.Line, site.Detail),
+			})
 			continue
 		}
 

@@ -322,7 +322,7 @@ func TestJoinAmbiguousTagSiteProducesAmbiguityFinding(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Join: %v", err)
 	}
-	wantAmbiguity := Finding{Kind: "ambiguity", RowID: "", Detail: "func TestFoo: has a receiver; go test only runs top-level functions"}
+	wantAmbiguity := Finding{Kind: "ambiguity", RowID: "", Detail: "pkg/foo_test.go:5: func TestFoo: has a receiver; go test only runs top-level functions"}
 	found := false
 	for _, f := range findings {
 		if f == wantAmbiguity {

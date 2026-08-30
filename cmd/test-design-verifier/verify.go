@@ -101,6 +101,12 @@ func loadVerifiedSource(op, repoRoot, coverageSource string) (*coverage.Source, 
 		return nil, cliErr
 	}
 	src.Runner.Root = root
+
+	baselinePath, cliErr := confinedRelPath(op, "baseline-evidence", "baseline-evidence-outside-repo", src.BaselineEvidencePath)
+	if cliErr != nil {
+		return nil, cliErr
+	}
+	src.BaselineEvidencePath = baselinePath
 	return src, nil
 }
 

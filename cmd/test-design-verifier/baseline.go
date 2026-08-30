@@ -38,10 +38,6 @@ func baselineHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer) *cl
 	if cliErr != nil {
 		return cliErr
 	}
-	if src.BaselineEvidencePath == "" {
-		return &cliError{Code: "missing-baseline-evidence-path", Message: "baseline: coverage source has no baseline-evidence path"}
-	}
-
 	ctrl, err := worktree.NewController(req.RepoRoot)
 	if err != nil {
 		return &cliError{Code: "controller-failed", Message: fmt.Sprintf("baseline: %v", err)}

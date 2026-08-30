@@ -302,8 +302,11 @@ func TestSomething(t *testing.T) {
 	if site.TestName != "" {
 		t.Errorf("TestName = %q, want empty", site.TestName)
 	}
-	if !strings.Contains(site.Detail, "pkg/foo_test.go:7") {
-		t.Errorf("Detail = %q, want it to name file:line pkg/foo_test.go:7", site.Detail)
+	if site.File != "pkg/foo_test.go" || site.Line != 7 {
+		t.Errorf("site location = %s:%d, want pkg/foo_test.go:7", site.File, site.Line)
+	}
+	if !strings.Contains(site.Detail, "free-floating") {
+		t.Errorf("Detail = %q, want it to give the reason the comment binds nothing", site.Detail)
 	}
 }
 
