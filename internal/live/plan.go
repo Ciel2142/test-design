@@ -147,6 +147,9 @@ func validatePredicate(pred Predicate) error {
 		if _, err := strconv.Atoi(pred.Value); err != nil {
 			return fmt.Errorf("live plan: inexpressible-predicate exit-code value %q", pred.Value)
 		}
+		if pred.Stream != "" {
+			return fmt.Errorf("live plan: inexpressible-predicate exit-code stream %q", pred.Stream)
+		}
 	case "matches", "not-matches":
 		if pred.Stream != "stdout" && pred.Stream != "stderr" && pred.Stream != "combined" {
 			return fmt.Errorf("live plan: inexpressible-predicate %s stream %q", pred.Form, pred.Stream)
@@ -180,7 +183,10 @@ func isEndpointShaped(token string) bool {
 
 func endpointDeclared(token string, declared []string) bool {
 	for _, d := range declared {
-		if token == d || strings.HasPrefix(token, d) {
+		if token == d {
+			return true
+		}
+		if strings.HasPrefix(token, d) && strings.ContainsRune("/?#", rune(token[len(d)])) {
 			return true
 		}
 	}

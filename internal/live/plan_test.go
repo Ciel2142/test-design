@@ -333,6 +333,33 @@ func TestValidateInexpressiblePredicateNonIntegerExitCode(t *testing.T) {
 	}
 }
 
+func TestValidateInexpressiblePredicateExitCodeWithStream(t *testing.T) {
+	pl := &Plan{
+		SchemaVersion: evidence.SchemaVersion,
+		Steps: []Step{
+			{
+				Expectation: "step runs",
+				Command:     []string{"./scripts/walk.sh"},
+				Predicates: []Predicate{
+					{Form: "exit-code", Stream: "stdout", Value: "0"},
+				},
+				SCBindings: []string{"SC-1", "SC-2"},
+			},
+		},
+	}
+
+	err := pl.Validate(planProfile(), applicableRows(), map[string]bool{"SC-3": true})
+	if err == nil {
+		t.Fatal("Validate() returned nil error, want inexpressible-predicate (exit-code takes no stream)")
+	}
+	if !strings.Contains(err.Error(), "inexpressible-predicate") {
+		t.Errorf("error = %q, want it to contain inexpressible-predicate", err.Error())
+	}
+	if !strings.Contains(err.Error(), "stdout") {
+		t.Errorf("error = %q, want it to name the offending stream", err.Error())
+	}
+}
+
 func TestValidateInexpressiblePredicateBadRegex(t *testing.T) {
 	pl := &Plan{
 		SchemaVersion: evidence.SchemaVersion,
@@ -450,6 +477,26 @@ func TestValidateAcceptsDeclaredEndpointWithPathSuffix(t *testing.T) {
 
 	if err := pl.Validate(planProfile(), applicableRows(), map[string]bool{"SC-3": true}); err != nil {
 		t.Errorf("Validate() = %v, want nil for declared endpoint with path suffix", err)
+	}
+}
+
+func TestValidateUndeclaredEndpointRejectsNumericallyAdjacentPort(t *testing.T) {
+	pl := &Plan{
+		SchemaVersion: evidence.SchemaVersion,
+		Steps: []Step{
+			rowStep([]string{"./scripts/walk.sh", "http://127.0.0.1:80990/foo"}, []string{"SC-1", "SC-2"}),
+		},
+	}
+
+	err := pl.Validate(planProfile(), applicableRows(), map[string]bool{"SC-3": true})
+	if err == nil {
+		t.Fatal("Validate() returned nil error, want undeclared-endpoint (8099 is a string-prefix of 80990, not a boundary match)")
+	}
+	if !strings.Contains(err.Error(), "undeclared-endpoint") {
+		t.Errorf("error = %q, want it to contain undeclared-endpoint", err.Error())
+	}
+	if !strings.Contains(err.Error(), "http://127.0.0.1:80990/foo") {
+		t.Errorf("error = %q, want it to name the offending token", err.Error())
 	}
 }
 
