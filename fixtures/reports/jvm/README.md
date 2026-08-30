@@ -156,6 +156,20 @@ check needs real examples of what it must normalize:
   parameterized invocations `oneFailing(int)[1]`, `[2]`, `[3]`. Gradle names
   them `[1] 1`, `[2] 2`, `[3] 3` (index + the JUnit5-generated argument
   display).
+- **Nested-class test routing**: for a top-level class with a `@Nested`
+  inner class (`SimpleTest`/`SimpleIT`), Maven Surefire/Failsafe route ALL
+  of the outer class's own testcase results — not just the nested ones —
+  into the sibling `$NestedCases` suite file. `maven-surefire/TEST-com.example.verifier.SimpleTest.xml`
+  and `maven-failsafe/TEST-com.example.verifier.SimpleIT.xml` are each a
+  well-formed, near-empty `<testsuite ... tests="0" ...>` with a `<properties>`
+  block and no `<testcase>` children; every one of `passingTest`,
+  `failingAssertionTest`, `disabledTest`, and `throwingExceptionTest` shows
+  up instead in `TEST-com.example.verifier.SimpleTest$NestedCases.xml` /
+  `SimpleIT$NestedCases.xml` alongside `nestedPassingTest`. Gradle's writer
+  does not do this: `gradle-java/TEST-com.example.verifier.SimpleTest.xml`
+  and `gradle-kotlin/TEST-com.example.verifier.SimpleTest.xml` legitimately
+  hold `tests="4"` with all four outer-class testcases present, and the
+  nested class gets its own separate `tests="1"` file as expected.
 
 ## Hand-crafted rejection fixtures
 
