@@ -58,6 +58,12 @@ func TestGoTarget(t *testing.T) {
 			wantCommand: []string{"go", "test", "-count=1", "test-design/internal/widget", "-run", `^TestAdd\[special\]$`},
 		},
 		{
+			name:    "rejects two non-flag tokens as ambiguous (e.g. a two-token flag value)",
+			cfg:     coverage.RunnerConfig{Kind: "go", Command: []string{"go", "test", "-count=1", "-timeout", "300s", "./..."}},
+			id:      Identity{Scope: "test-design/internal/widget", Name: "TestAdd"},
+			wantErr: "non-flag arguments",
+		},
+		{
 			name:    "rejects a missing -count=1",
 			cfg:     coverage.RunnerConfig{Kind: "go", Command: []string{"go", "test", "-json", "./..."}},
 			id:      Identity{Scope: "test-design/internal/widget", Name: "TestAdd"},

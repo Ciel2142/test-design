@@ -32,16 +32,19 @@ func GoTarget(cfg coverage.RunnerConfig, id Identity) (Target, error) {
 	}
 
 	cmd := slices.Clone(cfg.Command)
-	// The package pattern is the sole non-flag argument after the binary and
-	// subcommand (go test -count=1 -json ./...); substitute it in place so
-	// every other configured argument keeps its position, or append if the
-	// command names no package at all.
+	// package pattern = sole non-flag token after "go test". 2+ non-flag
+	// tokens is ambiguous (e.g. two-token "-timeout 300s" flag shape) —
+	// guessing would risk clobbering a flag's value, so fail closed.
 	pkgIdx := -1
+	nonFlagCount := 0
 	for i := 2; i < len(cmd); i++ {
 		if !strings.HasPrefix(cmd[i], "-") {
+			nonFlagCount++
 			pkgIdx = i
-			break
 		}
+	}
+	if nonFlagCount > 1 {
+		return Target{}, fmt.Errorf("mutation: GoTarget: command %v has %d non-flag arguments after go test; expected at most one package pattern", cfg.Command, nonFlagCount)
 	}
 	switch {
 	case pkgIdx == -1:

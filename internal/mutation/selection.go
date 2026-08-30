@@ -40,7 +40,10 @@ func goFamilyMember(name, want string) bool {
 	return name == want || strings.HasPrefix(name, want+"/")
 }
 
-// VerifyJVMSelection proves res is the targeted family run alone.
+// VerifyJVMSelection proves res is the targeted family run alone. Record
+// names match id.Name exactly — junitxml.Merge already strips any
+// parameterized decoration to the bare declared method before jvmrun.Run
+// builds a Record, so no decoration ever survives into res.Records.
 // res.NormalizationError means the report cannot be trusted at all, so no
 // verdict is possible; it is checked before anything else. An Unsupported
 // family within id.Scope is checked next: the target command already
@@ -60,7 +63,7 @@ func VerifyJVMSelection(res *jvmrun.Result, id Identity) error {
 		}
 	}
 	for _, r := range res.Records {
-		if !jvmScopeMember(r.Scope, id.Scope) || !jvmFamilyMember(r.Name, id.Name) {
+		if !jvmScopeMember(r.Scope, id.Scope) || r.Name != id.Name {
 			return fmt.Errorf("%w: record %s.%s ran outside %s.%s", ErrForeignIdentity, r.Scope, r.Name, id.Scope, id.Name)
 		}
 	}
@@ -69,8 +72,4 @@ func VerifyJVMSelection(res *jvmrun.Result, id Identity) error {
 
 func jvmScopeMember(scope, want string) bool {
 	return scope == want || strings.HasPrefix(scope, want+"$")
-}
-
-func jvmFamilyMember(name, want string) bool {
-	return name == want || strings.HasPrefix(name, want+"[") || strings.HasPrefix(name, want+"(")
 }

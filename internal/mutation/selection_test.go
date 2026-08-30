@@ -102,13 +102,6 @@ func TestVerifyJVMSelection(t *testing.T) {
 			}},
 		},
 		{
-			name: "accepts a parameterized decoration of the name",
-			res: &jvmrun.Result{Records: []runrecord.Record{
-				rec(runrecord.Passed, id.Scope, "adds(int)[1]"),
-				rec(runrecord.Failed, id.Scope, "adds(int)[2]"),
-			}},
-		},
-		{
 			name: "rejects a foreign class",
 			res: &jvmrun.Result{Records: []runrecord.Record{
 				rec(runrecord.Passed, id.Scope, "adds"),
@@ -183,6 +176,44 @@ func TestVerifyJVMSelection(t *testing.T) {
 			}
 			checkSelectionErr(t, err, tc.wantErr, tc.wantNames)
 		})
+	}
+}
+
+// recordsFromFamilies mirrors jvmrun.Run's family-to-Record step, so a test
+// built on it exercises the same shape VerifyJVMSelection actually receives:
+// junitxml.Merge already collapses parameterized decoration to the bare
+// declared method, so a derivable family produces exactly one clean Record.
+func recordsFromFamilies(t *testing.T, docs ...*junitxml.Document) []runrecord.Record {
+	t.Helper()
+	report, err := junitxml.Merge(docs)
+	if err != nil {
+		t.Fatalf("junitxml.Merge: %v", err)
+	}
+	var records []runrecord.Record
+	for _, f := range report.Families {
+		name := f.Identity.Method
+		if f.Identity.Unsupported != "" {
+			name = f.Cases[0].RawName
+		}
+		records = append(records, rec(f.Status, f.Identity.ClassName, name))
+	}
+	return records
+}
+
+func TestVerifyJVMSelectionAcceptsRealMavenParameterizedFamily(t *testing.T) {
+	id := Identity{Scope: "com.example.ParamTest", Name: "oneFailing"}
+	doc := &junitxml.Document{Cases: []junitxml.Case{
+		{Status: runrecord.Passed, ClassName: id.Scope, RawName: "oneFailing(int)[1]"},
+		{Status: runrecord.Failed, ClassName: id.Scope, RawName: "oneFailing(int)[2]"},
+	}}
+	records := recordsFromFamilies(t, doc)
+	if len(records) != 1 || records[0].Name != "oneFailing" {
+		t.Fatalf("records = %+v, want exactly one clean %q record", records, "oneFailing")
+	}
+
+	res := &jvmrun.Result{Records: records}
+	if err := VerifyJVMSelection(res, id); err != nil {
+		t.Fatalf("VerifyJVMSelection: %v", err)
 	}
 }
 
