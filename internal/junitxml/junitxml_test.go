@@ -256,6 +256,34 @@ func TestNormalizeFileMissingClassnameFixtureErrors(t *testing.T) {
 	}
 }
 
+func TestNormalizeFileDoctypeInsideTestsuiteBodyRejected(t *testing.T) {
+	input := `<testsuite name="s" tests="1"><!DOCTYPE evil><testcase classname="pkg.A" name="one"/></testsuite>`
+	doc, err := NormalizeFile(strings.NewReader(input))
+	if err == nil {
+		t.Fatalf("NormalizeFile returned nil error with %+v, want error", doc)
+	}
+	if doc != nil {
+		t.Errorf("NormalizeFile returned %+v alongside error, want nil *Document", doc)
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "doctype") {
+		t.Errorf("error = %q, want it to name DOCTYPE", err.Error())
+	}
+}
+
+func TestNormalizeFileDoctypeInsideTestcaseBodyRejected(t *testing.T) {
+	input := `<testsuite name="s" tests="1"><testcase classname="pkg.A" name="one"><!DOCTYPE evil><failure/></testcase></testsuite>`
+	doc, err := NormalizeFile(strings.NewReader(input))
+	if err == nil {
+		t.Fatalf("NormalizeFile returned nil error with %+v, want error", doc)
+	}
+	if doc != nil {
+		t.Errorf("NormalizeFile returned %+v alongside error, want nil *Document", doc)
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "doctype") {
+		t.Errorf("error = %q, want it to name DOCTYPE", err.Error())
+	}
+}
+
 func TestNormalizeFileTestcaseMissingNameErrors(t *testing.T) {
 	input := `<testsuite name="s" tests="1"><testcase classname="pkg.A"/></testsuite>`
 	doc, err := NormalizeFile(strings.NewReader(input))
