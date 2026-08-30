@@ -29,12 +29,17 @@ type classFrame struct {
 	depth int
 }
 
-// scanStructure returns the declared package and, per token index, the
-// enclosing class chain as Outer$Inner ("" = top level). Fails closed on
-// brace imbalance at EOF.
-func scanStructure(toks []Token, lang Lang) (string, []string, error) {
+type fileStructure struct {
+	pkg       string
+	enclosing []string // per token: enclosing chain Outer$Inner, "" = top level
+	member    []bool   // per token: directly at class-body depth
+}
+
+// fails closed on brace imbalance at EOF
+func scanStructure(toks []Token, lang Lang) (*fileStructure, error) {
 	pkg := ""
 	enclosing := make([]string, len(toks))
+	member := make([]bool, len(toks))
 	var stack []classFrame
 	depth := 0
 	pendingClass := ""
@@ -50,16 +55,20 @@ func scanStructure(toks []Token, lang Lang) (string, []string, error) {
 
 	for i, tk := range toks {
 		enclosing[i] = current()
+		member[i] = len(stack) > 0 && depth == stack[len(stack)-1].depth
 		switch {
 		case tk.Kind == TokIdent && tk.Text == "package" && depth == 0 && pkg == "":
 			var parts []string
+			wantIdent := true
 			for j := i + 1; j < len(toks); j++ {
 				t := toks[j]
-				if t.Kind == TokIdent {
+				if wantIdent && t.Kind == TokIdent {
 					parts = append(parts, t.Text)
-				} else if t.Text != "." {
+				} else if !wantIdent && t.Text == "." {
+				} else {
 					break
 				}
+				wantIdent = !wantIdent
 			}
 			pkg = strings.Join(parts, ".")
 		case tk.Kind == TokIdent && isClassKeyword(tk.Text, lang) && !precededByColonColon(toks, i):
@@ -84,7 +93,7 @@ func scanStructure(toks []Token, lang Lang) (string, []string, error) {
 			}
 			depth--
 			if depth < 0 {
-				return "", nil, fmt.Errorf("unbalanced braces: extra } at line %d", tk.Line)
+				return nil, fmt.Errorf("unbalanced braces: extra } at line %d", tk.Line)
 			}
 		case tk.Text == ";" || tk.Text == "=":
 			pendingKeyword = false
@@ -92,9 +101,9 @@ func scanStructure(toks []Token, lang Lang) (string, []string, error) {
 		}
 	}
 	if depth != 0 {
-		return "", nil, fmt.Errorf("unbalanced braces: %d unclosed at EOF", depth)
+		return nil, fmt.Errorf("unbalanced braces: %d unclosed at EOF", depth)
 	}
-	return pkg, enclosing, nil
+	return &fileStructure{pkg: pkg, enclosing: enclosing, member: member}, nil
 }
 
 func precededByColonColon(toks []Token, i int) bool {

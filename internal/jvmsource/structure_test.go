@@ -8,11 +8,11 @@ func mustStructure(t *testing.T, src string, lang Lang) (string, []Token, []stri
 	if err != nil {
 		t.Fatalf("Lex: %v", err)
 	}
-	pkg, enclosing, err := scanStructure(toks, lang)
+	st, err := scanStructure(toks, lang)
 	if err != nil {
 		t.Fatalf("scanStructure: %v", err)
 	}
-	return pkg, toks, enclosing
+	return st.pkg, toks, st.enclosing
 }
 
 func enclosingOf(toks []Token, enclosing []string, text string) (string, bool) {
@@ -81,7 +81,7 @@ func TestStructure_BraceImbalanceFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Lex: %v", err)
 	}
-	if _, _, err := scanStructure(toks, LangJava); err == nil {
+	if _, err := scanStructure(toks, LangJava); err == nil {
 		t.Fatal("want error on unbalanced braces, got nil")
 	}
 }
