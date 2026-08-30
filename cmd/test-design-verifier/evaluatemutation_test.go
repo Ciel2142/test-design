@@ -2,10 +2,14 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"test-design/internal/coverage"
+	"test-design/internal/mutation"
 )
 
 func evaluateMutationRequestJSON(t *testing.T, repo, runID, runDir, site string, lastSite bool) string {
@@ -453,6 +457,72 @@ func TestEvaluateMutation_AttachFailureOnRemovedWorktree(t *testing.T) {
 	got := decodeCLIError(t, stderr)
 	if got.Code != "worktree-attach-failed" {
 		t.Errorf("error code = %q, want worktree-attach-failed", got.Code)
+	}
+}
+
+// fake command, no real JVM toolchain needed: all target records pass but
+// exit is nonzero (auxiliary task failure), must not read as survived.
+func TestRunTargetedAndVerify_JVMAllPassNonzeroExitYieldsUnexplainedFailure(t *testing.T) {
+	src := &coverage.Source{Runner: coverage.RunnerConfig{Kind: "maven", Root: "."}}
+	target := mutation.Target{
+		Command: []string{"sh", "-c", `mkdir -p reports && cat > reports/a.xml <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.ATest" tests="1">
+  <testcase classname="com.example.ATest" name="adds"/>
+</testsuite>
+EOF
+exit 3`},
+		ReportGlobs: []string{"reports/*.xml"},
+	}
+	id := mutation.Identity{Scope: "com.example.ATest", Name: "adds"}
+
+	outcome, exitStatus, cliErr := runTargetedAndVerify("evaluate-mutation", src, "", t.TempDir(), t.TempDir(), target, id)
+
+	if cliErr == nil {
+		t.Fatalf("cliErr = nil, outcome = %q, want an error: every record passed but the command exited nonzero", outcome)
+	}
+	if cliErr.Code != "unexplained-runner-failure" {
+		t.Errorf("cliErr.Code = %q, want unexplained-runner-failure", cliErr.Code)
+	}
+	if outcome != "" {
+		t.Errorf("outcome = %q, want empty on error", outcome)
+	}
+	if exitStatus != 3 {
+		t.Errorf("exitStatus = %d, want 3", exitStatus)
+	}
+}
+
+func TestMapSelectionErr(t *testing.T) {
+	cases := []struct {
+		err  error
+		want string
+	}{
+		{mutation.ErrZeroSelection, "zero-selection"},
+		{mutation.ErrForeignIdentity, "foreign-identity"},
+		{mutation.ErrUnsupportedIdentity, "unsupported-test-identity"},
+		{errors.New("some other failure"), "normalization-failed"},
+	}
+	for _, c := range cases {
+		if got := mapSelectionErr(c.err); got != c.want {
+			t.Errorf("mapSelectionErr(%v) = %q, want %q", c.err, got, c.want)
+		}
+	}
+}
+
+func TestPoliceDiffCode(t *testing.T) {
+	cases := []struct {
+		err  error
+		want string
+	}{
+		{mutation.ErrEmptyDiff, "empty-diff"},
+		{mutation.ErrMultiSite, "multi-site-diff"},
+		{mutation.ErrForeignDiff, "foreign-diff"},
+		{errors.New("some other failure"), "diff-police-failed"},
+	}
+	for _, c := range cases {
+		if got := policeDiffCode(c.err); got != c.want {
+			t.Errorf("policeDiffCode(%v) = %q, want %q", c.err, got, c.want)
+		}
 	}
 }
 

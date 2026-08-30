@@ -112,9 +112,9 @@ func evaluateMutationHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Wri
 }
 
 // evaluateMutationOp is the evaluate-mutation op body. between runs after the
-// last site's worktree disposal, before the final snapshot re-check; it is
-// nil in production and exists so a test can mutate the original repository
-// at exactly the moment the op is blind to it.
+// last site's worktree disposal and before the final snapshot re-check; it
+// is nil in production and exists so a test can mutate the original
+// repository at exactly the moment the op is blind to it.
 func evaluateMutationOp(req *evaluateMutationRequest, stdout io.Writer, between func()) *cliError {
 	src, cliErr := loadVerifiedSource("evaluate-mutation", req.RepoRoot, req.CoverageSource)
 	if cliErr != nil {
@@ -317,7 +317,15 @@ func runTargetedAndVerify(op string, src *coverage.Source, suiteDir, wtPath, dir
 	if allSkipped(res.Records) {
 		return "", res.ExitStatus, zeroSelectionError(op, id)
 	}
-	return recordsOutcome(res.Records), res.ExitStatus, nil
+	jvmOutcome := recordsOutcome(res.Records)
+	if jvmOutcome == "survived" && res.ExitStatus != 0 {
+		return "", res.ExitStatus, &cliError{
+			Code: "unexplained-runner-failure",
+			Message: fmt.Sprintf("%s: runner exited %d with every %s.%s record passing; an auxiliary task failure still prevents a mutation verdict",
+				op, res.ExitStatus, id.Scope, id.Name),
+		}
+	}
+	return jvmOutcome, res.ExitStatus, nil
 }
 
 func zeroSelectionError(op string, id mutation.Identity) *cliError {

@@ -11,10 +11,9 @@ import (
 	"test-design/internal/mutation"
 )
 
-// The zero-selection and foreign-identity selection-layer refusals are
-// already proven end-to-end at the op boundary by
-// TestEvaluateMutation_ZeroSelectionOnAlwaysSkippedIdentity and
-// TestEvaluateMutation_TestFileDiffRefusedAsForeign in evaluatemutation_test.go;
+// The zero-selection and foreign-diff refusals are already proven end-to-end
+// at the op boundary by TestEvaluateMutation_ZeroSelectionOnAlwaysSkippedIdentity
+// and TestEvaluateMutation_TestFileDiffRefusedAsForeign in evaluatemutation_test.go;
 // no honest e2e construction adds anything those op tests don't already cover.
 
 const (
