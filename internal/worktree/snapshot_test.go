@@ -1,6 +1,7 @@
 package worktree
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -256,5 +257,83 @@ func TestTakeSnapshotLeavesStatusUnchanged(t *testing.T) {
 
 	if before != after {
 		t.Errorf("git status --porcelain changed after TakeSnapshot:\nbefore: %q\nafter:  %q", before, after)
+	}
+}
+
+func TestSnapshotJSONRoundTripMatchesCompareBehavior(t *testing.T) {
+	dir := newTestRepo(t)
+	ctrl, err := NewController(dir)
+	if err != nil {
+		t.Fatalf("NewController: %v", err)
+	}
+
+	original, err := ctrl.TakeSnapshot()
+	if err != nil {
+		t.Fatalf("TakeSnapshot: %v", err)
+	}
+
+	data, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	var loaded Snapshot
+	if err := json.Unmarshal(data, &loaded); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("mutated\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "scratch.txt"), []byte("scratch\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	fresh, err := ctrl.TakeSnapshot()
+	if err != nil {
+		t.Fatalf("TakeSnapshot fresh: %v", err)
+	}
+
+	wantEqual, wantDiffering := Compare(original, fresh)
+	gotEqual, gotDiffering := Compare(&loaded, fresh)
+
+	if gotEqual != wantEqual {
+		t.Errorf("Compare(loaded, fresh) equal = %v, want %v", gotEqual, wantEqual)
+	}
+	if !reflect.DeepEqual(gotDiffering, wantDiffering) {
+		t.Errorf("Compare(loaded, fresh) differing = %v, want %v", gotDiffering, wantDiffering)
+	}
+}
+
+func TestSnapshotUnmarshalMissingFieldFailsClosed(t *testing.T) {
+	full := map[string]any{
+		"headCommit":      "abc123",
+		"indexTree":       "def456",
+		"porcelainStatus": "",
+		"untrackedHashes": map[string]string{},
+	}
+
+	for _, missing := range []string{"headCommit", "indexTree", "porcelainStatus", "untrackedHashes"} {
+		t.Run(missing, func(t *testing.T) {
+			doc := make(map[string]any, len(full)-1)
+			for k, v := range full {
+				if k != missing {
+					doc[k] = v
+				}
+			}
+			data, err := json.Marshal(doc)
+			if err != nil {
+				t.Fatalf("Marshal fixture: %v", err)
+			}
+
+			var s Snapshot
+			err = json.Unmarshal(data, &s)
+			if err == nil {
+				t.Fatalf("Unmarshal missing %q = nil, want error", missing)
+			}
+			if !errors.Is(err, ErrSnapshotFieldMissing) {
+				t.Errorf("Unmarshal error = %v, want it to wrap ErrSnapshotFieldMissing", err)
+			}
+		})
 	}
 }

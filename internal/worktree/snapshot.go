@@ -1,6 +1,7 @@
 package worktree
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -18,6 +19,10 @@ var (
 	// ErrUnbornHead is wrapped into TakeSnapshot's error when HEAD has no
 	// commits yet (a freshly initialized repository).
 	ErrUnbornHead = errors.New("HEAD is unborn: no commits yet")
+	// ErrSnapshotFieldMissing is wrapped into UnmarshalJSON's error when the
+	// document omits one of Snapshot's four captured dimensions: fail
+	// closed rather than yield a Snapshot that compares equal to anything.
+	ErrSnapshotFieldMissing = errors.New("snapshot document missing required field")
 )
 
 // Snapshot captures the state of the original repository at one point in
@@ -67,6 +72,55 @@ func (c *Controller) TakeSnapshot() (*Snapshot, error) {
 // untracked files present — equivalent to an empty porcelain status.
 func (s *Snapshot) Clean() bool {
 	return strings.TrimSpace(s.porcelainStatus) == ""
+}
+
+// snapshotDoc is Snapshot's JSON wire form, letting one process take a
+// snapshot and a later process load it back for Compare.
+type snapshotDoc struct {
+	HeadCommit      string            `json:"headCommit"`
+	IndexTree       string            `json:"indexTree"`
+	PorcelainStatus string            `json:"porcelainStatus"`
+	UntrackedHashes map[string]string `json:"untrackedHashes"`
+}
+
+// MarshalJSON serializes all four dimensions TakeSnapshot captures.
+func (s *Snapshot) MarshalJSON() ([]byte, error) {
+	data, err := json.Marshal(snapshotDoc{
+		HeadCommit:      s.headCommit,
+		IndexTree:       s.indexTree,
+		PorcelainStatus: s.porcelainStatus,
+		UntrackedHashes: s.untrackedHashes,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("marshal snapshot: %w", err)
+	}
+	return data, nil
+}
+
+// UnmarshalJSON requires all four dimensions to be present; porcelainStatus
+// legitimately serializes as "" for a clean repo, so presence — not a
+// non-empty check — is what distinguishes a missing field from a clean one.
+func (s *Snapshot) UnmarshalJSON(data []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("unmarshal snapshot: %w", err)
+	}
+	for _, key := range []string{"headCommit", "indexTree", "porcelainStatus", "untrackedHashes"} {
+		if _, ok := raw[key]; !ok {
+			return fmt.Errorf("unmarshal snapshot: %w: %q", ErrSnapshotFieldMissing, key)
+		}
+	}
+
+	var doc snapshotDoc
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return fmt.Errorf("unmarshal snapshot: %w", err)
+	}
+
+	s.headCommit = doc.HeadCommit
+	s.indexTree = doc.IndexTree
+	s.porcelainStatus = doc.PorcelainStatus
+	s.untrackedHashes = doc.UntrackedHashes
+	return nil
 }
 
 func untrackedPaths(porcelain string) []string {
