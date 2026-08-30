@@ -23,6 +23,7 @@ type BaselineIdentity struct {
 type Baseline struct {
 	evidence.Envelope
 	RepoCommit         string             `json:"repoCommit"`
+	BaselineCommit     string             `json:"baselineCommit"`
 	RunnerKind         string             `json:"runnerKind"`
 	Command            []string           `json:"command"`
 	ToolVersions       map[string]string  `json:"toolVersions"`

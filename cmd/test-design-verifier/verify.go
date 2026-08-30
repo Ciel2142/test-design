@@ -278,18 +278,26 @@ func writeNormalizedReport(op, runDir string, rep *gotestjson.Report) (string, *
 	return sum, nil
 }
 
-var secretArgPattern = regexp.MustCompile(`(?i)^(-{0,2}[A-Za-z0-9_.-]*(token|secret|password|passwd|api[_-]?key|credential)[A-Za-z0-9_.-]*)=.*$`)
+var (
+	secretArgPattern  = regexp.MustCompile(`(?i)^(-{0,2}[A-Za-z0-9_.-]*(token|secret|password|passwd|api[_-]?key|credential)[A-Za-z0-9_.-]*)=.*$`)
+	secretFlagPattern = regexp.MustCompile(`(?i)^-{1,2}[A-Za-z0-9_.-]*(token|secret|password|passwd|api[_-]?key|credential)[A-Za-z0-9_.-]*$`)
+)
 
 // redactCommand keeps the command reproducible in evidence without carrying a
 // credential a coverage source may have inlined into an argument.
 func redactCommand(command []string) []string {
 	redacted := make([]string, len(command))
-	for i, arg := range command {
+	for i := 0; i < len(command); i++ {
+		arg := command[i]
 		if m := secretArgPattern.FindStringSubmatch(arg); m != nil {
 			redacted[i] = m[1] + "=REDACTED"
 			continue
 		}
 		redacted[i] = arg
+		if secretFlagPattern.MatchString(arg) && i+1 < len(command) {
+			i++
+			redacted[i] = "REDACTED"
+		}
 	}
 	return redacted
 }

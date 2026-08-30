@@ -1,6 +1,7 @@
 package trace
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,6 +29,55 @@ func newBaselineFixture() *Baseline {
 		StartedAt:    "2026-08-30T00:00:00Z",
 		FinishedAt:   "2026-08-30T00:01:00Z",
 		ExitStatus:   1,
+	}
+}
+
+func TestBaselineCommitRoundTripsDistinctFromRepoCommit(t *testing.T) {
+	b := newBaselineFixture()
+	b.BaselineCommit = "base456"
+	path := filepath.Join(t.TempDir(), "baseline.json")
+	if err := WriteBaseline(path, b); err != nil {
+		t.Fatalf("WriteBaseline: %v", err)
+	}
+	got, err := LoadBaseline(path, "")
+	if err != nil {
+		t.Fatalf("LoadBaseline: %v", err)
+	}
+	if got.BaselineCommit != "base456" || got.RepoCommit != "abc123" {
+		t.Errorf("BaselineCommit = %q, RepoCommit = %q; want base456 / abc123", got.BaselineCommit, got.RepoCommit)
+	}
+}
+
+func TestLoadBaselineOldEvidenceWithoutBaselineCommitDecodesEmpty(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "baseline.json")
+	if err := WriteBaseline(path, newBaselineFixture()); err != nil {
+		t.Fatalf("WriteBaseline: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	delete(raw, "baselineCommit")
+	old, err := json.Marshal(raw)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if err := os.WriteFile(path, old, 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	got, err := LoadBaseline(path, "")
+	if err != nil {
+		t.Fatalf("LoadBaseline on old evidence: %v", err)
+	}
+	if got.BaselineCommit != "" {
+		t.Errorf("BaselineCommit = %q, want empty for old evidence", got.BaselineCommit)
+	}
+	if got.RepoCommit != "abc123" {
+		t.Errorf("RepoCommit = %q, want abc123", got.RepoCommit)
 	}
 }
 

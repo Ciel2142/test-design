@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -89,6 +90,22 @@ func TestTrace_BaselineOutsideRepoIsNeverRead(t *testing.T) {
 }
 
 // only go test's own trailing result line is volatile; a panic's duration is evidence
+func TestRedactCommand_TwoArgumentSecretFlagRedactsValue(t *testing.T) {
+	got := redactCommand([]string{"mvn", "--token", "hunter2", "--password", "s3cret", "-Dkey=1", "verify"})
+	want := []string{"mvn", "--token", "REDACTED", "--password", "REDACTED", "-Dkey=1", "verify"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("redactCommand = %v, want %v", got, want)
+	}
+}
+
+func TestRedactCommand_TrailingSecretFlagWithoutValueUnchanged(t *testing.T) {
+	got := redactCommand([]string{"mvn", "--token"})
+	want := []string{"mvn", "--token"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("redactCommand = %v, want %v", got, want)
+	}
+}
+
 func TestCanonicalizeReport_ScrubsOnlyTheTrailingResultLine(t *testing.T) {
 	rep := &gotestjson.Report{
 		Failures: []gotestjson.RunnerFailure{{

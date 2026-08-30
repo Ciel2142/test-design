@@ -152,6 +152,9 @@ func TestBaseline_E2EPublishesEvidenceBesideCoverageDoc(t *testing.T) {
 	if b.RepoCommit == "" || b.RepoCommit != strings.TrimSpace(mustGit(t, repo, "rev-parse", "HEAD~1")) {
 		t.Errorf("repoCommit = %q, want the coverage doc's BASELINE_COMMIT", b.RepoCommit)
 	}
+	if b.BaselineCommit != b.RepoCommit {
+		t.Errorf("baselineCommit = %q, want the baseline commit %q recorded explicitly", b.BaselineCommit, b.RepoCommit)
+	}
 	if b.NormalizationError != "" {
 		t.Errorf("normalizationError = %q, want empty", b.NormalizationError)
 	}

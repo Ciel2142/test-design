@@ -58,9 +58,9 @@ func Merge(docs []*Document) (*Report, error) {
 	families := map[familyKey]*Family{}
 	var order []familyKey
 
-	for _, doc := range docs {
+	for i, doc := range docs {
 		if doc == nil {
-			continue
+			return nil, fmt.Errorf("junitxml: merge: nil document at index %d", i)
 		}
 		for _, c := range doc.Cases {
 			switch c.Status {

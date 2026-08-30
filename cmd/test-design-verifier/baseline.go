@@ -85,6 +85,7 @@ func baselineHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer) *cl
 	b := &trace.Baseline{
 		Envelope:           evidence.Envelope{SchemaVersion: evidence.SchemaVersion, VerifierVersion: evidence.VerifierVersion},
 		RepoCommit:         src.BaselineCommit,
+		BaselineCommit:     src.BaselineCommit,
 		RunnerKind:         src.Runner.Kind,
 		Command:            redactCommand(src.Runner.Command),
 		ToolVersions:       toolVersions(suiteDir, src.Runner.Command),

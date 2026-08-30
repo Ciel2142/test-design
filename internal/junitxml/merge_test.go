@@ -2,6 +2,7 @@ package junitxml
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"test-design/internal/runrecord"
@@ -17,6 +18,20 @@ func TestMergeNoDocumentsProducesEmptyReport(t *testing.T) {
 	}
 	if report.Counts != (Counts{}) {
 		t.Errorf("Counts = %+v, want zero value", report.Counts)
+	}
+}
+
+func TestMergeNilDocumentErrors(t *testing.T) {
+	docs := []*Document{
+		{Cases: []Case{{Status: runrecord.Passed, ClassName: "pkg.A", RawName: "one"}}},
+		nil,
+	}
+	_, err := Merge(docs)
+	if err == nil {
+		t.Fatal("Merge with nil document: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "nil document") {
+		t.Errorf("error %q does not name the nil document", err)
 	}
 }
 
