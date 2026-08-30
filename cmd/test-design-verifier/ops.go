@@ -31,6 +31,10 @@ var ops = map[string]opSpec{
 		newFlags: newTraceFlags,
 		handler:  traceHandler,
 	},
+	"prepare-mutation": {
+		newFlags: newPrepareMutationFlags,
+		handler:  prepareMutationHandler,
+	},
 }
 
 func newNextIDFlags() *flag.FlagSet {
@@ -57,6 +61,12 @@ func newBaselineFlags() *flag.FlagSet {
 
 func newTraceFlags() *flag.FlagSet {
 	fs := flag.NewFlagSet("trace", flag.ContinueOnError)
+	addRequestFlag(fs)
+	return fs
+}
+
+func newPrepareMutationFlags() *flag.FlagSet {
+	fs := flag.NewFlagSet("prepare-mutation", flag.ContinueOnError)
 	addRequestFlag(fs)
 	return fs
 }
