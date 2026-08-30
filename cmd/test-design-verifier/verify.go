@@ -17,6 +17,7 @@ import (
 	"test-design/internal/coverage"
 	"test-design/internal/evidence"
 	"test-design/internal/gotestjson"
+	"test-design/internal/jvmrun"
 	"test-design/internal/runrecord"
 )
 
@@ -192,6 +193,36 @@ const (
 	stderrFile     = "runner-stderr.log"
 	normalizedFile = "normalized-report.json"
 )
+
+// runSuiteFor dispatches suite execution on runner kind: go through runSuite,
+// maven/gradle through jvmrun.Run. Both land on the shared suiteRun shape.
+func runSuiteFor(op string, src *coverage.Source, wtPath, runDir string) (*suiteRun, *cliError) {
+	if src.Runner.Kind == "go" {
+		suiteDir := filepath.Join(wtPath, filepath.FromSlash(src.Runner.Root))
+		return runSuite(op, suiteDir, runDir, src.Runner.Command)
+	}
+	res, err := jvmrun.Run(wtPath, runDir, src.Runner)
+	if err != nil {
+		code := "runner-start-failed"
+		if strings.Contains(err.Error(), "report-glob-escapes-root") {
+			code = "report-glob-escapes-root"
+		}
+		return nil, &cliError{Code: code, Message: fmt.Sprintf("%s: %v", op, err)}
+	}
+	sr := &suiteRun{
+		exitStatus:         res.ExitStatus,
+		startedAt:          res.StartedAt,
+		finishedAt:         res.FinishedAt,
+		normalizationError: res.NormalizationError,
+	}
+	if res.NormalizationError == "" {
+		sr.report = &gotestjson.Report{
+			Records: res.Records,
+			Counts:  gotestjson.Counts(res.Counts),
+		}
+	}
+	return sr, nil
+}
 
 // runSuite executes the coverage source's runner command inside dir and
 // normalizes its stdout. A nonzero exit is not an error here: callers decide

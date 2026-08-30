@@ -6,6 +6,7 @@ import (
 	"io"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -77,7 +78,7 @@ func baselineHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer) *cl
 	defer func() { _ = dispose() }()
 
 	suiteDir := filepath.Join(wt.Path, filepath.FromSlash(src.Runner.Root))
-	sr, cliErr := runSuite("baseline", suiteDir, runDir, src.Runner.Command)
+	sr, cliErr := runSuiteFor("baseline", src, wt.Path, runDir)
 	if cliErr != nil {
 		return cliErr
 	}
@@ -88,7 +89,7 @@ func baselineHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer) *cl
 		BaselineCommit:     src.BaselineCommit,
 		RunnerKind:         src.Runner.Kind,
 		Command:            redactCommand(src.Runner.Command),
-		ToolVersions:       toolVersions(suiteDir, src.Runner.Command),
+		ToolVersions:       toolVersions(suiteDir, src.Runner.Kind, src.Runner.Command),
 		StartedAt:          sr.startedAt,
 		FinishedAt:         sr.finishedAt,
 		ExitStatus:         sr.exitStatus,
@@ -164,14 +165,39 @@ func identities(records []runrecord.Record, want runrecord.Status) []trace.Basel
 
 // toolVersions is best-effort provenance: a toolchain that cannot report its
 // version does not invalidate the suite run that already succeeded with it.
-func toolVersions(dir string, command []string) map[string]string {
+func toolVersions(dir, kind string, command []string) map[string]string {
 	versions := map[string]string{}
-	cmd := exec.Command(command[0], "version")
-	cmd.Dir = dir
-	out, err := cmd.Output()
-	if err != nil {
-		return versions
+	switch kind {
+	case "maven":
+		addToolVersion(versions, dir, "mvn", command[0], "-B", "-version")
+		addToolVersion(versions, dir, "java", "java", "-version")
+	case "gradle":
+		addToolVersion(versions, dir, "gradle", command[0], "--version")
+		addToolVersion(versions, dir, "java", "java", "-version")
+	default:
+		addToolVersion(versions, dir, filepath.Base(command[0]), command[0], "version")
 	}
-	versions[filepath.Base(command[0])] = strings.TrimSpace(string(out))
 	return versions
+}
+
+var ansiEscapePattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+// addToolVersion stores the first informative output line. CombinedOutput
+// because java -version prints to stderr; ANSI stripped because mvn colors
+// its banner.
+func addToolVersion(versions map[string]string, dir, key, bin string, args ...string) {
+	cmd := exec.Command(bin, args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(ansiEscapePattern.ReplaceAllString(line, ""))
+		if line == "" || strings.HasPrefix(line, "-") {
+			continue
+		}
+		versions[key] = line
+		return
+	}
 }
