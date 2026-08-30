@@ -23,6 +23,14 @@ var ops = map[string]opSpec{
 		newFlags: newPreflightFlags,
 		handler:  preflightHandler,
 	},
+	"baseline": {
+		newFlags: newBaselineFlags,
+		handler:  baselineHandler,
+	},
+	"trace": {
+		newFlags: newTraceFlags,
+		handler:  traceHandler,
+	},
 }
 
 func newNextIDFlags() *flag.FlagSet {
@@ -37,6 +45,18 @@ func newPreflightFlags() *flag.FlagSet {
 	fs := flag.NewFlagSet("preflight", flag.ContinueOnError)
 	fs.String("source", "", "coverage source markdown path")
 	fs.String("repo", ".", "repository root")
+	addRequestFlag(fs)
+	return fs
+}
+
+func newBaselineFlags() *flag.FlagSet {
+	fs := flag.NewFlagSet("baseline", flag.ContinueOnError)
+	addRequestFlag(fs)
+	return fs
+}
+
+func newTraceFlags() *flag.FlagSet {
+	fs := flag.NewFlagSet("trace", flag.ContinueOnError)
 	addRequestFlag(fs)
 	return fs
 }
