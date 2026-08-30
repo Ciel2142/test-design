@@ -131,6 +131,9 @@ func baselineHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer) *cl
 	if err != nil {
 		return &cliError{Code: "publish-failed", Message: fmt.Sprintf("baseline: %v", err)}
 	}
+	if len(records) != 1 {
+		return &cliError{Code: "publish-failed", Message: fmt.Sprintf("baseline: publish returned %d records, want 1", len(records))}
+	}
 
 	out := baselineOutput{
 		Envelope:       evidence.Envelope{SchemaVersion: evidence.SchemaVersion, VerifierVersion: evidence.VerifierVersion},

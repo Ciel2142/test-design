@@ -180,3 +180,52 @@ func TestBaseline_SecondPublishOnStaleSnapshotRefused(t *testing.T) {
 		t.Errorf("stderr = %q, want the dirty refusal naming the first run's own output", stderr)
 	}
 }
+
+func verifierWorktrees(t *testing.T) []string {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(os.Getenv("TMPDIR"), "test-design-verifier-*", "worktrees", "wt-*"))
+	if err != nil {
+		t.Fatalf("glob worktrees: %v", err)
+	}
+	return matches
+}
+
+func TestBaseline_UnnormalizableRunIsNotPublished(t *testing.T) {
+	repo := fixtureRepo(t)
+	rewriteFixtureDoc(t, repo, func(s string) string {
+		return strings.ReplaceAll(s, `["go", "test", "-count=1", "-json", "./..."]`, `["go", "test", "-count=1", "-v", "./..."]`)
+	})
+	mustGit(t, repo, "add", "-A")
+	mustGit(t, repo, "commit", "-q", "-m", "runner that emits plain text, not test2json")
+
+	code, _, stderr := runVerifyOp(t, "baseline", verifyRequestJSON(t, repo, "unnormalizable"))
+
+	if code != exitError {
+		t.Fatalf("exit code = %d, want %d", code, exitError)
+	}
+	if !strings.Contains(stderr, "cannot publish an unnormalizable baseline") {
+		t.Errorf("stderr = %q, want the unnormalizable-baseline refusal", stderr)
+	}
+	if lines := gitStatusLines(t, repo); len(lines) != 0 {
+		t.Errorf("git status = %v, want nothing published", lines)
+	}
+	if left := verifierWorktrees(t); len(left) != 0 {
+		t.Errorf("worktrees left behind = %v, want the error path to have disposed of it", left)
+	}
+
+	matches, err := filepath.Glob(filepath.Join(os.Getenv("TMPDIR"), "test-design-verifier-*", "runs", "unnormalizable", baselineEvidenceFile))
+	if err != nil || len(matches) != 1 {
+		t.Fatalf("run-dir baseline not found: %v %v", matches, err)
+	}
+	data, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatalf("read run-dir baseline: %v", err)
+	}
+	var b trace.Baseline
+	if err := json.Unmarshal(data, &b); err != nil {
+		t.Fatalf("decode run-dir baseline: %v", err)
+	}
+	if b.NormalizationError == "" {
+		t.Error("run-dir baseline normalizationError is empty, want the failure recorded")
+	}
+}

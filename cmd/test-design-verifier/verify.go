@@ -245,8 +245,8 @@ type normalizedReport struct {
 	Failures []gotestjson.RunnerFailure `json:"failures"`
 }
 
-func writeNormalizedReport(op, runDir string, rep *gotestjson.Report) (path, sha string, cliErr *cliError) {
-	path = filepath.Join(runDir, normalizedFile)
+func writeNormalizedReport(op, runDir string, rep *gotestjson.Report) (string, *cliError) {
+	path := filepath.Join(runDir, normalizedFile)
 	doc := normalizedReport{Records: rep.Records, Counts: rep.Counts, Failures: rep.Failures}
 	if doc.Records == nil {
 		doc.Records = []runrecord.Record{}
@@ -255,13 +255,13 @@ func writeNormalizedReport(op, runDir string, rep *gotestjson.Report) (path, sha
 		doc.Failures = []gotestjson.RunnerFailure{}
 	}
 	if err := evidence.WriteJSON(path, &doc); err != nil {
-		return "", "", &cliError{Code: "run-dir-write-failed", Message: fmt.Sprintf("%s: %v", op, err)}
+		return "", &cliError{Code: "run-dir-write-failed", Message: fmt.Sprintf("%s: %v", op, err)}
 	}
 	sum, err := evidence.SHA256File(path)
 	if err != nil {
-		return "", "", &cliError{Code: "run-dir-write-failed", Message: fmt.Sprintf("%s: %v", op, err)}
+		return "", &cliError{Code: "run-dir-write-failed", Message: fmt.Sprintf("%s: %v", op, err)}
 	}
-	return path, sum, nil
+	return sum, nil
 }
 
 var secretArgPattern = regexp.MustCompile(`(?i)^(-{0,2}[A-Za-z0-9_.-]*(token|secret|password|passwd|api[_-]?key|credential)[A-Za-z0-9_.-]*)=.*$`)
