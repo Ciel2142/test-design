@@ -114,8 +114,8 @@ func TestCompareStagedChangeIsUnequal(t *testing.T) {
 	if equal {
 		t.Fatalf("Compare() equal = true, want false after staging a change")
 	}
-	if !reflect.DeepEqual(differing, []string{"tracked.txt"}) {
-		t.Errorf("Compare() differing = %v, want [tracked.txt]", differing)
+	if !reflect.DeepEqual(differing, []string{"INDEX", "tracked.txt"}) {
+		t.Errorf("Compare() differing = %v, want [INDEX tracked.txt]", differing)
 	}
 }
 
@@ -257,5 +257,41 @@ func TestCompareTwoDifferingPathsBothNamedSortedOnce(t *testing.T) {
 	want := []string{"aaa.txt", "zzz.txt"}
 	if !reflect.DeepEqual(differing, want) {
 		t.Errorf("Compare() differing = %v, want %v", differing, want)
+	}
+}
+
+func TestCompareStagedContentChangeWithSameStatusCodeIsUnequal(t *testing.T) {
+	dir := newTestRepo(t)
+	ctrl, err := NewController(dir)
+	if err != nil {
+		t.Fatalf("NewController: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "new.txt"), []byte("A\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	mustGit(t, dir, "add", "new.txt")
+
+	before, err := ctrl.TakeSnapshot()
+	if err != nil {
+		t.Fatalf("TakeSnapshot before: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "new.txt"), []byte("B\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	mustGit(t, dir, "add", "new.txt")
+
+	after, err := ctrl.TakeSnapshot()
+	if err != nil {
+		t.Fatalf("TakeSnapshot after: %v", err)
+	}
+
+	equal, differing := Compare(before, after)
+	if equal {
+		t.Fatalf("Compare() equal = true, want false: staged content changed (A -> B) though the status code stays the same")
+	}
+	if !reflect.DeepEqual(differing, []string{"INDEX"}) {
+		t.Errorf("Compare() differing = %v, want [INDEX]", differing)
 	}
 }

@@ -3,7 +3,6 @@ package worktree
 import (
 	"fmt"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"test-design/internal/evidence"
@@ -66,12 +65,7 @@ func untrackedPaths(porcelain string) []string {
 		if !ok {
 			continue
 		}
-		if strings.HasPrefix(path, `"`) {
-			if unquoted, err := strconv.Unquote(path); err == nil {
-				path = unquoted
-			}
-		}
-		paths = append(paths, path)
+		paths = append(paths, unquotePorcelainPath(path))
 	}
 	return paths
 }

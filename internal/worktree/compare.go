@@ -7,14 +7,18 @@ import (
 )
 
 // Compare reports whether before and after capture the same repository
-// state. When they differ, differing names each differing path — or "HEAD"
-// for HEAD movement — sorted deterministically with no duplicates. Compare
-// is pure: it never runs git and never touches the filesystem.
+// state. When they differ, differing names each differing path — or the
+// pseudo-entries "HEAD" (HEAD moved) and "INDEX" (staged tree changed) —
+// sorted deterministically with no duplicates. Compare is pure: it never
+// runs git and never touches the filesystem.
 func Compare(before, after *Snapshot) (equal bool, differing []string) {
 	diffs := make(map[string]struct{})
 
 	if before.headCommit != after.headCommit {
 		diffs["HEAD"] = struct{}{}
+	}
+	if before.indexTree != after.indexTree {
+		diffs["INDEX"] = struct{}{}
 	}
 	addDiffingPaths(diffs, trackedPathStatuses(before.porcelainStatus), trackedPathStatuses(after.porcelainStatus))
 	addDiffingPaths(diffs, before.untrackedHashes, after.untrackedHashes)
@@ -44,7 +48,10 @@ func addDiffingPaths(diffs map[string]struct{}, before, after map[string]string)
 	}
 }
 
-// "?? " entries are skipped: untrackedHashes already covers those paths.
+// "?? " entries skipped: untrackedHashes covers those.
+// Codes are relative to HEAD, not the other snapshot — dirty vs dirty with
+// different content but same code is invisible here; callers require
+// Clean() so this doesn't bite. Staged half caught via indexTree in Compare.
 func trackedPathStatuses(porcelain string) map[string]string {
 	statuses := make(map[string]string)
 	for line := range strings.SplitSeq(porcelain, "\n") {
@@ -52,12 +59,17 @@ func trackedPathStatuses(porcelain string) map[string]string {
 			continue
 		}
 		status, path := line[:2], line[3:]
-		if strings.HasPrefix(path, `"`) {
-			if unquoted, err := strconv.Unquote(path); err == nil {
-				path = unquoted
-			}
-		}
-		statuses[path] = status
+		statuses[unquotePorcelainPath(path)] = status
 	}
 	return statuses
+}
+
+func unquotePorcelainPath(path string) string {
+	if !strings.HasPrefix(path, `"`) {
+		return path
+	}
+	if unquoted, err := strconv.Unquote(path); err == nil {
+		return unquoted
+	}
+	return path
 }
