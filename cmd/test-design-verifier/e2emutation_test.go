@@ -106,7 +106,7 @@ func TestE2EMutation_GoTwoGuardMultiSite(t *testing.T) {
 	if siteB.EvidencePath == "" {
 		t.Fatal("evidencePath is empty, want the written evidence file's path")
 	}
-	assertEvidenceFile(t, siteB.EvidencePath, "SC-10", "go", 2, []string{"caught", "survived"})
+	assertEvidenceFile(t, siteB.EvidencePath, "e2emutation-go", "SC-10", "go", 2, []string{"caught", "survived"})
 	if left := verifierWorktrees(t); len(left) != 0 {
 		t.Errorf("worktrees registered = %v, want the lastSite call to have disposed of it", left)
 	}
@@ -241,6 +241,9 @@ func TestE2EMutation_MavenSingleSite(t *testing.T) {
 	}
 
 	ev := readMutationEvidence(t, out.EvidencePath)
+	if ev.RunID != "maven-mutation" {
+		t.Errorf("evidence.RunID = %q, want maven-mutation", ev.RunID)
+	}
 	wantFlag := "-Dtest=com.example.OrdersTest#validatesQuantityDeliberately"
 	if !slices.Contains(ev.TargetCommand, wantFlag) {
 		t.Errorf("targetCommand = %v, want it to contain %q", ev.TargetCommand, wantFlag)
@@ -332,6 +335,9 @@ func TestE2EMutation_GradleSingleSite(t *testing.T) {
 	}
 
 	ev := readMutationEvidence(t, out.EvidencePath)
+	if ev.RunID != "gradle-mutation" {
+		t.Errorf("evidence.RunID = %q, want gradle-mutation", ev.RunID)
+	}
 	wantArg := "com.example.OrderKtTest.validatesQuantityDeliberately"
 	if !slices.Contains(ev.TargetCommand, "--tests") || !slices.Contains(ev.TargetCommand, wantArg) {
 		t.Errorf("targetCommand = %v, want it to contain --tests %q", ev.TargetCommand, wantArg)

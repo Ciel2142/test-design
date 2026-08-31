@@ -56,6 +56,7 @@ type mutationSiteEvidence struct {
 
 type mutationEvidence struct {
 	evidence.Envelope
+	RunID         string                 `json:"runId"`
 	RowID         string                 `json:"rowID"`
 	Identity      identityOutput         `json:"identity"`
 	RunnerKind    string                 `json:"runnerKind"`
@@ -260,6 +261,7 @@ func evaluateMutationOp(req *evaluateMutationRequest, stdout io.Writer, between 
 	evidencePath := filepath.Join(req.RunDir, "mutation-evidence.json")
 	ev := mutationEvidence{
 		Envelope:      out.Envelope,
+		RunID:         req.RunID,
 		RowID:         st.RowID,
 		Identity:      identityOutput{Scope: st.Identity.Scope, Name: st.Identity.Name},
 		RunnerKind:    src.Runner.Kind,

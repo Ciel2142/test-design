@@ -103,7 +103,7 @@ func TestEvaluateMutation_CaughtSite(t *testing.T) {
 		t.Errorf("sites = %+v, want one caught site", out.Sites)
 	}
 
-	assertEvidenceFile(t, out.EvidencePath, "SC-09", "go", 1, []string{"caught"})
+	assertEvidenceFile(t, out.EvidencePath, "eval-caught", "SC-09", "go", 1, []string{"caught"})
 
 	if left := verifierWorktrees(t); len(left) != 0 {
 		t.Errorf("worktrees registered = %v, want the lastSite call to have disposed of it", left)
@@ -135,7 +135,7 @@ func TestEvaluateMutation_SurvivedSite(t *testing.T) {
 		t.Errorf("outcome = %q, want survived", out.Outcome)
 	}
 
-	assertEvidenceFile(t, out.EvidencePath, "SC-09", "go", 1, []string{"survived"})
+	assertEvidenceFile(t, out.EvidencePath, "eval-survived", "SC-09", "go", 1, []string{"survived"})
 
 	if left := verifierWorktrees(t); len(left) != 0 {
 		t.Errorf("worktrees registered = %v, want the lastSite call to have disposed of it", left)
@@ -195,7 +195,7 @@ func TestEvaluateMutation_MultiSiteRowAccumulatesAndDisposesOnLast(t *testing.T)
 		t.Errorf("sites[1].MutatedRunDir = %q, want it to end with site-2-mutated", second.Sites[1].MutatedRunDir)
 	}
 
-	assertEvidenceFile(t, second.EvidencePath, "SC-09", "go", 2, []string{"survived", "caught"})
+	assertEvidenceFile(t, second.EvidencePath, "eval-multisite", "SC-09", "go", 2, []string{"survived", "caught"})
 
 	if left := verifierWorktrees(t); len(left) != 0 {
 		t.Errorf("worktrees registered = %v, want the lastSite call to have disposed of it", left)
@@ -526,15 +526,25 @@ func TestPoliceDiffCode(t *testing.T) {
 	}
 }
 
-func assertEvidenceFile(t *testing.T, path, wantRowID, wantRunnerKind string, wantSites int, wantOutcomes []string) {
+func assertEvidenceFile(t *testing.T, path, wantRunID, wantRowID, wantRunnerKind string, wantSites int, wantOutcomes []string) {
 	t.Helper()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("ReadFile evidence: %v", err)
 	}
+	var decoded map[string]any
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("evidence did not decode: %v\ndata=%s", err, data)
+	}
+	if decoded["runId"] != wantRunID {
+		t.Errorf("evidence[runId] = %v, want %q", decoded["runId"], wantRunID)
+	}
 	var ev mutationEvidence
 	if err := json.Unmarshal(data, &ev); err != nil {
 		t.Fatalf("evidence did not decode: %v\ndata=%s", err, data)
+	}
+	if ev.RunID != wantRunID {
+		t.Errorf("evidence.RunID = %q, want %q", ev.RunID, wantRunID)
 	}
 	if ev.RowID != wantRowID {
 		t.Errorf("evidence.RowID = %q, want %q", ev.RowID, wantRowID)
