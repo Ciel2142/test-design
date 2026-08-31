@@ -248,20 +248,21 @@ type LayerSummary struct {
 
 type Report struct {
 	evidence.Envelope
-	RunID          string            `json:"runId"`
-	Source         string            `json:"source"`
-	SourceSHA256   string            `json:"sourceSha256"`
-	HeadCommit     string            `json:"headCommit"`
-	BaselineCommit string            `json:"baselineCommit"`
-	BaselineStatus string            `json:"baselineStatus"`
-	Approval       string            `json:"approval"`
-	Verdict        string            `json:"verdict"`
-	Acknowledged   bool              `json:"acknowledged"`
-	Reasons        []Reason          `json:"reasons"`
-	Layers         LayerSummary      `json:"layers"`
-	Rows           []RowReport       `json:"rows"`
-	Batches        []BatchReport     `json:"batches"`
-	Transcripts    []TranscriptRef   `json:"transcripts"`
-	ToolVersions   map[string]string `json:"toolVersions"`
-	FinishedAt     string            `json:"finishedAt"`
+	RunID           string            `json:"runId"`
+	Source          string            `json:"source"`
+	SourceSHA256    string            `json:"sourceSha256"`
+	HeadCommit      string            `json:"headCommit"`
+	BaselineCommit  string            `json:"baselineCommit"`
+	BaselineStatus  string            `json:"baselineStatus"`
+	Approval        string            `json:"approval"`
+	Verdict         string            `json:"verdict"`
+	Acknowledged    bool              `json:"acknowledged"`
+	Acknowledgement string            `json:"acknowledgement,omitempty"`
+	Reasons         []Reason          `json:"reasons"`
+	Layers          LayerSummary      `json:"layers"`
+	Rows            []RowReport       `json:"rows"`
+	Batches         []BatchReport     `json:"batches"`
+	Transcripts     []TranscriptRef   `json:"transcripts"`
+	ToolVersions    map[string]string `json:"toolVersions"`
+	FinishedAt      string            `json:"finishedAt"`
 }

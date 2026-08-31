@@ -150,27 +150,7 @@ func validateLayer2(in *Inputs, active []coverage.Row, gaps map[string]bool) err
 		byID[b.BatchID] = b
 	}
 
-	voided := make(map[string]bool, len(in.Batches))
-	var resolve func(id string, visiting map[string]bool) bool
-	resolve = func(id string, visiting map[string]bool) bool {
-		if v, ok := voided[id]; ok {
-			return v
-		}
-		b, ok := byID[id]
-		if !ok || visiting[id] {
-			return false
-		}
-		visiting[id] = true
-		v := b.Voided
-		if !v && b.InheritsFrom != "" {
-			v = resolve(b.InheritsFrom, visiting)
-		}
-		voided[id] = v
-		return v
-	}
-	for _, b := range in.Batches {
-		resolve(b.BatchID, map[string]bool{})
-	}
+	voided := voidedBatches(in.Batches)
 
 	for _, b := range in.Batches {
 		if b.Canary != nil && !b.Canary.Caught && !voided[b.BatchID] {

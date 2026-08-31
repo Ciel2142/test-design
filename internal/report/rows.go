@@ -38,3 +38,34 @@ func Layer1Gaps(tr *TraceEvidence) map[string]bool {
 	}
 	return gaps
 }
+
+// voidedBatches resolves which batches are voided, following inheritsFrom
+// transitively: a batch inheriting from a voided batch is itself voided.
+func voidedBatches(batches []Batch) map[string]bool {
+	byID := make(map[string]Batch, len(batches))
+	for _, b := range batches {
+		byID[b.BatchID] = b
+	}
+	voided := make(map[string]bool, len(batches))
+	var resolve func(id string, visiting map[string]bool) bool
+	resolve = func(id string, visiting map[string]bool) bool {
+		if v, ok := voided[id]; ok {
+			return v
+		}
+		b, ok := byID[id]
+		if !ok || visiting[id] {
+			return false
+		}
+		visiting[id] = true
+		v := b.Voided
+		if !v && b.InheritsFrom != "" {
+			v = resolve(b.InheritsFrom, visiting)
+		}
+		voided[id] = v
+		return v
+	}
+	for _, b := range batches {
+		resolve(b.BatchID, map[string]bool{})
+	}
+	return voided
+}
