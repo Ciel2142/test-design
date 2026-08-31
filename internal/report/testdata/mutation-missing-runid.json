@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "1",
+  "verifierVersion": "0.6.0",
+  "rowID": "SC-03",
+  "identity": {"scope": "order", "name": "TestOrderUniqueness"},
+  "runnerKind": "go",
+  "suiteCommand": ["go", "test", "./..."],
+  "targetCommand": ["go", "test", "-run", "TestOrderUniqueness", "./..."],
+  "sites": [
+    {
+      "site": "internal/order/create.go:42",
+      "outcome": "caught",
+      "diffPath": "run/mutation/SC-03/site-1.diff",
+      "diffSha256": "1122334455667788990011223344556677889900112233445566778899aabb",
+      "mutatedRunDir": "run/mutation/SC-03/mutated",
+      "mutatedExitStatus": 1,
+      "cleanRunDir": "run/mutation/SC-03/clean",
+      "cleanExitStatus": 0
+    }
+  ],
+  "snapshotEqual": true
+}

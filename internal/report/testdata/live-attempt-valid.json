@@ -1,0 +1,7 @@
+{
+  "schemaVersion": "1",
+  "verifierVersion": "0.6.0",
+  "runID": "run-2026-08-31-0001",
+  "profile": "docs/superpowers/coverage/live-profiles/dev.json",
+  "refusal": "missing-profile"
+}
