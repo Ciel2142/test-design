@@ -134,11 +134,12 @@ type Batch struct {
 }
 
 type MutationInput struct {
-	RowID               string `json:"rowId"`
-	EvidencePath        string `json:"evidencePath,omitempty"`
-	Outcome             string `json:"outcome,omitempty"`
-	Reason              string `json:"reason,omitempty"`
-	AttemptEvidencePath string `json:"attemptEvidencePath,omitempty"`
+	RowID               string            `json:"rowId"`
+	EvidencePath        string            `json:"evidencePath,omitempty"`
+	Outcome             string            `json:"outcome,omitempty"`
+	Reason              string            `json:"reason,omitempty"`
+	AttemptEvidencePath string            `json:"attemptEvidencePath,omitempty"`
+	Evidence            *MutationEvidence `json:"-"`
 }
 
 type Inputs struct {
