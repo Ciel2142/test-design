@@ -111,7 +111,7 @@ func bindJavaMethod(toks []Token, st *fileStructure, name int, typeSeen bool) (s
 	if !st.member[name] {
 		return "", "", 0, detailOutsideClassBody
 	}
-	return enc, toks[name].Text, methodEndLine(toks, name), ""
+	return enc, toks[name].Text, methodEndLine(toks, LangJava, name), ""
 }
 
 func bindKotlinFun(toks []Token, st *fileStructure, fun int) (string, string, int, string) {
@@ -136,13 +136,15 @@ func bindKotlinFun(toks []Token, st *fileStructure, fun int) (string, string, in
 	if !st.member[fun] {
 		return "", "", 0, detailOutsideClassBody
 	}
-	return enc, strings.Trim(toks[name].Text, "`"), methodEndLine(toks, name), ""
+	return enc, strings.Trim(toks[name].Text, "`"), methodEndLine(toks, LangKotlin, name), ""
 }
 
 // methodEndLine walks past the parameter list at name to the method's body
-// brace (skipping a throws clause or Kotlin return type) and returns the
-// line of its match; 0 when the declaration has no brace body.
-func methodEndLine(toks []Token, name int) int {
+// and returns the line of its last token. A brace body (skipping a Java
+// throws clause or Kotlin return type first) ends at its matching close
+// brace; a Kotlin expression body (`= ...`) ends at expressionEndLine. 0
+// when the declaration has neither.
+func methodEndLine(toks []Token, lang Lang, name int) int {
 	if name+1 >= len(toks) || toks[name+1].Text != "(" {
 		return 0
 	}
@@ -150,25 +152,54 @@ func methodEndLine(toks []Token, name int) int {
 	if closeParen < 0 {
 		return 0
 	}
-	openBrace := -1
 	for j := closeParen + 1; j < len(toks); j++ {
 		switch toks[j].Text {
 		case "{":
-			openBrace = j
-		case ";", "=":
+			closeBrace := matchDelim(toks, j, "{", "}")
+			if closeBrace < 0 {
+				return 0
+			}
+			return toks[closeBrace].Line
+		case "=":
+			return expressionEndLine(toks, lang, j+1)
+		case ";":
+			return 0
 		default:
 			continue
 		}
-		break
 	}
-	if openBrace < 0 {
-		return 0
+	return 0
+}
+
+// expressionEndLine returns the line of the last token of a Kotlin
+// expression body starting at start: everything up to (but not including)
+// the next member start, the enclosing class's closing brace, or a
+// statement terminator at bracket depth 0.
+func expressionEndLine(toks []Token, lang Lang, start int) int {
+	depth := 0
+	last := start - 1
+	for j := start; j < len(toks); j++ {
+		tk := toks[j]
+		if depth == 0 && isMemberStart(tk, lang) {
+			break
+		}
+		switch tk.Text {
+		case "(", "[", "{":
+			depth++
+		case ")", "]", "}":
+			depth--
+		}
+		last = j
 	}
-	closeBrace := matchDelim(toks, openBrace, "{", "}")
-	if closeBrace < 0 {
-		return 0
+	return toks[last].Line
+}
+
+func isMemberStart(tk Token, lang Lang) bool {
+	switch tk.Text {
+	case ";", "}", "@", "fun", "val", "var":
+		return true
 	}
-	return toks[closeBrace].Line
+	return tk.Kind == TokIdent && (modifierFor(lang)[tk.Text] || isClassKeyword(tk.Text, lang))
 }
 
 func matchDelim(toks []Token, open int, openText, closeText string) int {

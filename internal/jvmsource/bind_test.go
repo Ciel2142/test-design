@@ -115,6 +115,40 @@ interface I {
 	}
 }
 
+func TestBind_KotlinExpressionBodySingleLineEndLineEqualsLine(t *testing.T) {
+	src := "package com.example\n" +
+		"class OrderTest {\n" +
+		"  @Test\n" +
+		"  // covers: SC-01\n" +
+		"  fun addsCorrectly() = assertEquals(4, 2 + 2)\n" +
+		"}\n"
+	b := one(t, bindAll(t, src, LangKotlin))
+	if b.Ambiguous {
+		t.Fatalf("ambiguous: %s", b.Detail)
+	}
+	if b.EndLine != 5 {
+		t.Errorf("EndLine = %d, want 5 (the declaration's own line; expression body is single-line)", b.EndLine)
+	}
+}
+
+func TestBind_KotlinExpressionBodyMultiLineEndLineIsLastExpressionLine(t *testing.T) {
+	src := "package com.example\n" +
+		"class OrderTest {\n" +
+		"  @Test\n" +
+		"  // covers: SC-01\n" +
+		"  fun addsCorrectly() =\n" +
+		"      assertEquals(\n" +
+		"          4, 2 + 2)\n" +
+		"}\n"
+	b := one(t, bindAll(t, src, LangKotlin))
+	if b.Ambiguous {
+		t.Fatalf("ambiguous: %s", b.Detail)
+	}
+	if b.EndLine != 7 {
+		t.Errorf("EndLine = %d, want 7 (the last line of the expression body)", b.EndLine)
+	}
+}
+
 func TestBind_NestedClassBindsDollarName(t *testing.T) {
 	src := `package p;
 class Outer {
@@ -127,6 +161,9 @@ class Outer {
 	b := one(t, bindAll(t, src, LangJava))
 	if b.Ambiguous || b.ClassName != "p.Outer$Inner" || b.Method != "deep" {
 		t.Errorf("got %+v, want p.Outer$Inner#deep", b)
+	}
+	if b.EndLine != 5 {
+		t.Errorf("EndLine = %d, want 5", b.EndLine)
 	}
 }
 
