@@ -184,6 +184,90 @@ func TestRenderMarkdownLayer3NAIsOneLine(t *testing.T) {
 	}
 }
 
+// n/a is also reachable with Applicable > 0: all applicable rows gap.
+func TestRenderMarkdownLayer3NAAllGapsIsOneLine(t *testing.T) {
+	in := &Inputs{
+		Source: &coverage.Source{
+			Path:           greenSourcePath,
+			SHA256:         "sha-source-1",
+			BaselineCommit: "base-1",
+			Rows: []coverage.Row{
+				{ID: "SC-00", Level: "unit", Risk: "low"},
+				{ID: "SC-01", Level: "smoke", Risk: "low"},
+				{ID: "SC-02", Level: "e2e", Risk: "low"},
+			},
+		},
+		RunID:      "run-1",
+		HeadCommit: "head-1",
+		Trace: &TraceEvidence{
+			RunID:          "run-1",
+			Source:         greenSourcePath,
+			SourceSHA256:   "sha-source-1",
+			RepoCommit:     "head-1",
+			BaselineCommit: "base-1",
+			BaselineStatus: "ok",
+			Counts:         SuiteCounts{Passed: 1},
+			RowAccounting:  RowAccounting{ActiveRows: 3, WithResult: 1, Unaccounted: []string{"SC-01", "SC-02"}},
+			FindingCounts:  map[string]int{},
+			RowResults:     []TraceRowResult{{RowID: "SC-00", Scope: "pkg/a", Name: "TestA", Status: "passed"}},
+		},
+		Freshness: Freshness{Result: "fresh"},
+		Batches: []Batch{
+			{
+				BatchID:    "cb1",
+				DispatchID: "d1",
+				RunID:      "run-1",
+				Rows:       []string{"SC-00"},
+				Canary:     &Canary{RowID: "SC-00", Kind: "synthesized", Weakening: "dropped a check", Caught: true},
+			},
+			{
+				BatchID:      "b1",
+				DispatchID:   "d2",
+				RunID:        "run-1",
+				Rows:         []string{"SC-00"},
+				InheritsFrom: "cb1",
+				Verdicts:     []CriticVerdict{{RowID: "SC-00", Verdict: "HOLDS"}},
+			},
+			{
+				BatchID:      "b2",
+				DispatchID:   "d3",
+				RunID:        "run-1",
+				Rows:         []string{"SC-01", "SC-02"},
+				InheritsFrom: "cb1",
+				Verdicts: []CriticVerdict{
+					{RowID: "SC-01", Verdict: "MISSING"},
+					{RowID: "SC-02", Verdict: "MISSING"},
+				},
+			},
+		},
+		Live: &LiveEvidence{
+			RunID:        "run-1",
+			Source:       greenSourcePath,
+			SourceSHA256: "sha-source-1",
+			RowVerdicts: []LiveRowVerdict{
+				{RowID: "SC-01", Verdict: "LIVE-N/A (layer 1 gap)"},
+				{RowID: "SC-02", Verdict: "LIVE-N/A (layer 1 gap)"},
+			},
+			CleanupOK:     true,
+			SnapshotEqual: true,
+		},
+	}
+
+	r := mustCompute(t, in)
+	if r.Layers.Layer3.Status != "n/a" || r.Layers.Layer3.Applicable != 2 {
+		t.Fatalf("scenario setup: Layer3 = %+v, want status n/a with 2 applicable rows", r.Layers.Layer3)
+	}
+
+	md := mustRender(t, r)
+	l3 := md[strings.Index(md, "## Layer 3"):strings.Index(md, "## Layer 4")]
+	if strings.Count(l3, "\n") > 4 {
+		t.Errorf("Layer 3 n/a-with-applicable-rows section should be a single summary line, got:\n%s", l3)
+	}
+	if !strings.Contains(l3, "n/a") || !strings.Contains(l3, "2") {
+		t.Errorf("Layer 3 section should state n/a status and the applicable count; got:\n%s", l3)
+	}
+}
+
 func TestRenderMarkdownLayer4SurvivingSites(t *testing.T) {
 	in := greenInputs()
 	in.Mutations[0].Evidence.Sites[1].Outcome = "survived"

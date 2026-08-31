@@ -109,8 +109,12 @@ func writeMarkdownLayer2(b *strings.Builder, r *Report) {
 func writeMarkdownLayer3(b *strings.Builder, r *Report) {
 	b.WriteString("## Layer 3 — live\n\n")
 	s := r.Layers.Layer3
-	if s.Applicable == 0 {
-		fmt.Fprintf(b, "Status: %s — no applicable rows.\n\n", s.Status)
+	if s.Status == statusNA {
+		if s.Applicable == 0 {
+			fmt.Fprintf(b, "Status: %s — no smoke/e2e rows.\n\n", s.Status)
+		} else {
+			fmt.Fprintf(b, "Status: %s — %d applicable rows, all layer-1 gaps.\n\n", s.Status, s.Applicable)
+		}
 		return
 	}
 	fmt.Fprintf(b, "Status: %s · Applicable %d · Pass %d · Fail %d · Inconclusive %d · N/A %d\n\n",
