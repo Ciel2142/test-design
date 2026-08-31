@@ -872,3 +872,47 @@ func TestDeriveLayer4UnloadedEvidenceBlocks(t *testing.T) {
 		t.Errorf("reason = %+v, want a blocking layer-4 invalid-verdict on SC-02", rs.list)
 	}
 }
+
+func TestComputeRowBoundFindingBeatsPassingResult(t *testing.T) {
+	in := greenInputs()
+	in.Trace.Findings = []TraceFinding{{Kind: "drift", RowID: "SC-01", Detail: "TestA cites SC-01 but asserts the retired rule"}}
+	in.Trace.FindingCounts = map[string]int{"drift": 1}
+
+	r := mustCompute(t, in)
+
+	wantVerdict(t, r, "BLOCKED")
+	if got := rowOf(t, r, "SC-01").Layer1.Status; got != "drift" {
+		t.Errorf("SC-01 Layer1 = %q, want drift; a row-bound finding wins over a passing result", got)
+	}
+	rn := wantReason(t, r, "1", "SC-01", "drift")
+	if !strings.Contains(rn.Detail, "retired rule") {
+		t.Errorf("reason detail = %q, want the trace finding detail", rn.Detail)
+	}
+}
+
+func TestComputeAmbiguityFindingOnPassingRowIsGapGated(t *testing.T) {
+	in := greenInputs()
+	in.Trace.Findings = []TraceFinding{{Kind: "ambiguity", RowID: "SC-01", Detail: "two tests cite SC-01"}}
+	in.Trace.FindingCounts = map[string]int{"ambiguity": 1}
+	in.Batches[1].Verdicts[0].Verdict = "MISSING"
+
+	r := mustCompute(t, in)
+
+	wantVerdict(t, r, "BLOCKED")
+	sc01 := rowOf(t, r, "SC-01")
+	if sc01.Layer1.Status != "ambiguity" {
+		t.Errorf("SC-01 Layer1 = %q, want ambiguity; a gap-gated row is never bound", sc01.Layer1.Status)
+	}
+	if sc01.Layer2.Verdict != "MISSING" {
+		t.Errorf("SC-01 Layer2 = %+v, want the MISSING its ambiguity requires", sc01.Layer2)
+	}
+	wantReason(t, r, "1", "SC-01", "ambiguity")
+}
+
+func TestComputeAmbiguityFindingOnPassingRowRefusesHoldingCritic(t *testing.T) {
+	in := greenInputs()
+	in.Trace.Findings = []TraceFinding{{Kind: "ambiguity", RowID: "SC-01", Detail: "two tests cite SC-01"}}
+	in.Trace.FindingCounts = map[string]int{"ambiguity": 1}
+
+	wantComputeRefusal(t, in, CodeMissingVerdict)
+}

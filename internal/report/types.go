@@ -80,6 +80,14 @@ type LiveAttempt struct {
 	Refusal string `json:"refusal"`
 }
 
+// Attempt is the envelope-carrying shape shared by the attempt documents a
+// refused layer-4 run leaves behind; finalize checks it before publishing one.
+type Attempt struct {
+	evidence.Envelope
+	RunID string `json:"runID"`
+	RowID string `json:"rowID"`
+}
+
 type MutationSiteOutcome struct {
 	Site              string `json:"site"`
 	Outcome           string `json:"outcome"`

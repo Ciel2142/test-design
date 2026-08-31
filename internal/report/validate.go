@@ -86,6 +86,9 @@ func validateStaleness(in *Inputs) error {
 			return refuse(CodeStaleEvidence, "live sourceSha256 %q does not match source sha256 %q", in.Live.SourceSHA256, in.Source.SHA256)
 		}
 	}
+	if in.LiveAttempt != nil && in.LiveAttempt.RunID != in.RunID {
+		return refuse(CodeStaleEvidence, "live attempt runId %q does not match request runId %q", in.LiveAttempt.RunID, in.RunID)
+	}
 	for _, b := range in.Batches {
 		if b.RunID != in.RunID {
 			return refuse(CodeStaleEvidence, "batch %s runId %q does not match request runId %q", b.BatchID, b.RunID, in.RunID)
@@ -336,12 +339,7 @@ func validateLayer3(in *Inputs, active []coverage.Row, gaps map[string]bool) err
 }
 
 func validateLayer4(in *Inputs, active []coverage.Row, gaps map[string]bool) error {
-	var mutRows []coverage.Row
-	for _, r := range active {
-		if r.Risk == "high" {
-			mutRows = append(mutRows, r)
-		}
-	}
+	mutRows := layer4Applicable(active, in.Mutations)
 
 	counts := make(map[string]int, len(in.Mutations))
 	for _, m := range in.Mutations {

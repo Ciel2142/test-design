@@ -449,3 +449,30 @@ func TestValidateCanaryBookkeepingNaturalCaughtHoldsInAnotherBatch(t *testing.T)
 		t.Errorf("Detail = %q, want it to name batch b2, which verdicts the caught natural canary row HOLDS", re.Detail)
 	}
 }
+
+func TestValidateStaleEvidenceLiveAttemptRunIDMismatch(t *testing.T) {
+	in := baseInputs()
+	in.Live = nil
+	in.LiveAttempt = &LiveAttempt{RunID: "other-run", Profile: "p", Refusal: "missing-profile"}
+	wantRefusal(t, Validate(in), CodeStaleEvidence)
+}
+
+func TestValidateStaleEvidenceLiveAttemptRunIDEmpty(t *testing.T) {
+	in := baseInputs()
+	in.Live = nil
+	in.LiveAttempt = &LiveAttempt{Profile: "p", Refusal: "missing-profile"}
+	wantRefusal(t, Validate(in), CodeStaleEvidence)
+}
+
+func TestValidateMutationEntryOnNonHighRiskRowIsChecked(t *testing.T) {
+	in := baseInputs()
+	in.Mutations = append(in.Mutations, MutationInput{
+		RowID:        "SC-03",
+		EvidencePath: "testdata/mutation-foreign.json",
+		Evidence:     &MutationEvidence{RunID: "run-1", RowID: "SC-02"},
+	})
+	re := wantRefusal(t, Validate(in), CodeMutationEvidenceEmpty)
+	if !strings.Contains(re.Detail, "SC-03") {
+		t.Errorf("Detail = %q, want it to name row SC-03, whose med-risk entry carries empty evidence", re.Detail)
+	}
+}

@@ -69,3 +69,20 @@ func voidedBatches(batches []Batch) map[string]bool {
 	}
 	return voided
 }
+
+// layer4Applicable returns the rows layer 4 must account for: every high-risk
+// active row, plus any active row a layer-4 entry was supplied for. Validation
+// and derivation share it so no supplied entry can escape the per-row checks.
+func layer4Applicable(active []coverage.Row, mutations []MutationInput) []coverage.Row {
+	supplied := make(map[string]bool, len(mutations))
+	for _, m := range mutations {
+		supplied[m.RowID] = true
+	}
+	var rows []coverage.Row
+	for _, r := range active {
+		if r.Risk == "high" || supplied[r.ID] {
+			rows = append(rows, r)
+		}
+	}
+	return rows
+}

@@ -631,3 +631,31 @@ func TestFinalize_LiveEvidenceWithoutApplicableRowsRefused(t *testing.T) {
 
 	f.wantRefusal(report.CodeUnexpectedLiveEvidence)
 }
+
+func TestFinalize_MutationAttemptEvidenceSchemaMismatchRefused(t *testing.T) {
+	f := newFinalizeFixture(t)
+	attemptPath := filepath.Join(f.dir, "mutation-attempt.json")
+	if err := os.WriteFile(attemptPath, []byte(`{"rowID":"SC-10","refusal":"runner-start-failed"}`), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	f.body.Layer4.Rows[0].EvidencePath = ""
+	f.body.Layer4.Rows[0].Outcome = "environmental"
+	f.body.Layer4.Rows[0].Reason = "the mutation runner could not start"
+	f.body.Layer4.Rows[0].AttemptEvidencePath = attemptPath
+
+	f.wantRefusal("evidence-schema-mismatch")
+}
+
+func TestFinalize_MutationAttemptEvidenceUnreadableRefused(t *testing.T) {
+	f := newFinalizeFixture(t)
+	attemptPath := filepath.Join(f.dir, "mutation-attempt-broken.json")
+	if err := os.WriteFile(attemptPath, []byte(`{"schemaVersion": `), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	f.body.Layer4.Rows[0].EvidencePath = ""
+	f.body.Layer4.Rows[0].Outcome = "environmental"
+	f.body.Layer4.Rows[0].Reason = "the mutation runner could not start"
+	f.body.Layer4.Rows[0].AttemptEvidencePath = attemptPath
+
+	f.wantRefusal("evidence-unreadable")
+}

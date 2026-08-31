@@ -217,10 +217,10 @@ func deriveLayer1(rs *reasonSet, tr *TraceEvidence, active []coverage.Row) map[s
 			if detail == "" {
 				detail = "the row is unaccounted for in the trace row accounting"
 			}
-		case hasResult && rr.Status == "passed":
-			verdict.Status = "bound"
 		case hasFinding:
 			verdict.Status = finding.Kind
+		case hasResult && rr.Status == "passed":
+			verdict.Status = "bound"
 		case hasResult && rr.Status == "failed":
 			verdict.Status = "red"
 			detail = fmt.Sprintf("%s %s failed with no trace finding", rr.Scope, rr.Name)
@@ -351,13 +351,10 @@ func deriveLayer4(rs *reasonSet, in *Inputs, active []coverage.Row, gaps map[str
 	}
 
 	refs := make(map[string]MutationRef, len(active))
-	var applicable []coverage.Row
 	for _, row := range active {
 		refs[row.ID] = MutationRef{Status: valueNA}
-		if _, supplied := entries[row.ID]; row.Risk == "high" || supplied {
-			applicable = append(applicable, row)
-		}
 	}
+	applicable := layer4Applicable(active, in.Mutations)
 
 	sum := Layer4Summary{Applicable: len(applicable)}
 	if len(applicable) == 0 {

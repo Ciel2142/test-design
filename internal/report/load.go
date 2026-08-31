@@ -103,3 +103,11 @@ func LoadMutation(path string) (*MutationEvidence, error) {
 	}
 	return &ev, nil
 }
+
+func LoadAttempt(path string) (*Attempt, error) {
+	var ev Attempt
+	if err := decodeEvidence(path, &ev); err != nil {
+		return nil, err
+	}
+	return &ev, nil
+}

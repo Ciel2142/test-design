@@ -206,6 +206,9 @@ func finalizeOp(req *finalizeRequest, stdout io.Writer, between func()) *cliErro
 			})
 		}
 		if m.AttemptEvidencePath != "" {
+			if _, err := report.LoadAttempt(m.AttemptEvidencePath); err != nil {
+				return evidenceLoadError(err)
+			}
 			transcripts = append(transcripts, worktree.PublishFile{
 				RepoRelPath: repoPath(artifactDir, "transcripts", req.RunID, "mutation-attempt-"+m.RowID+".json"),
 				SourcePath:  m.AttemptEvidencePath,
