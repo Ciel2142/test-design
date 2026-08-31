@@ -21,8 +21,10 @@ tags to declarations, executes the live plan, applies and evaluates mutations, a
 the verdict. This thread's work is the judgment the executable cannot do — classifying the
 production diff for freshness, composing layer-2 batches and their canaries, confirming
 that a mutation diff is the mutation the row named, and carrying the three agent dispatches.
-Where this skill says "read", it means read a field of an op's output; it never means
-re-deriving a result the executable already produced.
+Where this skill says "read", it means read a field of an op's output for anything the
+executable produces; it never means re-deriving a result the executable already produced.
+The one document this thread reads directly is the coverage source itself, once, in layer 1
+— for the per-row facts no op returns.
 
 **Announce at start:** "I'm using the coverage-verification skill to verify coverage for
 this feature."
@@ -90,11 +92,12 @@ code and its message — and stop. There is nothing to approve, because nothing 
 validated; `parse-source-failed` in particular means the document is not a coverage source
 this verifier can measure against.
 
-On success, state in the approval request — every value read from `preflightOutput`, none
-invented:
+On success, state in the approval request — the branch read from the repository with
+`git rev-parse --abbrev-ref HEAD`, which is the one gate value `preflightOutput` does not
+carry, and every other value read from `preflightOutput`, none invented:
 
-- `source` and `sourceSha256`, the document and revision this run measures against;
 - the branch the source repository is on;
+- `source` and `sourceSha256`, the document and revision this run measures against;
 - `runner.kind`, `runner.root`, `runner.command`, and `runner.reportGlobs`;
 - `layers.layer1` through `layers.layer4`, the row count each layer will cover;
 - `highRiskCount`, the rows layer 4 will mutate;
@@ -171,6 +174,22 @@ produced no normalized report at all.
 **A `baselineStatus` other than `ok` is not a stop condition.** The run continues; finalize
 turns it into a `baseline-<status>` reason and a `PARTIAL` verdict. Stopping here would
 discard three layers of evidence over one missing comparison file.
+
+### Read the source's rows once
+
+`preflight` returned counts and `trace` evidence carries identities and statuses; neither
+carries what the remaining layers dispatch on. Read the coverage source once, here, and keep
+four things per active row:
+
+- **`Level`** — which rows layer 3 covers, namely `smoke` and `e2e`;
+- **`Risk`** — which rows layer 4 covers, namely `high`;
+- **its behavior group** — how layer 2's batches are cut, and what the freshness
+  classification below compares each diff hunk against;
+- **its `Verification mutation` text** — what the `mutator` dispatch carries, and what the
+  layer-4 diff confirmation checks the applied edit against.
+
+Nothing else comes from the document. Row statuses, bindings, verdicts, and counts come from
+the ops, and no row's fate is decided by re-reading the source.
 
 ### The one semantic act in layer 1
 
@@ -491,8 +510,9 @@ Per site, in the order the agent listed them:
    mutation that reproduces the row's fault from an unrelated one-line edit that happens to
    pass the same checks. This confirmation is the only place that judgment happens.
 
-   If it is not the named mutation, do not call `evaluate-mutation` for this site. Record the
-   row `unappliable` with what the diff actually did as the reason.
+   If it is not the named mutation, the **row** is over. Do not call `evaluate-mutation` for
+   this site or for any later site of this row; record the one row entry described under
+   [When confirmation fails](#when-confirmation-fails) and move to the next row.
 3. Evaluate:
 
    ```text
@@ -505,8 +525,8 @@ Per site, in the order the agent listed them:
    `site`, `outcome`, and `diff {file, hunks}`; on the `lastSite: true` call it also returns
    the aggregated `sites[]` and the `evidencePath` of the row's mutation evidence.
 
-Set `lastSite: true` on the final site. That call writes the evidence and disposes the
-worktree; record the row as
+Set `lastSite: true` on the final site of a row whose every site confirmed. That call writes
+the evidence and disposes the worktree; record the row as
 
 ```json
 {"rowId": "SC-07", "evidencePath": "<the printed evidencePath>"}
@@ -516,15 +536,27 @@ Finalize derives `MUTATION-CAUGHT` when every enumerated site's targeted test fa
 mutation applied and passed again after restore, and `MUTATION-SURVIVED`, naming each
 surviving site, otherwise. One survivor blocks; no number of caught sites elsewhere offsets it.
 
-### When confirmation leaves no valid site
+### When confirmation fails
 
-The worktree is disposed only by an `evaluate-mutation` call with `lastSite: true`, so make
-that call for the last site you were able to confirm. If no confirmable site remains — the
-first site failed confirmation and it was the only one — there is nothing valid left to
-evaluate. Record the row `unappliable` with the reason, leave the worktree in place, and name
-both the `worktreePath` and the `runDir` in the report and to the user: disposing an abandoned
-worktree is the controller's job, not this thread's, and deleting it by hand destroys the
-evidence of why the row was abandoned.
+A confirmation failure aborts the **row**, not just the site — at any position in the site
+list, including the middle of it. Nothing in that worktree can be salvaged afterwards:
+`mutator` never reverts its own edit and only `evaluate-mutation` restores the source, so the
+unconfirmed edit stays on disk and the diff police refuses every later call against that
+worktree; and a site already evaluated cannot be re-run, because `evaluate-mutation` refuses
+a repeat as `duplicate-site`. There is no "last good site" to fall back to.
+
+So, exactly once for the row:
+
+```json
+{"rowId": "SC-07", "outcome": "unappliable", "reason": "<what the diff actually did, at which site>"}
+```
+
+One entry per row — a second entry for the same row is refused `duplicate-verdict`. Evaluate
+no further site of that row, and make no further `evaluate-mutation` call against that
+worktree. No op will dispose it, so leave it in place and name both its `worktreePath` and its
+`runDir` in the report and to the user, so it can be removed: disposing an abandoned worktree
+is the controller's job, not this thread's, and deleting it by hand destroys the evidence of
+why the row was abandoned.
 
 ### Environmental refusals
 
