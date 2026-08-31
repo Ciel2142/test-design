@@ -25,23 +25,35 @@ type finalizeRequestJSON struct {
 }
 
 type finalizeFixture struct {
-	t         *testing.T
-	repo      string
-	src       *coverage.Source
-	head      string
-	runID     string
-	dir       string
-	tracePath string
-	trace     *report.TraceEvidence
-	body      finalizeRequestBody
+	t              *testing.T
+	repo           string
+	coverageSource string
+	src            *coverage.Source
+	head           string
+	runID          string
+	dir            string
+	tracePath      string
+	trace          *report.TraceEvidence
+	body           finalizeRequestBody
 }
 
 // newFinalizeFixture builds a repository plus synthesized layer evidence whose
 // finalize verdict is PASS; each test bends one input away from that shape.
 func newFinalizeFixture(t *testing.T) *finalizeFixture {
 	t.Helper()
-	repo := fixtureRepo(t)
-	src, cliErr := loadVerifiedSource("finalize", repo, fixtureCoverageSource)
+	return newFinalizeFixtureFor(t, fixtureRepo(t), fixtureCoverageSource)
+}
+
+// newLiveFinalizeFixture is the same shape over fixtures/live-project, whose
+// smoke and e2e rows make layer 3 applicable.
+func newLiveFinalizeFixture(t *testing.T) *finalizeFixture {
+	t.Helper()
+	return newFinalizeFixtureFor(t, liveFixtureRepo(t), liveFixtureCoverageSource)
+}
+
+func newFinalizeFixtureFor(t *testing.T, repo, coverageSource string) *finalizeFixture {
+	t.Helper()
+	src, cliErr := loadVerifiedSource("finalize", repo, coverageSource)
 	if cliErr != nil {
 		t.Fatalf("loadVerifiedSource: %v", cliErr)
 	}
@@ -50,7 +62,9 @@ func newFinalizeFixture(t *testing.T) *finalizeFixture {
 		t.Fatalf("headCommit: %v", cliErr)
 	}
 
-	f := &finalizeFixture{t: t, repo: repo, src: src, head: head, runID: "fin-1", dir: t.TempDir()}
+	f := &finalizeFixture{
+		t: t, repo: repo, coverageSource: coverageSource, src: src, head: head, runID: "fin-1", dir: t.TempDir(),
+	}
 
 	active := report.ActiveRows(src)
 	rowResults := make([]report.TraceRowResult, 0, len(active))
@@ -137,12 +151,54 @@ func (f *finalizeFixture) writeJSON(path string, doc any) {
 	}
 }
 
+// writeLive writes live evidence carrying verdicts and returns its path.
+func (f *finalizeFixture) writeLive(verdicts []report.LiveRowVerdict) string {
+	f.t.Helper()
+	path := filepath.Join(f.dir, "live-evidence.json")
+	f.writeJSON(path, &report.LiveEvidence{
+		Envelope:      evidence.Envelope{SchemaVersion: evidence.SchemaVersion, VerifierVersion: evidence.VerifierVersion},
+		RunID:         f.runID,
+		Source:        f.src.Path,
+		SourceSHA256:  f.src.SHA256,
+		RowVerdicts:   verdicts,
+		CleanupOK:     true,
+		SnapshotEqual: true,
+	})
+	return path
+}
+
+func (f *finalizeFixture) writeLiveAttempt(profile, refusal string) string {
+	f.t.Helper()
+	path := filepath.Join(f.dir, "live-attempt.json")
+	f.writeJSON(path, &report.LiveAttempt{
+		Envelope: evidence.Envelope{SchemaVersion: evidence.SchemaVersion, VerifierVersion: evidence.VerifierVersion},
+		RunID:    f.runID,
+		Profile:  profile,
+		Refusal:  refusal,
+	})
+	return path
+}
+
+// publishedReport decodes the verification report finalize wrote into the repo.
+func (f *finalizeFixture) publishedReport(jsonPath string) *report.Report {
+	f.t.Helper()
+	data, err := os.ReadFile(filepath.Join(f.repo, filepath.FromSlash(jsonPath)))
+	if err != nil {
+		f.t.Fatalf("read published report: %v", err)
+	}
+	var rep report.Report
+	if err := json.Unmarshal(data, &rep); err != nil {
+		f.t.Fatalf("decode published report: %v", err)
+	}
+	return &rep
+}
+
 func (f *finalizeFixture) requestJSON() string {
 	f.t.Helper()
 	body, err := json.Marshal(finalizeRequestJSON{
 		SchemaVersion:       evidence.SchemaVersion,
 		RepoRoot:            f.repo,
-		CoverageSource:      fixtureCoverageSource,
+		CoverageSource:      f.coverageSource,
 		RunID:               f.runID,
 		finalizeRequestBody: f.body,
 	})
@@ -481,4 +537,97 @@ func TestFinalize_PassRunPublishesReportAndTranscripts(t *testing.T) {
 	if !strings.Contains(string(md), "**Verdict: PASS**") {
 		t.Errorf("markdown does not carry the JSON verdict:\n%s", md)
 	}
+}
+
+func TestFinalize_LiveEvidencePublishedAndPerRow(t *testing.T) {
+	f := newLiveFinalizeFixture(t)
+	f.body.Layer3 = &finalizeLayer3{EvidencePath: f.writeLive([]report.LiveRowVerdict{
+		{RowID: "SC-11", Verdict: "LIVE-PASS"},
+		{RowID: "SC-12", Verdict: "LIVE-PASS"},
+		{RowID: "SC-13", Verdict: "LIVE-INCONCLUSIVE"},
+	})}
+
+	exit, stdout, stderr := f.run()
+
+	if exit != exitOK {
+		t.Fatalf("exit code = %d, want %d; stderr=%s", exit, exitOK, stderr)
+	}
+	out := decodeFinalizeOutput(t, stdout)
+	if out.Verdict != report.VerdictBlocked {
+		t.Errorf("verdict = %q, want %q; reasons=%+v", out.Verdict, report.VerdictBlocked, out.Reasons)
+	}
+
+	published := "docs/superpowers/coverage/transcripts/" + f.runID + "/live-evidence.json"
+	if _, err := os.Stat(filepath.Join(f.repo, filepath.FromSlash(published))); err != nil {
+		t.Errorf("stat %s: %v", published, err)
+	}
+
+	rep := f.publishedReport(out.JSONPath)
+	want := map[string]string{"SC-11": "LIVE-PASS", "SC-12": "LIVE-PASS", "SC-13": "LIVE-INCONCLUSIVE", "SC-14": "N/A"}
+	for _, row := range rep.Rows {
+		if got := row.Layer3; got != want[row.RowID] {
+			t.Errorf("%s layer3 = %q, want %q", row.RowID, got, want[row.RowID])
+		}
+	}
+	if rep.Layers.Layer3.Applicable != 3 || rep.Layers.Layer3.Pass != 2 || rep.Layers.Layer3.Inconclusive != 1 {
+		t.Errorf("layer3 summary = %+v, want 3 applicable, 2 pass, 1 inconclusive", rep.Layers.Layer3)
+	}
+
+	var ref report.TranscriptRef
+	for _, tr := range rep.Transcripts {
+		if tr.Path == published {
+			ref = tr
+		}
+	}
+	if ref.Path == "" {
+		t.Fatalf("transcripts = %+v, want a ref to %s", rep.Transcripts, published)
+	}
+	sum, err := evidence.SHA256File(filepath.Join(f.repo, filepath.FromSlash(published)))
+	if err != nil {
+		t.Fatalf("sha256: %v", err)
+	}
+	if sum != ref.SHA256 {
+		t.Errorf("%s: published sha256 = %s, want the recorded %s", published, sum, ref.SHA256)
+	}
+}
+
+func TestFinalize_LiveAttemptPublishedAsPartial(t *testing.T) {
+	f := newLiveFinalizeFixture(t)
+	f.body.Layer3 = &finalizeLayer3{
+		AttemptEvidencePath: f.writeLiveAttempt(liveFixtureProfilePath, "missing-profile"),
+	}
+
+	exit, stdout, stderr := f.run()
+
+	if exit != exitOK {
+		t.Fatalf("exit code = %d, want %d; stderr=%s", exit, exitOK, stderr)
+	}
+	out := decodeFinalizeOutput(t, stdout)
+	if out.Verdict != report.VerdictPartial {
+		t.Fatalf("verdict = %q, want %q; reasons=%+v", out.Verdict, report.VerdictPartial, out.Reasons)
+	}
+	found := false
+	for _, r := range out.Reasons {
+		if r.Code == "live-profile-unavailable" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("reasons = %+v, want a live-profile-unavailable reason", out.Reasons)
+	}
+
+	published := "docs/superpowers/coverage/transcripts/" + f.runID + "/live-attempt.json"
+	if _, err := os.Stat(filepath.Join(f.repo, filepath.FromSlash(published))); err != nil {
+		t.Errorf("stat %s: %v", published, err)
+	}
+	if _, err := os.Stat(filepath.Join(f.repo, "docs", "superpowers", "coverage", "transcripts", f.runID, "live-evidence.json")); !os.IsNotExist(err) {
+		t.Errorf("live-evidence.json exists, want only the attempt transcript published")
+	}
+}
+
+func TestFinalize_LiveEvidenceWithoutApplicableRowsRefused(t *testing.T) {
+	f := newFinalizeFixture(t)
+	f.body.Layer3 = &finalizeLayer3{EvidencePath: f.writeLive(nil)}
+
+	f.wantRefusal(report.CodeUnexpectedLiveEvidence)
 }
