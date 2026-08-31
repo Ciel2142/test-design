@@ -45,6 +45,7 @@ func TestRejectsZeroQuantity(t *testing.T) {
 			TestName:   "TestRejectsZeroQuantity",
 			File:       "pkg/foo_test.go",
 			Line:       5,
+			EndLine:    7,
 			IDs:        []string{"SC-01"},
 			Ambiguous:  false,
 		},
@@ -470,6 +471,54 @@ func TestScanTagsSkipsVendorTestdataHiddenAndNestedModuleDirs(t *testing.T) {
 	}
 	if got[0].TestName != "TestGood" {
 		t.Errorf("TestName = %q, want TestGood", got[0].TestName)
+	}
+}
+
+func TestScanTagsRecordsEndLineOfClosingBrace(t *testing.T) {
+	dir := writeTestFiles(t, map[string]string{
+		"pkg/foo_test.go": `package pkg
+
+import "testing"
+
+// covers: SC-01
+func TestMultiLine(t *testing.T) {
+	x := 1
+	_ = x
+}
+`,
+	})
+
+	got, err := ScanTags(dir, "example.com/mod")
+	if err != nil {
+		t.Fatalf("ScanTags: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("ScanTags = %+v, want 1 site", got)
+	}
+	if got[0].Line != 5 || got[0].EndLine != 9 {
+		t.Errorf("Line/EndLine = %d/%d, want 5/9", got[0].Line, got[0].EndLine)
+	}
+}
+
+func TestScanTagsAmbiguousSitesHaveZeroEndLine(t *testing.T) {
+	dir := writeTestFiles(t, map[string]string{
+		"pkg/foo_test.go": `package pkg
+
+// covers: SC-01
+func helperSetup(t *testing.T) {
+}
+`,
+	})
+
+	got, err := ScanTags(dir, "example.com/mod")
+	if err != nil {
+		t.Fatalf("ScanTags: %v", err)
+	}
+	if len(got) != 1 || !got[0].Ambiguous {
+		t.Fatalf("ScanTags = %+v, want 1 ambiguous site", got)
+	}
+	if got[0].EndLine != 0 {
+		t.Errorf("EndLine = %d, want 0 for an ambiguous site", got[0].EndLine)
 	}
 }
 

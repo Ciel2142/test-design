@@ -22,10 +22,13 @@ import (
 const traceEvidenceFile = "trace-evidence.json"
 
 type traceRowResult struct {
-	RowID  string `json:"rowId"`
-	Scope  string `json:"scope"`
-	Name   string `json:"name"`
-	Status string `json:"status"`
+	RowID   string `json:"rowId"`
+	Scope   string `json:"scope"`
+	Name    string `json:"name"`
+	Status  string `json:"status"`
+	File    string `json:"file"`
+	Line    int    `json:"line"`
+	EndLine int    `json:"endLine"`
 }
 
 type traceFinding struct {
@@ -169,6 +172,7 @@ func traceOp(req *verifyRequest, stdout io.Writer, between func()) *cliError {
 				TestName:   s.Method,
 				File:       s.File,
 				Line:       s.Line,
+				EndLine:    s.EndLine,
 				IDs:        s.IDs,
 				Ambiguous:  s.Ambiguous,
 				Detail:     s.Detail,
@@ -370,7 +374,15 @@ func renderFindings(findings []trace.Finding) []traceFinding {
 func rowResults(results []trace.RowResult) []traceRowResult {
 	out := make([]traceRowResult, 0, len(results))
 	for _, r := range results {
-		out = append(out, traceRowResult{RowID: r.RowID, Scope: r.Scope, Name: r.Name, Status: string(r.Status)})
+		out = append(out, traceRowResult{
+			RowID:   r.RowID,
+			Scope:   r.Scope,
+			Name:    r.Name,
+			Status:  string(r.Status),
+			File:    r.File,
+			Line:    r.Line,
+			EndLine: r.EndLine,
+		})
 	}
 	return out
 }

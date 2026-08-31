@@ -22,6 +22,7 @@ type TagSite struct {
 	TestName   string
 	File       string
 	Line       int
+	EndLine    int
 	IDs        []string
 	Ambiguous  bool
 	Detail     string
@@ -122,6 +123,7 @@ func scanFile(path, worktreeRoot, modulePath string) ([]TagSite, error) {
 			TestName:   fd.Name.Name,
 			File:       relFile,
 			Line:       line,
+			EndLine:    bodyEndLine(fset, fd),
 			IDs:        ids,
 			Ambiguous:  false,
 		})
@@ -147,6 +149,13 @@ func scanFile(path, worktreeRoot, modulePath string) ([]TagSite, error) {
 	}
 
 	return sites, nil
+}
+
+func bodyEndLine(fset *token.FileSet, fd *ast.FuncDecl) int {
+	if fd.Body == nil {
+		return 0
+	}
+	return fset.Position(fd.Body.Rbrace).Line
 }
 
 func importPathFor(modulePath, relDir string) string {

@@ -15,6 +15,7 @@ type TagSite struct {
 	Method    string
 	File      string
 	Line      int
+	EndLine   int
 	IDs       []string
 	Ambiguous bool
 	Detail    string
@@ -63,6 +64,7 @@ func ScanTags(root string) ([]TagSite, error) {
 				Method:    b.Method,
 				File:      filepath.ToSlash(rel),
 				Line:      b.Line,
+				EndLine:   b.EndLine,
 				IDs:       tags.Extract(b.Comment),
 				Ambiguous: b.Ambiguous,
 				Detail:    b.Detail,

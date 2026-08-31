@@ -113,6 +113,9 @@ func TestTraceJVM_MavenPipeline(t *testing.T) {
 	}
 
 	wantRowResult(t, ev, "SC-01", "passed")
+	if got, ok := rowResultFor(ev, "SC-01"); !ok || got.File != "src/test/java/com/example/OrdersTest.java" || got.Line != 14 || got.EndLine != 17 {
+		t.Errorf("SC-01 site = %+v, want src/test/java/com/example/OrdersTest.java:14-17", got)
+	}
 	wantRowResult(t, ev, "SC-02", "failed")
 	wantFinding(t, ev, "red", "SC-02", "failsDeliberately")
 	wantRowResult(t, ev, "SC-03", "skipped")
@@ -176,6 +179,9 @@ func TestTraceJVM_GradlePipeline(t *testing.T) {
 	got, ok := rowResultFor(ev, "SC-01")
 	if !ok || got.Scope != "com.example.OrderKtTest" || got.Name != "passes with backticks and spaces" {
 		t.Errorf("SC-01 = %+v, want the backtick method bound verbatim", got)
+	}
+	if got.File != "src/test/kotlin/com/example/OrderKtTest.kt" || got.Line != 12 || got.EndLine != 15 {
+		t.Errorf("SC-01 site = %+v, want src/test/kotlin/com/example/OrderKtTest.kt:12-15", got)
 	}
 	wantRowResult(t, ev, "SC-02", "failed")
 	wantFinding(t, ev, "red", "SC-02", "failsDeliberately")

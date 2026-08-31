@@ -44,6 +44,9 @@ class OrderTest {
 	if b.ClassName != "com.example.OrderTest" || b.Method != "rejectsZeroQuantity" {
 		t.Errorf("got %s#%s", b.ClassName, b.Method)
 	}
+	if b.EndLine != 8 {
+		t.Errorf("EndLine = %d, want 8 (the method's closing brace)", b.EndLine)
+	}
 }
 
 func TestBind_KotlinBacktickName(t *testing.T) {
@@ -54,6 +57,61 @@ func TestBind_KotlinBacktickName(t *testing.T) {
 	}
 	if b.ClassName != "com.example.OrderTest" || b.Method != "rejects zero quantity" {
 		t.Errorf("got %s#%q", b.ClassName, b.Method)
+	}
+	if b.EndLine != 5 {
+		t.Errorf("EndLine = %d, want 5 (empty body closes on the declaration line)", b.EndLine)
+	}
+}
+
+func TestBind_EndLineKotlinMultiLineBody(t *testing.T) {
+	src := "package com.example\n" +
+		"class OrderTest {\n" +
+		"  @Test\n" +
+		"  // covers: SC-02\n" +
+		"  fun rejectsZeroQuantity() {\n" +
+		"    helper()\n" +
+		"  }\n" +
+		"}\n"
+	b := one(t, bindAll(t, src, LangKotlin))
+	if b.Ambiguous {
+		t.Fatalf("ambiguous: %s", b.Detail)
+	}
+	if b.EndLine != 7 {
+		t.Errorf("EndLine = %d, want 7", b.EndLine)
+	}
+}
+
+func TestBind_JavaMethodWithThrowsClauseEndLine(t *testing.T) {
+	src := `package com.example;
+class OrderTest {
+  // covers: SC-01
+  public void rejectsZeroQuantity() throws Exception {
+    helper();
+  }
+}
+`
+	b := one(t, bindAll(t, src, LangJava))
+	if b.Ambiguous {
+		t.Fatalf("ambiguous: %s", b.Detail)
+	}
+	if b.EndLine != 6 {
+		t.Errorf("EndLine = %d, want 6", b.EndLine)
+	}
+}
+
+func TestBind_AbstractMethodEndLineZero(t *testing.T) {
+	src := `package p;
+interface I {
+  // covers: SC-01
+  void method();
+}
+`
+	b := one(t, bindAll(t, src, LangJava))
+	if b.Ambiguous {
+		t.Fatalf("ambiguous: %s", b.Detail)
+	}
+	if b.EndLine != 0 {
+		t.Errorf("EndLine = %d, want 0 (no body)", b.EndLine)
 	}
 }
 

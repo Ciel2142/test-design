@@ -7,6 +7,7 @@ type tagBinding struct {
 	Comment   string
 	ClassName string
 	Method    string
+	EndLine   int
 	Ambiguous bool
 	Detail    string
 }
@@ -52,31 +53,31 @@ func bindTags(toks []Token, lang Lang) ([]tagBinding, error) {
 			continue
 		}
 		b := tagBinding{Line: tk.Line, Comment: tk.Text}
-		cls, method, detail := bindOne(toks, st, lang, i)
+		cls, method, endLine, detail := bindOne(toks, st, lang, i)
 		if detail != "" {
 			b.Ambiguous, b.Detail = true, detail
 		} else {
-			b.ClassName, b.Method = qualify(st.pkg, cls), method
+			b.ClassName, b.Method, b.EndLine = qualify(st.pkg, cls), method, endLine
 		}
 		out = append(out, b)
 	}
 	return out, nil
 }
 
-func bindOne(toks []Token, st *fileStructure, lang Lang, tag int) (cls, method, detail string) {
+func bindOne(toks []Token, st *fileStructure, lang Lang, tag int) (cls, method string, endLine int, detail string) {
 	typeSeen := false
 	for j := tag + 1; j < len(toks); j++ {
 		tk := toks[j]
 		switch {
 		case tk.Kind == TokCoversTag:
 		case tk.Kind == TokLiteral:
-			return "", "", detailExecutable
+			return "", "", 0, detailExecutable
 		case tk.Text == "@":
-			return "", "", detailAnnotationAfterTag
+			return "", "", 0, detailAnnotationAfterTag
 		case tk.Kind == TokIdent && isClassKeyword(tk.Text, lang):
-			return "", "", detailAboveClass
+			return "", "", 0, detailAboveClass
 		case tk.Kind == TokIdent && statementKeywords[tk.Text]:
-			return "", "", detailExecutable
+			return "", "", 0, detailExecutable
 		case lang == LangKotlin && tk.Kind == TokIdent && tk.Text == "fun":
 			return bindKotlinFun(toks, st, j)
 		case tk.Kind == TokIdent:
@@ -90,30 +91,30 @@ func bindOne(toks []Token, st *fileStructure, lang Lang, tag int) (cls, method, 
 		case tk.Text == "<" || tk.Text == ">" || tk.Text == "," ||
 			tk.Text == "." || tk.Text == "[" || tk.Text == "]" || tk.Text == "?":
 		default:
-			return "", "", detailExecutable
+			return "", "", 0, detailExecutable
 		}
 	}
-	return "", "", detailNoDeclaration
+	return "", "", 0, detailNoDeclaration
 }
 
-func bindJavaMethod(toks []Token, st *fileStructure, name int, typeSeen bool) (string, string, string) {
+func bindJavaMethod(toks []Token, st *fileStructure, name int, typeSeen bool) (string, string, int, string) {
 	enc := st.enclosing[name]
 	if !typeSeen {
 		if simpleName(enc) == toks[name].Text {
-			return "", "", detailUnsupportedShape
+			return "", "", 0, detailUnsupportedShape
 		}
-		return "", "", detailNoDeclaration
+		return "", "", 0, detailNoDeclaration
 	}
 	if unresolvedEnclosing(enc) {
-		return "", "", detailUnresolved
+		return "", "", 0, detailUnresolved
 	}
 	if !st.member[name] {
-		return "", "", detailOutsideClassBody
+		return "", "", 0, detailOutsideClassBody
 	}
-	return enc, toks[name].Text, ""
+	return enc, toks[name].Text, methodEndLine(toks, name), ""
 }
 
-func bindKotlinFun(toks []Token, st *fileStructure, fun int) (string, string, string) {
+func bindKotlinFun(toks []Token, st *fileStructure, fun int) (string, string, int, string) {
 	j := fun + 1
 	if j < len(toks) && toks[j].Text == "<" {
 		for j < len(toks) && toks[j].Text != ">" {
@@ -122,20 +123,68 @@ func bindKotlinFun(toks []Token, st *fileStructure, fun int) (string, string, st
 		j++
 	}
 	if j >= len(toks) || toks[j].Kind != TokIdent {
-		return "", "", detailUnsupportedShape
+		return "", "", 0, detailUnsupportedShape
 	}
 	name := j
 	if name+1 >= len(toks) || toks[name+1].Text != "(" {
-		return "", "", detailUnsupportedShape
+		return "", "", 0, detailUnsupportedShape
 	}
 	enc := st.enclosing[fun]
 	if unresolvedEnclosing(enc) {
-		return "", "", detailUnresolved
+		return "", "", 0, detailUnresolved
 	}
 	if !st.member[fun] {
-		return "", "", detailOutsideClassBody
+		return "", "", 0, detailOutsideClassBody
 	}
-	return enc, strings.Trim(toks[name].Text, "`"), ""
+	return enc, strings.Trim(toks[name].Text, "`"), methodEndLine(toks, name), ""
+}
+
+// methodEndLine walks past the parameter list at name to the method's body
+// brace (skipping a throws clause or Kotlin return type) and returns the
+// line of its match; 0 when the declaration has no brace body.
+func methodEndLine(toks []Token, name int) int {
+	if name+1 >= len(toks) || toks[name+1].Text != "(" {
+		return 0
+	}
+	closeParen := matchDelim(toks, name+1, "(", ")")
+	if closeParen < 0 {
+		return 0
+	}
+	openBrace := -1
+	for j := closeParen + 1; j < len(toks); j++ {
+		switch toks[j].Text {
+		case "{":
+			openBrace = j
+		case ";", "=":
+		default:
+			continue
+		}
+		break
+	}
+	if openBrace < 0 {
+		return 0
+	}
+	closeBrace := matchDelim(toks, openBrace, "{", "}")
+	if closeBrace < 0 {
+		return 0
+	}
+	return toks[closeBrace].Line
+}
+
+func matchDelim(toks []Token, open int, openText, closeText string) int {
+	depth := 0
+	for j := open; j < len(toks); j++ {
+		switch toks[j].Text {
+		case openText:
+			depth++
+		case closeText:
+			depth--
+			if depth == 0 {
+				return j
+			}
+		}
+	}
+	return -1
 }
 
 func modifierFor(lang Lang) map[string]bool {

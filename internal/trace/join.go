@@ -18,10 +18,13 @@ type Finding struct {
 }
 
 type RowResult struct {
-	RowID  string
-	Scope  string // package import path
-	Name   string // parent test name
-	Status runrecord.Status
+	RowID   string
+	Scope   string // package import path
+	Name    string // parent test name
+	Status  runrecord.Status
+	File    string // repo-relative path of the bound tag site; "" when unbound
+	Line    int    // declaration line of the bound test; 0 when unbound
+	EndLine int    // last line of the bound test declaration; 0 when unknown
 }
 
 // TagClass: evidence for foreign/unknown IDs; never binds a row.
@@ -142,7 +145,15 @@ func Join(src *coverage.Source, reg *coverage.Registry, sites []TagSite, rep *go
 				return nil, nil, nil, fmt.Errorf("trace: join: row %s: %w", row.ID, err)
 			}
 
-			results = append(results, RowResult{RowID: row.ID, Scope: site.ImportPath, Name: site.TestName, Status: status})
+			results = append(results, RowResult{
+				RowID:   row.ID,
+				Scope:   site.ImportPath,
+				Name:    site.TestName,
+				Status:  status,
+				File:    site.File,
+				Line:    site.Line,
+				EndLine: site.EndLine,
+			})
 			switch status {
 			case runrecord.Failed:
 				findings = append(findings, Finding{

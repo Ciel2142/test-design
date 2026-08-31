@@ -124,6 +124,9 @@ func TestE2E_FixturePipeline(t *testing.T) {
 	}
 
 	wantRowResult(t, ev, "SC-01", "passed")
+	if got, ok := rowResultFor(ev, "SC-01"); !ok || got.File != "orders/orders_test.go" || got.Line != 5 || got.EndLine != 10 {
+		t.Errorf("SC-01 site = %+v, want orders/orders_test.go:5-10", got)
+	}
 	wantRowResult(t, ev, "SC-02", "failed")
 	wantFinding(t, ev, "red", "SC-02", "TestValidateQuantityRejectsZero")
 	wantRowResult(t, ev, "SC-03", "skipped")

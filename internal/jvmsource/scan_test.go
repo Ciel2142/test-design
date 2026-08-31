@@ -18,16 +18,16 @@ func TestScanTags_FixtureTree(t *testing.T) {
 			byID[id] = s
 		}
 	}
-	if s := byID["SC-01"]; s.ClassName != "com.example.a.ATest" || s.Method != "sameName" || s.Ambiguous {
+	if s := byID["SC-01"]; s.ClassName != "com.example.a.ATest" || s.Method != "sameName" || s.Ambiguous || s.EndLine != 7 {
 		t.Errorf("SC-01 = %+v", s)
 	}
-	if s := byID["SC-02"]; s.ClassName != "com.example.b.BTest$Nested" || s.Method != "sameName" {
+	if s := byID["SC-02"]; s.ClassName != "com.example.b.BTest$Nested" || s.Method != "sameName" || s.EndLine != 8 {
 		t.Errorf("SC-02 = %+v", s)
 	}
 	if !reflect.DeepEqual(byID["SC-02"].IDs, []string{"SC-02", "SC-03"}) {
 		t.Errorf("SC-02 IDs = %v", byID["SC-02"].IDs)
 	}
-	if s := byID["SC-04"]; s.ClassName != "com.example.k.DeclaredNameTest" || s.Method != "binds by declared class" {
+	if s := byID["SC-04"]; s.ClassName != "com.example.k.DeclaredNameTest" || s.Method != "binds by declared class" || s.EndLine != 7 {
 		t.Errorf("SC-04 = %+v (declared class must win over filename)", s)
 	}
 	if s := byID["SC-05"]; !s.Ambiguous || s.Detail == "" {

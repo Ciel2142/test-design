@@ -35,7 +35,7 @@ func TestJoinSingleBindingPassedProducesRowResultOnly(t *testing.T) {
 	reg, thisDoc := buildJoinTestRegistry(t)
 	src := basicSource(thisDoc, coverage.Row{ID: "SC-01"})
 	sites := []TagSite{
-		{ImportPath: "pkg", TestName: "TestFoo", File: "pkg/foo_test.go", Line: 5, IDs: []string{"SC-01"}},
+		{ImportPath: "pkg", TestName: "TestFoo", File: "pkg/foo_test.go", Line: 5, EndLine: 9, IDs: []string{"SC-01"}},
 	}
 	rep := &gotestjson.Report{Records: []runrecord.Record{
 		{Status: runrecord.Passed, Scope: "pkg", Name: "TestFoo"},
@@ -45,7 +45,7 @@ func TestJoinSingleBindingPassedProducesRowResultOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Join: %v", err)
 	}
-	wantResults := []RowResult{{RowID: "SC-01", Scope: "pkg", Name: "TestFoo", Status: runrecord.Passed}}
+	wantResults := []RowResult{{RowID: "SC-01", Scope: "pkg", Name: "TestFoo", Status: runrecord.Passed, File: "pkg/foo_test.go", Line: 5, EndLine: 9}}
 	if !reflect.DeepEqual(results, wantResults) {
 		t.Errorf("results = %+v, want %+v", results, wantResults)
 	}
