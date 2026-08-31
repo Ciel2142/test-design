@@ -47,6 +47,10 @@ var ops = map[string]opSpec{
 		newFlags: newExecuteLiveFlags,
 		handler:  executeLiveHandler,
 	},
+	"finalize": {
+		newFlags: newFinalizeFlags,
+		handler:  finalizeHandler,
+	},
 }
 
 func newNextIDFlags() *flag.FlagSet {
