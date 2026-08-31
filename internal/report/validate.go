@@ -2,6 +2,7 @@ package report
 
 import (
 	"fmt"
+	"slices"
 
 	"test-design/internal/coverage"
 )
@@ -22,6 +23,7 @@ const (
 	CodeMutationRowMismatch     = "mutation-row-mismatch"
 	CodeMissingAttemptEvidence  = "missing-attempt-evidence"
 	CodeInvalidMutationOutcome  = "invalid-mutation-outcome"
+	CodeInvalidVerdict          = "invalid-verdict"
 )
 
 type RefusalError struct {
@@ -153,6 +155,14 @@ func validateLayer2(in *Inputs, active []coverage.Row, gaps map[string]bool) err
 	voided := voidedBatches(in.Batches)
 
 	for _, b := range in.Batches {
+		for _, v := range b.Verdicts {
+			if !validCriticVerdict(v.Verdict) {
+				return refuse(CodeInvalidVerdict, "batch %s verdicts row %s with %q, outside HOLDS|WEAK|VACUOUS|MISSING", b.BatchID, v.RowID, v.Verdict)
+			}
+		}
+	}
+
+	for _, b := range in.Batches {
 		if b.Canary != nil && !b.Canary.Caught && !voided[b.BatchID] {
 			return refuse(CodeUncaughtCanaryNotVoided, "batch %s has an uncaught canary and is not voided", b.BatchID)
 		}
@@ -204,6 +214,10 @@ func validateCanaryBookkeeping(b Batch, byID map[string]Batch, voided map[string
 		return nil
 	}
 
+	if !slices.Contains(b.Rows, b.Canary.RowID) {
+		return refuse(CodeCanaryBookkeeping, "batch %s carries a canary on row %s, which the batch does not dispatch", b.BatchID, b.Canary.RowID)
+	}
+
 	switch b.Canary.Kind {
 	case "synthesized":
 		if b.Canary.Weakening == "" {
@@ -214,14 +228,32 @@ func validateCanaryBookkeeping(b Batch, byID map[string]Batch, voided map[string
 		}
 	case "natural":
 		if b.Canary.Caught {
-			for _, v := range b.Verdicts {
-				if v.RowID == b.Canary.RowID && v.Verdict == "HOLDS" {
-					return refuse(CodeCanaryBookkeeping, "batch %s natural canary row %s caught with a HOLDS real-source verdict", b.BatchID, b.Canary.RowID)
+			for _, other := range byID {
+				for _, v := range other.Verdicts {
+					if v.RowID == b.Canary.RowID && v.Verdict == "HOLDS" {
+						return refuse(CodeCanaryBookkeeping, "batch %s natural canary row %s is caught, yet batch %s verdicts it HOLDS", b.BatchID, b.Canary.RowID, other.BatchID)
+					}
 				}
 			}
 		}
 	}
 	return nil
+}
+
+func validCriticVerdict(verdict string) bool {
+	switch verdict {
+	case "HOLDS", "WEAK", "VACUOUS", "MISSING":
+		return true
+	}
+	return false
+}
+
+func validLiveVerdict(verdict string) bool {
+	switch verdict {
+	case "LIVE-PASS", "LIVE-FAIL", "LIVE-INCONCLUSIVE", valueLiveGap:
+		return true
+	}
+	return false
 }
 
 func hasRealSourceVerdict(canaryBatch Batch, byID map[string]Batch, voided map[string]bool) bool {
@@ -290,8 +322,14 @@ func validateLayer3(in *Inputs, active []coverage.Row, gaps map[string]bool) err
 		if !ok {
 			return refuse(CodeMissingVerdict, "row %s is layer-3 applicable but absent from live rowVerdicts", row.ID)
 		}
-		if gaps[row.ID] && v.Verdict != "LIVE-N/A (layer 1 gap)" {
-			return refuse(CodeMissingVerdict, "row %s is a layer-1 gap and must carry LIVE-N/A (layer 1 gap), got %q", row.ID, v.Verdict)
+		if !validLiveVerdict(v.Verdict) {
+			return refuse(CodeInvalidVerdict, "row %s carries live verdict %q, outside LIVE-PASS|LIVE-FAIL|LIVE-INCONCLUSIVE|%s", row.ID, v.Verdict, valueLiveGap)
+		}
+		if gaps[row.ID] && v.Verdict != valueLiveGap {
+			return refuse(CodeMissingVerdict, "row %s is a layer-1 gap and must carry %s, got %q", row.ID, valueLiveGap, v.Verdict)
+		}
+		if !gaps[row.ID] && v.Verdict == valueLiveGap {
+			return refuse(CodeInvalidVerdict, "row %s is not a layer-1 gap and must not carry %s", row.ID, valueLiveGap)
 		}
 	}
 	return nil
@@ -318,6 +356,9 @@ func validateLayer4(in *Inputs, active []coverage.Row, gaps map[string]bool) err
 	for _, m := range in.Mutations {
 		if gaps[m.RowID] {
 			return refuse(CodeMutationOnGapRow, "row %s is a layer-1 gap and must not carry mutation evidence", m.RowID)
+		}
+		if m.EvidencePath != "" && m.Evidence == nil {
+			return refuse(CodeInvalidVerdict, "row %s names mutation evidence %s that was not loaded", m.RowID, m.EvidencePath)
 		}
 	}
 

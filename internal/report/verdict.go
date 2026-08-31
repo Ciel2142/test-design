@@ -32,6 +32,7 @@ const (
 
 const (
 	valueNA                  = "N/A"
+	valueLiveGap             = "LIVE-N/A (layer 1 gap)"
 	valueLiveProfileNA       = "N/A (profile unavailable)"
 	valueMutationCaught      = "MUTATION-CAUGHT"
 	valueMutationSurvived    = "MUTATION-SURVIVED"
@@ -256,12 +257,16 @@ func deriveLayer2(rs *reasonSet, in *Inputs, active []coverage.Row) map[string]C
 	for _, row := range active {
 		ref := refs[row.ID]
 		switch ref.Verdict {
+		case "HOLDS":
 		case "WEAK", "VACUOUS", "MISSING":
 			detail := reasons[row.ID]
 			if detail == "" {
 				detail = fmt.Sprintf("batch %s returned %s", ref.BatchID, ref.Verdict)
 			}
 			rs.add(sevBlocked, layer2, row.ID, ref.Verdict, "%s", detail)
+		default:
+			rs.add(sevBlocked, layer2, row.ID, "invalid-verdict",
+				"layer-2 verdict %q is outside HOLDS|WEAK|VACUOUS|MISSING", ref.Verdict)
 		}
 	}
 	return refs
@@ -323,8 +328,12 @@ func deriveLayer3(rs *reasonSet, in *Inputs, active []coverage.Row) (map[string]
 		case "LIVE-INCONCLUSIVE":
 			sum.Inconclusive++
 			rs.add(sevBlocked, layer3, row.ID, "LIVE-INCONCLUSIVE", "the live walkthrough was inconclusive")
+		case valueLiveGap:
+			sum.NA++
 		default:
 			sum.NA++
+			rs.add(sevBlocked, layer3, row.ID, "invalid-verdict",
+				"layer-3 verdict %q is outside LIVE-PASS|LIVE-FAIL|LIVE-INCONCLUSIVE|%s", v.Verdict, valueLiveGap)
 		}
 		if v.RedactionBarrier {
 			rs.add(sevPartial, layer3, row.ID, "redaction-barrier", "the live transcript could not be reduced without redacting evidence")
@@ -390,6 +399,8 @@ func deriveLayer4(rs *reasonSet, in *Inputs, active []coverage.Row, gaps map[str
 			}
 		default:
 			sum.NA++
+			rs.add(sevBlocked, layer4, row.ID, "invalid-verdict",
+				"the row is layer-4 applicable but its entry carries no loaded evidence and no outcome")
 		}
 	}
 

@@ -47,6 +47,9 @@ func greenTrace() *TraceEvidence {
 	}
 }
 
+// greenBatches models the all-green layer-2 shape: a synthesized canary on a
+// healthy row, caught, with that row re-dispatched alone against the real
+// source, and the remaining rows in a canary-free batch inheriting the catch.
 func greenBatches() []Batch {
 	return []Batch{
 		{
@@ -54,12 +57,19 @@ func greenBatches() []Batch {
 			DispatchID: "d1",
 			RunID:      "run-1",
 			Rows:       []string{"SC-01"},
-			Canary:     &Canary{RowID: "SC-02", Kind: "natural", Caught: true},
-			Verdicts:   []CriticVerdict{{RowID: "SC-01", Verdict: "HOLDS"}},
+			Canary:     &Canary{RowID: "SC-01", Kind: "synthesized", Weakening: "dropped the boundary assertion", Caught: true},
 		},
 		{
 			BatchID:      "b1",
 			DispatchID:   "d2",
+			RunID:        "run-1",
+			Rows:         []string{"SC-01"},
+			InheritsFrom: "cb1",
+			Verdicts:     []CriticVerdict{{RowID: "SC-01", Verdict: "HOLDS"}},
+		},
+		{
+			BatchID:      "b2",
+			DispatchID:   "d3",
 			RunID:        "run-1",
 			Rows:         []string{"SC-02", "SC-03"},
 			InheritsFrom: "cb1",
@@ -224,8 +234,8 @@ func TestComputeAllGreenIsPass(t *testing.T) {
 	if sc01.Layer1 != (LayerVerdict{Status: "bound", Scope: "pkg/a", Name: "TestA"}) {
 		t.Errorf("SC-01 Layer1 = %+v, want bound with scope/name", sc01.Layer1)
 	}
-	if sc01.Layer2 != (CriticRef{Verdict: "HOLDS", BatchID: "cb1", DispatchID: "d1"}) {
-		t.Errorf("SC-01 Layer2 = %+v, want HOLDS from cb1/d1", sc01.Layer2)
+	if sc01.Layer2 != (CriticRef{Verdict: "HOLDS", BatchID: "b1", DispatchID: "d2"}) {
+		t.Errorf("SC-01 Layer2 = %+v, want HOLDS from the real-source batch b1/d2", sc01.Layer2)
 	}
 	if sc01.Layer3 != "N/A" {
 		t.Errorf("SC-01 Layer3 = %q, want N/A (unit row)", sc01.Layer3)
@@ -244,8 +254,8 @@ func TestComputeAllGreenIsPass(t *testing.T) {
 	if sc02.Layer4.Status != "MUTATION-CAUGHT" || len(sc02.Layer4.Sites) != 0 {
 		t.Errorf("SC-02 Layer4 = %+v, want MUTATION-CAUGHT with no named sites", sc02.Layer4)
 	}
-	if sc02.Layer2 != (CriticRef{Verdict: "HOLDS", BatchID: "b1", DispatchID: "d2"}) {
-		t.Errorf("SC-02 Layer2 = %+v, want HOLDS from b1/d2", sc02.Layer2)
+	if sc02.Layer2 != (CriticRef{Verdict: "HOLDS", BatchID: "b2", DispatchID: "d3"}) {
+		t.Errorf("SC-02 Layer2 = %+v, want HOLDS from b2/d3", sc02.Layer2)
 	}
 
 	sc03 := rowOf(t, r, "SC-03")
@@ -269,8 +279,8 @@ func TestComputeAllGreenIsPass(t *testing.T) {
 		t.Errorf("Layer4 summary = %+v, want 1 applicable / 1 caught", r.Layers.Layer4)
 	}
 
-	if len(r.Batches) != 2 || r.Batches[0].BatchID != "cb1" || r.Batches[0].Canary == nil {
-		t.Errorf("Batches = %+v, want both dispatches with the canary preserved", r.Batches)
+	if len(r.Batches) != 3 || r.Batches[0].BatchID != "cb1" || r.Batches[0].Canary == nil {
+		t.Errorf("Batches = %+v, want every dispatch with the canary preserved", r.Batches)
 	}
 }
 
@@ -293,7 +303,7 @@ func gapInputs() *Inputs {
 	in.Trace.RowAccounting = RowAccounting{ActiveRows: 3, WithResult: 2}
 	in.Trace.Findings = []TraceFinding{{Kind: "gap", RowID: "SC-02", Detail: "no test cites SC-02"}}
 	in.Trace.FindingCounts = map[string]int{"gap": 1}
-	in.Batches[1].Verdicts[0].Verdict = "MISSING"
+	in.Batches[2].Verdicts[0].Verdict = "MISSING"
 	in.Live.RowVerdicts[0].Verdict = "LIVE-N/A (layer 1 gap)"
 	in.Mutations = nil
 	return in
@@ -598,7 +608,7 @@ func TestComputeLayer3NotApplicableIsNA(t *testing.T) {
 
 func TestComputeWeakCriticVerdictIsBlocked(t *testing.T) {
 	in := greenInputs()
-	in.Batches[1].Verdicts[1] = CriticVerdict{RowID: "SC-03", Verdict: "WEAK", Reason: "asserts only the status code"}
+	in.Batches[2].Verdicts[1] = CriticVerdict{RowID: "SC-03", Verdict: "WEAK", Reason: "asserts only the status code"}
 
 	r := mustCompute(t, in)
 
@@ -615,7 +625,7 @@ func TestComputeWeakCriticVerdictIsBlocked(t *testing.T) {
 
 func TestComputeVacuousCriticVerdictIsBlocked(t *testing.T) {
 	in := greenInputs()
-	in.Batches[1].Verdicts[1].Verdict = "VACUOUS"
+	in.Batches[2].Verdicts[1].Verdict = "VACUOUS"
 
 	r := mustCompute(t, in)
 
@@ -663,9 +673,9 @@ func TestComputeRedRunnerIsBlocked(t *testing.T) {
 	in.Trace.RowResults = nil
 	in.Trace.Counts = SuiteCounts{}
 	in.Trace.RowAccounting = RowAccounting{ActiveRows: 3, Unaccounted: []string{"SC-01", "SC-02", "SC-03"}}
-	in.Batches[0].Verdicts[0].Verdict = "MISSING"
 	in.Batches[1].Verdicts[0].Verdict = "MISSING"
-	in.Batches[1].Verdicts[1].Verdict = "MISSING"
+	in.Batches[2].Verdicts[0].Verdict = "MISSING"
+	in.Batches[2].Verdicts[1].Verdict = "MISSING"
 	in.Live.RowVerdicts[0].Verdict = "LIVE-N/A (layer 1 gap)"
 	in.Live.RowVerdicts[1].Verdict = "LIVE-N/A (layer 1 gap)"
 	in.Mutations = nil
@@ -767,8 +777,8 @@ func multiCauseInputs() *Inputs {
 	}
 	in.Trace.FindingCounts = map[string]int{"drift": 1, "gap": 1}
 	in.Trace.RowAccounting = RowAccounting{ActiveRows: 3, WithResult: 2}
-	in.Batches[0].Verdicts[0].Verdict = "MISSING"
-	in.Batches[1].Verdicts[1] = CriticVerdict{RowID: "SC-03", Verdict: "WEAK", Reason: "shallow"}
+	in.Batches[1].Verdicts[0].Verdict = "MISSING"
+	in.Batches[2].Verdicts[1] = CriticVerdict{RowID: "SC-03", Verdict: "WEAK", Reason: "shallow"}
 	in.Live.RowVerdicts[0].Verdict = "LIVE-FAIL"
 	in.Live.RowVerdicts[1].RedactionBarrier = true
 	in.Live.CleanupFailed = true
@@ -806,5 +816,59 @@ func TestComputeIsDeterministic(t *testing.T) {
 
 	if !reflect.DeepEqual(first, second) {
 		t.Errorf("two Compute calls over equal inputs differ:\n%+v\n%+v", first, second)
+	}
+}
+
+func TestDeriveLayer2InvalidVerdictBlocks(t *testing.T) {
+	in := greenInputs()
+	in.Batches[1].Verdicts[0].Verdict = "PROBABLY-HOLDS"
+	rs := newReasonSet()
+
+	refs := deriveLayer2(rs, in, ActiveRows(in.Source))
+
+	if refs["SC-01"].Verdict != "PROBABLY-HOLDS" {
+		t.Errorf("SC-01 ref = %+v, want the raw token preserved", refs["SC-01"])
+	}
+	if rs.max != sevBlocked {
+		t.Errorf("severity = %v, want blocked", rs.max)
+	}
+	if got := (reasonKey{rs.list[0].Layer, rs.list[0].RowID, rs.list[0].Code}); got != (reasonKey{"2", "SC-01", "invalid-verdict"}) {
+		t.Errorf("reason = %+v, want a blocking layer-2 invalid-verdict on SC-01", rs.list)
+	}
+}
+
+func TestDeriveLayer3InvalidVerdictBlocks(t *testing.T) {
+	in := greenInputs()
+	in.Live.RowVerdicts[0].Verdict = "LIVE-MAYBE"
+	rs := newReasonSet()
+
+	_, sum := deriveLayer3(rs, in, ActiveRows(in.Source))
+
+	if sum.Status != statusBlocked || sum.NA != 1 || sum.Pass != 1 {
+		t.Errorf("layer 3 summary = %+v, want blocked with the unknown token counted as n/a", sum)
+	}
+	if rs.max != sevBlocked {
+		t.Errorf("severity = %v, want blocked", rs.max)
+	}
+	if got := (reasonKey{rs.list[0].Layer, rs.list[0].RowID, rs.list[0].Code}); got != (reasonKey{"3", "SC-02", "invalid-verdict"}) {
+		t.Errorf("reason = %+v, want a blocking layer-3 invalid-verdict on SC-02", rs.list)
+	}
+}
+
+func TestDeriveLayer4UnloadedEvidenceBlocks(t *testing.T) {
+	in := greenInputs()
+	in.Mutations[0].Evidence = nil
+	rs := newReasonSet()
+
+	refs, sum := deriveLayer4(rs, in, ActiveRows(in.Source), Layer1Gaps(in.Trace))
+
+	if refs["SC-02"].Status != "N/A" {
+		t.Errorf("SC-02 ref = %+v, want N/A alongside the blocking reason", refs["SC-02"])
+	}
+	if sum.Status != statusBlocked {
+		t.Errorf("layer 4 status = %q, want blocked; an unloaded entry must never pass", sum.Status)
+	}
+	if got := (reasonKey{rs.list[0].Layer, rs.list[0].RowID, rs.list[0].Code}); got != (reasonKey{"4", "SC-02", "invalid-verdict"}) {
+		t.Errorf("reason = %+v, want a blocking layer-4 invalid-verdict on SC-02", rs.list)
 	}
 }

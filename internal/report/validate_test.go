@@ -399,3 +399,53 @@ func TestValidateInvalidMutationOutcome(t *testing.T) {
 	in.Mutations[0].Outcome = "bogus"
 	wantRefusal(t, Validate(in), CodeInvalidMutationOutcome)
 }
+
+func TestValidateInvalidVerdictLayer2Token(t *testing.T) {
+	in := baseInputs()
+	in.Batches[1].Verdicts[0].Verdict = "PROBABLY-HOLDS"
+	wantRefusal(t, Validate(in), CodeInvalidVerdict)
+}
+
+func TestValidateInvalidVerdictLayer3Token(t *testing.T) {
+	in := baseInputs()
+	in.Live.RowVerdicts[0].Verdict = "LIVE-MAYBE"
+	wantRefusal(t, Validate(in), CodeInvalidVerdict)
+}
+
+func TestValidateInvalidVerdictLayer3GapTokenOnNonGapRow(t *testing.T) {
+	in := baseInputs()
+	in.Live.RowVerdicts[0].Verdict = "LIVE-N/A (layer 1 gap)"
+	re := wantRefusal(t, Validate(in), CodeInvalidVerdict)
+	if !strings.Contains(re.Detail, "SC-02") {
+		t.Errorf("Detail = %q, want it to name SC-02, which is bound at layer 1", re.Detail)
+	}
+}
+
+func TestValidateInvalidVerdictLayer4UnloadedEvidence(t *testing.T) {
+	in := baseInputs()
+	in.Mutations[0].Evidence = nil
+	re := wantRefusal(t, Validate(in), CodeInvalidVerdict)
+	if !strings.Contains(re.Detail, "testdata/mutation-valid.json") {
+		t.Errorf("Detail = %q, want it to name the unloaded evidence path", re.Detail)
+	}
+}
+
+func TestValidateCanaryBookkeepingCanaryRowNotInBatchRows(t *testing.T) {
+	in := baseInputs()
+	in.Batches[0].Rows = []string{"SC-01"}
+	wantRefusal(t, Validate(in), CodeCanaryBookkeeping)
+}
+
+func TestValidateCanaryBookkeepingNaturalCaughtHoldsInAnotherBatch(t *testing.T) {
+	in := baseInputs()
+	in.Batches[0].Verdicts = nil
+	in.Batches[2].Rows = []string{"SC-02", "SC-03"}
+	in.Batches[2].Verdicts = []CriticVerdict{
+		{RowID: "SC-02", Verdict: "HOLDS"},
+		{RowID: "SC-03", Verdict: "HOLDS"},
+	}
+	re := wantRefusal(t, Validate(in), CodeCanaryBookkeeping)
+	if !strings.Contains(re.Detail, "b2") {
+		t.Errorf("Detail = %q, want it to name batch b2, which verdicts the caught natural canary row HOLDS", re.Detail)
+	}
+}
