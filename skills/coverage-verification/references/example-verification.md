@@ -1,87 +1,79 @@
-# Verification: order creation
+# Verification: docs/superpowers/coverage/2026-07-30-order-creation-coverage.md
 
-Coverage: docs/superpowers/coverage/2026-07-30-order-creation-coverage.md
-Baseline: a1b2c3d · Run: 2026-07-30T14:02Z
-Approved by: alex — "go ahead, run it here" (2026-07-30T14:01Z)
-Verdict: BLOCKED — 2 gaps, 1 vacuous, 1 mutation survived, 1 live failure, 1 live inconclusive
+- Source: `docs/superpowers/coverage/2026-07-30-order-creation-coverage.md` (sha256 `9f2b6c1e4a7d8f0351c6a9e2d4b7f8091a2c3d4e5f60718293a4b5c6d7e8f901`)
+- Head commit: `4c1d90ab7e2f5638c0a1b2d3e4f5061728394a5b`
+- Baseline: `a1b2c3d4e5f60718293a4b5c6d7e8f9012345678` (ok)
+- Run: `run-2026-07-30-0001`
+- Verifier: `0.6.0` · Schema: `1`
+- Approved by: alex — "go ahead, run it here" (2026-07-30T14:01Z)
+- **Verdict: BLOCKED**
 
-## Layer 1 — trace (full re-run)
+## Layer 1 — trace
 
-3/4 rows tagged · runner reported 3 passed, 1 skipped · 0 new failures vs baseline
+Status: blocked · Suite passed 12 · failed 0 · skipped 0 · new failures 0
 
-```
-gap:       SC-05 — no tagged test
-gap:       SC-02 — tagged test reported `skipped` by the runner
-drift:     none
-overclaim: none
-stale:     none
-```
+Findings: gap 1
 
-`SC-02` is the case a grep-only layer 1 would have called covered: the tag is present and
-the suite is green, because a skipped test does not fail.
+| Row | Level | Risk | Layer 1 | Scope/Name |
+| --- | --- | --- | --- | --- |
+| SC-01 | unit | high | bound | test-design/internal/orders TestRejectsZeroQuantity |
+| SC-02 | unit | med | bound | test-design/internal/orders TestPersistsAcceptedOrder |
+| SC-03 | integration | high | bound | test-design/internal/orders TestUniquenessUnderRetry |
+| SC-04 | smoke | med | bound | test-design/internal/orders TestCreateOrderSmoke |
+| SC-05 | e2e | high | gap |  |
 
-## Layer 2 — adversarial read (1 canary, synthesized from SC-01 — caught)
+## Layer 2 — adversarial read
 
-2 rows read: HOLDS 1 · WEAK 0 · VACUOUS 1 — real-source verdicts only; the canary copy's
-own `VACUOUS` is canary evidence, not a row verdict, and is excluded from this tally
+Status: blocked · Applicable 5 · Holds 3 · Weak 0 · Vacuous 1 · Missing 1
 
-```
-SC-01 HOLDS
-  asserts the thrown message AND that no row persisted; mutating <= to < makes qty=0
-  succeed, so count() becomes 1 and the second assertion fails
-SC-03 VACUOUS
-  only asserts spy.toHaveBeenCalledOnce; the mutation changes persisted state, which this
-  test never inspects
-```
+| Row | Layer 2 | Batch | Dispatch |
+| --- | --- | --- | --- |
+| SC-01 | HOLDS | batch-2 | dispatch-2 |
+| SC-02 | VACUOUS | batch-1 | dispatch-1 |
+| SC-03 | HOLDS | batch-1 | dispatch-1 |
+| SC-04 | HOLDS | batch-1 | dispatch-1 |
+| SC-05 | MISSING | batch-1 | dispatch-1 |
 
-Canary: one, synthesized from SC-01.
+| Batch | Dispatch | Rows | Canary Row | Canary Kind | Weakening | Caught | Inherits From | Voided |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| batch-1 | dispatch-1 | SC-01, SC-02, SC-03, SC-04, SC-05 | SC-01 | synthesized | the boundary assertion on the rejected quantity replaced with a non-negative bound, which holds either side of the row's Verification mutation | true | - | false |
+| batch-2 | dispatch-2 | SC-01 | - | - | - | - | batch-1 | false |
 
-No natural one was available — layer 1's flagged rows are `SC-02` and `SC-05`,
-neither in this batch (`SC-01`, `SC-03`), and neither had a prior `WEAK`/`VACUOUS` verdict
-before this run started. So one was synthesized from `SC-01`: the batch was dispatched
-(`dispatch 1`, canary-bearing) with `SC-01`'s `expect(count()).toBe(0)` replaced by
-`expect(count()).toBeGreaterThanOrEqual(0)`, which holds for both `0` and `1` and so no
-longer binds to the `<=`→`<` mutation. The critic returned `VACUOUS` on that copy — canary
-caught — so `SC-03`'s verdict stands. `SC-01` was then re-dispatched alone with its real
-source (`dispatch 2`, canary-free, inheriting dispatch 1's canary evidence), returning the
-`HOLDS` above. Nothing was written to disk; the weakened copy existed only in the dispatch
-prompt.
+## Layer 3 — live
 
-## Layer 3 — live (transcripts re-grepped by main thread)
+Status: blocked · Applicable 2 · Pass 0 · Fail 1 · Inconclusive 0 · N/A 1
 
-```
-W0 happy    PASS          EXPECT 201 → got 201                                    no SC row (baseline happy path)
-W2 dep down FAIL          EXPECT 503 and "rows":0 → got 500                       SC-05
-W5 parallel INCONCLUSIVE  1 iteration only; needs a stated count with fail-if-any  SC-03
-SC-05 LIVE-N/A (layer 1 gap)  no tagged test at all (see layer 1 gap)
-```
+| Row | Layer 3 |
+| --- | --- |
+| SC-01 | N/A |
+| SC-02 | N/A |
+| SC-03 | N/A |
+| SC-04 | LIVE-FAIL |
+| SC-05 | LIVE-N/A (layer 1 gap) |
 
-`W2` exercises exactly the scenario `SC-05` describes, but the row has no tagged test, so
-its formal layer-3 verdict is `LIVE-N/A (layer 1 gap)` — `W2`'s `FAIL` is diagnostic
-evidence for item 3 below, not a substitute for tagging the row.
+## Layer 4 — mutation
 
-transcripts: `docs/superpowers/coverage/transcripts/W0-happy.txt`, `W2-dep-down.txt`,
-`W5-parallel.txt`
+Status: blocked · Applicable 3 · Caught 1 · Survived 1 · Unappliable 0 · N/A 1
 
-Tamper check: HEAD unchanged, stash list unchanged, diff hash unchanged.
+| Row | Layer 4 | Surviving Sites |
+| --- | --- | --- |
+| SC-01 | MUTATION-CAUGHT | - |
+| SC-02 | N/A | - |
+| SC-03 | MUTATION-SURVIVED | site-2 |
+| SC-04 | N/A | - |
+| SC-05 | MUTATION-N/A (layer 1 gap) | - |
 
-## Layer 4 — mutation (risk=high rows)
+## Transcripts
 
-```
-SC-02 MUTATION-N/A (layer 1 gap)  row has no tagged executable test (see layer 1 gap)
-SC-05 MUTATION-N/A (layer 1 gap)  no tagged test at all (see layer 1 gap)
-SC-03 MUTATION-SURVIVED           uniqueness check moved outside the transaction, test still passed
-```
-
-transcripts: `docs/superpowers/coverage/transcripts/SC-03-mutation.txt`
-
-Tamper check: HEAD unchanged, stash list unchanged, diff hash unchanged; working tree clean
-apart from the transcripts.
+- `docs/superpowers/coverage/transcripts/run-2026-07-30-0001/live-evidence.json` (sha256 `1c9a0f3b8d27465e0a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f6071`)
+- `docs/superpowers/coverage/transcripts/run-2026-07-30-0001/mutation-SC-01.json` (sha256 `2d0b1e4c9a38576f1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f607182`)
+- `docs/superpowers/coverage/transcripts/run-2026-07-30-0001/mutation-SC-03.json` (sha256 `3e1c2f5d0b49687a2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293`)
+- `docs/superpowers/coverage/transcripts/run-2026-07-30-0001/trace-evidence.json` (sha256 `4f2d3a6e1c507a8b3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f6071829304`)
 
 ## What must happen before this branch can finish
 
-1. `SC-02` — un-skip the test, or delete the row and record why in `## Retired`
-2. `SC-03` — assert persisted state instead of the spy, then re-run layers 2 and 4 for `SC-03`
-3. `SC-05` — write the missing smoke test
-4. `W2` — map the dependency failure to 503 rather than the generic 500 handler
-5. `W5` — give the harness a stated iteration count with fail-if-any
+- [1] [SC-05] gap — no test cites SC-05
+- [2] [SC-02] VACUOUS — only asserts that the repository save method was called; the row's Verification mutation changes persisted state, which this test never inspects
+- [2] [SC-05] MISSING — no source found at internal/orders/create_test.go; the row has no tagged test
+- [3] [SC-04] LIVE-FAIL — the live walkthrough failed
+- [4] [SC-03] MUTATION-SURVIVED — the tagged test did not fail at site-2
