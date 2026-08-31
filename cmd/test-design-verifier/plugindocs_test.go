@@ -41,7 +41,7 @@ var forbiddenTokens = []string{
 	"bring-up-attempt.txt",
 	`grep -rn "covers`,
 	`covers: SC-"`,
-	"status\tscope\tname",
+	"status<TAB>scope<TAB>name",
 	".vitest-report",
 	"sample-project",
 	"-t '^",
