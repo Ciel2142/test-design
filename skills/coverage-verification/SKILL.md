@@ -193,7 +193,8 @@ the ops, and no row's fate is decided by re-reading the source.
 
 ### The one semantic act in layer 1
 
-Everything above is the executable's. Exactly one judgment is this thread's: **freshness**.
+Everything above, apart from that one read, is the executable's. Exactly one judgment is
+this thread's: **freshness**.
 Read the branch's production diff and classify it against the coverage source's behavior
 groups. A hunk that changes an externally-observable behavior no row describes makes the
 source stale — the yardstick no longer covers the code, and a verdict measured against it
@@ -229,9 +230,11 @@ Each entry of `rowResults[]` in the trace evidence carries `rowId`, `scope`, `na
 of the test declaration. Read `file` lines `line` through `endLine` with the Read tool and
 paste exactly that range — tag line included — as the row's source.
 
-Unbound rows carry zero in all three fields. They are dispatched anyway, with
-`no source found at <path>` in place of the paste: that is what lets the critic return
-`MISSING` and lets the layer-1 reconciliation below run at all.
+A row absent from `rowResults[]` is unbound. Its reason lives in `findings[]` — `gap` or
+`ambiguity` — whose `detail` names the tag site's `file:line` when one exists. Dispatch that
+row anyway: `no source found at <file:line>` when the finding names a site, or bare
+`no source found` when it does not. That is what lets the critic return `MISSING` and lets
+the layer-1 reconciliation below run at all.
 
 Never re-find a test by searching for its name. Names repeat across files, and the structural
 binding the trace op already resolved is what settles which file a tag means. A fresh lookup
@@ -424,7 +427,7 @@ Two other replies are legitimate:
   `layer3.attemptEvidencePath`:
 
   ```json
-  {"schemaVersion": "1", "verifierVersion": "0.6.0", "runID": "<run id>", "profile": "<profilePath>", "refusal": "<the agent's reason, verbatim>"}
+  {"schemaVersion": "1", "verifierVersion": "<verifierVersion as printed by any op this run>", "runID": "<run id>", "profile": "<profilePath>", "refusal": "<the agent's reason, verbatim>"}
   ```
 
   Finalize loads it with `report.LoadLiveAttempt`, which refuses a document without the
@@ -565,7 +568,7 @@ why the row was abandoned.
 Write the refusal as an attempt document under the run dir:
 
 ```json
-{"schemaVersion": "1", "verifierVersion": "0.6.0", "runID": "<run id>", "rowID": "SC-07", "code": "<refusal code>", "message": "<refusal message, verbatim>"}
+{"schemaVersion": "1", "verifierVersion": "<verifierVersion as printed by any op this run>", "runID": "<run id>", "rowID": "SC-07", "code": "<refusal code>", "message": "<refusal message, verbatim>"}
 ```
 
 and record the row as
@@ -643,7 +646,8 @@ the message names the specifics.
 | `snapshot-mismatch` | `execute-live`, `evaluate-mutation`, `finalize` | The repository changed while the op was running. This does **not** claim corruption: commit or discard the concurrent change, then re-run the run from a fresh run ID |
 | `source-changed-during-verification` | `trace` | The same condition seen at the end of the trace run. It does **not** claim corruption. Commit or discard the concurrent change and re-run |
 | `head-moved` | `finalize` | HEAD is no longer the commit the trace ran against. A verification describes one commit: mint a new run ID and repeat every layer at the current HEAD |
-| `stale-evidence` | `finalize` | Some batch, live document, or mutation document names a different run ID than the request. A bookkeeping defect in the request this thread assembled — fix the request document, never the evidence, and never re-stamp a run ID |
+| `stale-evidence` (run-ID mismatch) | `finalize` | Some trace, live, batch, or mutation document names a different run ID than the request. A bookkeeping defect in the request this thread assembled — fix the request document, never the evidence, and never re-stamp a run ID |
+| `stale-evidence` (source hash mismatch) | `finalize` | The trace or live evidence's `sourceSha256` does not match the coverage source's current hash. The coverage source changed mid-run — mint a new run ID and repeat every layer against the source as it now reads |
 | `missing-verdict` | `finalize` | An active row has no layer-2 verdict, a layer-3 applicable row is absent from `rowVerdicts`, a layer-4 applicable row has no entry, or a layer-1 gap row carries something other than `MISSING`. Add the missing entry to the request; do not invent a verdict for a row nothing verdicted |
 | `voided-verdict` | `finalize` | A row is verdicted only by voided batches. Its re-dispatch never happened or was never recorded: re-dispatch that row and add the batch |
 | `uncaught-canary-not-voided` | `finalize` | A batch records `caught: false` without `voided: true`. Set `voided: true` and add the higher-tier re-dispatch batch |
@@ -662,9 +666,11 @@ Exactly three, and `finalize` decides which.
 
 **`BLOCKED`** — any blocking reason. The executable raises them for: a `stale` freshness
 result; `red-runner`; new failures against the baseline; any active row whose layer-1 status
-is not `bound`; a layer-2 `WEAK`, `VACUOUS`, or `MISSING`; a layer-3 `LIVE-FAIL` or
-`LIVE-INCONCLUSIVE`; a repository that changed during the live or mutation run; and a layer-4
-`MUTATION-SURVIVED` or `MUTATION-UNAPPLIABLE`.
+is not `bound`; row-less layer-1 findings — `drift` and `overclaim` on tags that cite no
+active row; a layer-2 `WEAK`, `VACUOUS`, or `MISSING`; a layer-3 `LIVE-FAIL` or
+`LIVE-INCONCLUSIVE`; a repository that changed during the live or mutation run;
+`invalid-verdict` at layer 2, 3, or 4, when a row's verdict value falls outside that layer's
+closed set; and a layer-4 `MUTATION-SURVIVED` or `MUTATION-UNAPPLIABLE`.
 
 **`PARTIAL`** — no blocking reason, but at least one layer could not deliver a full answer.
 The executable's causes, exhaustively: `baseline-<status>` when `baselineStatus` was not `ok`;

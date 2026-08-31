@@ -26,9 +26,15 @@ kind the trace op emits:
 - `SC-09` is a test name (`TestSameName`) declared identically in both `orders` and
   `payments`; only the `orders` copy is tagged. This is the row that proves the join is
   scoped by the tag's file, not by the test name alone.
-- `SC-10` is the fixture's one bound `risk: high` row; `TestE2E_FinalizePipeline` reports
-  its mutation run `environmental` to reach a `BLOCKED` verdict without invoking the
-  `mutator` agent.
+- `SC-10` is the fixture's one bound `risk: high` row and the two-guard multi-site fixture:
+  its tagged test, `TestReserveGuard`, exercises only `Reserve`, while `orders.go` guards
+  both `Reserve` and `ReserveBatch` with the same shape of check. It carries the obligation
+  from `docs/superpowers/specs/2026-08-09-multi-site-mutation-design.md` — each guard must
+  be mutated and evaluated site-at-a-time, not collapsed into one row-level verdict —
+  proved end-to-end by `TestE2EMutation_GoTwoGuardMultiSite`, which catches the `Reserve`
+  mutant and lets the `ReserveBatch` mutant survive under its own site name. Separately,
+  `TestE2E_FinalizePipeline` reports `SC-10`'s mutation run `environmental` to reach a
+  `BLOCKED` verdict without invoking the `mutator` agent.
 
 `TestE2E_FixturePipeline` also asserts that two `trace` runs against the same repository
 state produce byte-identical evidence apart from timestamps and run IDs, and that `trace`
@@ -36,7 +42,8 @@ itself writes nothing into the repository it inspects.
 
 ## `maven-java-project/`
 
-Layer 1's JVM fixture for Maven, exercised by `baselinejvm_test.go`: a nested test class
+Layer 1's JVM fixture for Maven, exercised by `baseline` in `baselinejvm_test.go` and by
+`trace` in `TestTraceJVM_MavenPipeline`: a nested test class
 bound by `Outer$Inner` (`SC-04`), a parameterized test whose invocations collapse to one
 family verdict (`SC-05`), a passing, a failing, and a `@Disabled` test (`SC-01`–`SC-03`),
 an uncited row (`SC-06`), and one bound `risk: high` row (`SC-07`). Skipped when `mvn` is

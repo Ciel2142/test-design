@@ -71,8 +71,10 @@ mutation evidence.
 
 `SC-03` is `integration`, not `unit`, because two mocked concurrent calls execute
 sequentially in one thread and would pass whether or not the check sits inside the
-transaction. Its harness names an iteration count, because a single green run of a race
-test records `INCONCLUSIVE`, not `PASS`.
+transaction. Its harness names an iteration count and fail-on-any, because a single green
+run of a race test proves nothing — the racy interleaving might simply not occur on that
+pass, and only a harness that fails on any iteration's failure gives the row's verdict any
+weight.
 
 `SC-05` is `smoke`, which is why the `## Verification` block above names a `live-profile` —
 any `smoke` or `e2e` row makes layer 3 applicable, and layer 3 needs an approved profile to

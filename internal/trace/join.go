@@ -23,7 +23,7 @@ type RowResult struct {
 	Name    string // parent test name
 	Status  runrecord.Status
 	File    string // repo-relative path of the bound tag site; "" when unbound
-	Line    int    // declaration line of the bound test; 0 when unbound
+	Line    int    // line of the bound tag comment; 0 when unbound
 	EndLine int    // last line of the bound test declaration; 0 when unknown
 }
 

@@ -29,8 +29,9 @@ can see as the complete set and judge them. A paste that instead stops mid-state
 mid-block with no marker is a dispatcher error: verdict the row on what is visible and say
 in its reason line that the paste looks truncated, so it can be re-sent whole.
 
-A row whose paste reads `no source found at <path>` has no test. Verdict it `SC-nn MISSING`
-per the rules below — never `VACUOUS`, which means a test exists and asserts nothing.
+A row whose paste reads `no source found` — with or without a trailing `at <file:line>` — has
+no test. Verdict it `SC-nn MISSING` per the rules below — never `VACUOUS`, which means a test
+exists and asserts nothing.
 
 ## Verdicts
 
@@ -41,12 +42,14 @@ Exactly one per row.
 | `HOLDS` | Applying the mutation would make this test fail. It binds to the bug. |
 | `WEAK` | The test passes, but would **still** pass with the mutation applied. It tests something adjacent. |
 | `VACUOUS` | The test asserts nothing bound to the mutation at all. |
+| `MISSING` | The row's tagged test does not exist — the paste read `no source found`. |
 
 ## Defect patterns to hunt
 
-- **Assertion on a mock, not on state.** `expect(spy).toHaveBeenCalledOnce()` proves the
-  code called something. It does not prove the resulting state is correct. If the mutation
-  changes state but the test only inspects a spy, that is `VACUOUS`.
+- **Assertion on a mock, not on state.** Mockito's `verify(repo).save(any())`, or gomock's
+  `EXPECT().Save(gomock.Any())`, proves the code called something. It does not prove the
+  resulting state is correct. If the mutation changes state but the test only inspects a
+  mock, that is `VACUOUS`.
 - **Assertion on a trivially-returned value.** The test asserts what the implementation
   returns unconditionally, so it cannot distinguish correct from incorrect.
 - **Assertion that survives the mutation.** Trace it concretely: apply the mutation in your
@@ -63,7 +66,7 @@ SC-01 HOLDS
   asserts the thrown message AND that no row persisted; mutating <= to < makes qty=0
   succeed, so count() becomes 1 and the second assertion fails
 SC-03 VACUOUS
-  only asserts spy.toHaveBeenCalledOnce; the mutation changes persisted state, which this
+  only asserts verify(repo).save(any()); the mutation changes persisted state, which this
   test never inspects
 ```
 

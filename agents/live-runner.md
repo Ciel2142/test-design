@@ -84,9 +84,9 @@ A single green pass proves nothing — the interleaving that triggers a race may
 occur. State the iteration count in the walkthrough's `expectation` itself (e.g.
 "200 concurrent requests, none observe a torn write") and drive it with a script that
 fails on any single iteration's failure, not just the last one. A walkthrough you cannot
-express this way still gets a step, but its `expectation` says plainly that the result is
-inconclusive rather than claiming a pass — the row binds to an `INCONCLUSIVE` result
-rather than a false `LIVE-PASS`.
+drive that way — including one with no fail-on-any-iteration script available — is not a
+step you can bind to a row: treat it as a row that cannot be expressed as a plan step,
+below.
 
 ## No applicable rows
 
@@ -106,8 +106,9 @@ the rows.
 ## Complete example
 
 Given a profile whose `walkthrough` list declares `["echo", "live-fixture-ready"]` and
-`["printenv", "LIVE_FIXTURE_CANARY"]`, no declared endpoints, and applicable rows SC-11
-(smoke, happy path) and SC-12 (e2e, non-happy path), with SC-13 in the layer-1 gap set:
+`["printenv", "LIVE_FIXTURE_CANARY"]`, whose `cleanup` list declares `["rm", "-f", …]`, no
+declared endpoints, and applicable rows SC-11 (smoke, happy path) and SC-12 (e2e,
+non-happy path), with SC-13 in the layer-1 gap set:
 
 ```json
 {
