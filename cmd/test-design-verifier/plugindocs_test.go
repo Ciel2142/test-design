@@ -241,18 +241,16 @@ func TestPluginDocs_RefusalCodesExist(t *testing.T) {
 		t.Fatalf("read %s: %v", path, err)
 	}
 
-	section, err := extractSection(string(data), "## Refusals")
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	excluded := map[string]bool{}
 	for op := range ops {
 		excluded[op] = true
 	}
+	for _, tok := range nonCodeKebabTokens {
+		excluded[tok.token] = true
+	}
 
 	cited := map[string]bool{}
-	for _, m := range kebabTokenPattern.FindAllStringSubmatch(section, -1) {
+	for _, m := range kebabTokenPattern.FindAllStringSubmatch(string(data), -1) {
 		tok := m[1]
 		if excluded[tok] {
 			continue
@@ -260,12 +258,15 @@ func TestPluginDocs_RefusalCodesExist(t *testing.T) {
 		cited[tok] = true
 	}
 	if len(cited) == 0 {
-		t.Fatal("no refusal codes found in the Refusals section; the extraction heuristic is broken")
+		t.Fatal("no refusal codes found in skills/coverage-verification/SKILL.md; the extraction heuristic is broken")
 	}
 
 	literals, err := collectStringLiterals(
 		filepath.Join(root, "cmd", "test-design-verifier"),
 		filepath.Join(root, "internal", "report"),
+		filepath.Join(root, "internal", "live"),
+		filepath.Join(root, "internal", "mutation"),
+		filepath.Join(root, "internal", "coverage"),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -273,27 +274,32 @@ func TestPluginDocs_RefusalCodesExist(t *testing.T) {
 
 	var missing []string
 	for code := range cited {
-		if !literals[code] {
+		if !anyLiteralNames(literals, code) {
 			missing = append(missing, code)
 		}
 	}
 	sort.Strings(missing)
 	if len(missing) != 0 {
-		t.Errorf("refusal codes cited in skills/coverage-verification/SKILL.md but not found as a Go string literal in cmd/test-design-verifier or internal/report: %v", missing)
+		t.Errorf("refusal codes cited in skills/coverage-verification/SKILL.md but not found as, or embedded in, a Go string literal in cmd/test-design-verifier, internal/report, internal/live, internal/mutation, or internal/coverage: %v", missing)
 	}
 }
 
-func extractSection(doc, heading string) (string, error) {
-	start := strings.Index(doc, heading)
-	if start == -1 {
-		return "", fmt.Errorf("heading %q not found", heading)
+// Op names are excluded via the ops registry; these are the rest.
+var nonCodeKebabTokens = []struct{ token, reason string }{
+	{"coverage-critic", "agent name"},
+	{"live-runner", "agent name"},
+	{"requesting-code-review", "skill name"},
+	{"test-coverage-design", "skill name"},
+	{"runner-command", "coverage-source field name, not a refusal code"},
+}
+
+func anyLiteralNames(literals map[string]bool, code string) bool {
+	for lit := range literals {
+		if strings.Contains(lit, code) {
+			return true
+		}
 	}
-	rest := doc[start+len(heading):]
-	nextHeading := regexp.MustCompile(`(?m)^## `)
-	if loc := nextHeading.FindStringIndex(rest); loc != nil {
-		rest = rest[:loc[0]]
-	}
-	return rest, nil
+	return false
 }
 
 func collectStringLiterals(dirs ...string) (map[string]bool, error) {
