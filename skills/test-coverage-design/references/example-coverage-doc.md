@@ -1,7 +1,18 @@
 # Coverage: order creation
 
 Spec: docs/superpowers/specs/2026-07-30-order-creation-design.md
-Baseline: a1b2c3d · 1 passed, 0 failed, 0 skipped
+Baseline: e4a91f2 · 1 passed, 0 failed, 0 skipped
+
+## Verification
+
+- runner-kind: go
+- runner-root: .
+- runner-command: ["go", "test", "-count=1", "-json", "./..."]
+- report-globs: []
+- baseline-evidence: docs/superpowers/coverage/2026-07-30-order-creation-baseline.json
+- baseline-sha256: 3f5b3c1a9e7d2b8f4c6a1d9e5b7f3c2a8d6e4b1f9c7a5e3d1b9f7c5a3e1d9b7f
+- live-profile: .test-design/live-profiles/order-creation-local.json
+- final-command: ["/test-design:coverage-verification", "docs/superpowers/coverage/2026-07-30-order-creation-coverage.md"]
 
 ## Baseline failures
 
@@ -37,18 +48,22 @@ SC-05's `Expected` column; spec defines no separate logging/metrics contract), m
 (no schema change — no new changeset in this feature), resource limits (payload is two
 scalar fields)
 
-| ID | Behavior | Bug it catches | Level | Expected | Risk |
-|----|----------|----------------|-------|----------|------|
-| SC-01 | quantity at the lower bound is rejected | guard uses `<` instead of `<=` | unit | throws "qty must be > 0", no row persisted | med |
-| SC-02 | write rolls back when the commit hook fails | rollback call omitted on the error path | integration | 0 rows persisted, INV-1 holds | high |
-| SC-03 | two writers with one idempotency key | uniqueness check runs outside the transaction (TOCTOU) | integration | 1 row, second call answers 200 | high |
-| SC-05 | dependency down answers 503, not 500 | error mapped to the generic handler instead of the unavailable branch | smoke | 503, body reports `rows: 0`, message not acked | high |
+| ID | Behavior | Expected | Level | Verification mutation | Risk |
+|----|----------|----------|-------|------------------------|------|
+| SC-01 | quantity at the lower bound is rejected | throws "qty must be > 0", no row persisted | unit | guard uses `<` instead of `<=` | med |
+| SC-02 | write rolls back when the commit hook fails | 0 rows persisted, INV-1 holds | integration | rollback call omitted on the error path | high |
+| SC-03 | two writers with one idempotency key | 1 row, second call answers 200 | integration | uniqueness check runs outside the transaction (TOCTOU) | high |
+| SC-05 | dependency down answers 503, not 500 | 503, body reports `rows: 0`, message not acked | smoke | error mapped to the generic handler instead of the unavailable branch | high |
 
 harness SC-02: in-process store, write hook throws on invocation
 harness SC-03: 2 parallel clients, real store, no mocks, 50 iterations fail-if-any
 harness SC-05: service started with `FAIL_DB=1`, `POST /orders {"qty":3}`
 
 ### Notes on this example
+
+IDs were allocated through `next-id -repo . -area ""` before the sweep, which returned
+`next: 1` for a first coverage document — the rows below are numbered from that starting
+point, not chosen by hand.
 
 `SC-01` is `med` because axis 1 is not in the high-by-rule set. `SC-02` and `SC-05` are
 axis 3, `SC-03` is axis 4 and axis 5 — all `high` by rule, so all three require layer 4
@@ -59,6 +74,10 @@ sequentially in one thread and would pass whether or not the check sits inside t
 transaction. Its harness names an iteration count, because a single green run of a race
 test records `INCONCLUSIVE`, not `PASS`.
 
-Every `Bug it catches` names something a person could type into the source. Contrast
-"a duplicate order is created", which is `Expected` negated and gives the mutator nothing
-to apply.
+`SC-05` is `smoke`, which is why the `## Verification` block above names a `live-profile` —
+any `smoke` or `e2e` row makes layer 3 applicable, and layer 3 needs an approved profile to
+dispatch against.
+
+Every `Verification mutation` names something a person could type into the source.
+Contrast "a duplicate order is created", which is `Expected` negated and gives the mutator
+nothing to apply.
