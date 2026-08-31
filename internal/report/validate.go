@@ -297,7 +297,7 @@ func validateLayer3(in *Inputs, active []coverage.Row, gaps map[string]bool) err
 
 	for _, v := range in.Live.RowVerdicts {
 		if !liveApplicable[v.RowID] {
-			return refuse(CodeUnknownRow, "live rowVerdicts names row %s, which is not layer-3 applicable", v.RowID)
+			return refuse(CodeUnexpectedLiveEvidence, "live rowVerdicts names row %s, which is not a smoke/e2e active row", v.RowID)
 		}
 	}
 

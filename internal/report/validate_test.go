@@ -2,6 +2,7 @@ package report
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"test-design/internal/coverage"
@@ -97,7 +98,7 @@ func baseInputs() *Inputs {
 	}
 }
 
-func wantRefusal(t *testing.T, err error, code string) {
+func wantRefusal(t *testing.T, err error, code string) *RefusalError {
 	t.Helper()
 	if err == nil {
 		t.Fatalf("Validate returned nil error, want refusal %q", code)
@@ -109,6 +110,7 @@ func wantRefusal(t *testing.T, err error, code string) {
 	if re.Code != code {
 		t.Errorf("Validate refusal code = %q, want %q (detail: %s)", re.Code, code, re.Detail)
 	}
+	return re
 }
 
 func TestValidateAcceptsHappyPath(t *testing.T) {
@@ -201,6 +203,49 @@ func TestValidateVoidedVerdictLayer2(t *testing.T) {
 	wantRefusal(t, Validate(in), CodeVoidedVerdict)
 }
 
+func TestValidateVoidedVerdictTransitiveOneLevel(t *testing.T) {
+	in := baseInputs()
+	base := baseBatches()
+	in.Batches = []Batch{
+		{BatchID: "root", RunID: "run-1", Voided: true},
+		{
+			BatchID:      "b1",
+			RunID:        "run-1",
+			Rows:         []string{"SC-01"},
+			InheritsFrom: "root",
+			Verdicts:     []CriticVerdict{{RowID: "SC-01", Verdict: "HOLDS"}},
+		},
+		base[0],
+		base[2],
+	}
+	re := wantRefusal(t, Validate(in), CodeVoidedVerdict)
+	if !strings.Contains(re.Detail, "SC-01") {
+		t.Errorf("Detail = %q, want it to name row SC-01, whose only batch (b1) is voided purely via inheritsFrom root", re.Detail)
+	}
+}
+
+func TestValidateVoidedVerdictTransitiveTwoLevelChain(t *testing.T) {
+	in := baseInputs()
+	base := baseBatches()
+	in.Batches = []Batch{
+		{BatchID: "root", RunID: "run-1", Voided: true},
+		{BatchID: "mid", RunID: "run-1", InheritsFrom: "root"},
+		{
+			BatchID:      "b1",
+			RunID:        "run-1",
+			Rows:         []string{"SC-01"},
+			InheritsFrom: "mid",
+			Verdicts:     []CriticVerdict{{RowID: "SC-01", Verdict: "HOLDS"}},
+		},
+		base[0],
+		base[2],
+	}
+	re := wantRefusal(t, Validate(in), CodeVoidedVerdict)
+	if !strings.Contains(re.Detail, "SC-01") {
+		t.Errorf("Detail = %q, want it to name row SC-01, whose only batch (b1) is voided via a two-level inheritsFrom chain (b1 -> mid -> root)", re.Detail)
+	}
+}
+
 func TestValidateGapRowMustCarryMissingLayer2(t *testing.T) {
 	in := baseInputs()
 	in.Trace.Findings = []TraceFinding{{Kind: "gap", RowID: "SC-01", Detail: "no tagged test"}}
@@ -290,10 +335,13 @@ func TestValidateMissingVerdictLayer3RowAbsent(t *testing.T) {
 	wantRefusal(t, Validate(in), CodeMissingVerdict)
 }
 
-func TestValidateUnknownRowLayer3NotApplicable(t *testing.T) {
+func TestValidateUnexpectedLiveEvidenceInapplicableRow(t *testing.T) {
 	in := baseInputs()
 	in.Live.RowVerdicts = append(in.Live.RowVerdicts, LiveRowVerdict{RowID: "SC-01", Verdict: "LIVE-PASS"})
-	wantRefusal(t, Validate(in), CodeUnknownRow)
+	re := wantRefusal(t, Validate(in), CodeUnexpectedLiveEvidence)
+	if !strings.Contains(re.Detail, "SC-01") {
+		t.Errorf("Detail = %q, want it to name row SC-01", re.Detail)
+	}
 }
 
 func TestValidateGapRowLayer3MustCarryNA(t *testing.T) {
