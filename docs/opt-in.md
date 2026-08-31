@@ -2,7 +2,10 @@
 
 `test-design` is passive. Installing it exposes skills and agents but does not change the
 Superpowers workflow until the user explicitly invokes the coverage-design skill for a
-feature.
+feature. It supports Go, Maven, and Gradle projects only, and needs a Go 1.26+ toolchain
+on the machine running either skill — every mechanical step runs through the plugin's own
+Go executable, `go run -C "$CLAUDE_PLUGIN_ROOT" ./cmd/test-design-verifier <op> …`, which
+has no third-party dependencies and needs no build step or committed binary.
 
 ## Installation behavior
 
@@ -30,9 +33,17 @@ That invocation opts the feature into both stages:
 1. `test-coverage-design` creates approved SC rows. Its floor rule keeps a small feature's
    coverage source inline in the spec; larger features use a dedicated coverage doc.
 2. `writing-plans` cites those SC IDs and requires matching `covers: SC-nn` tags on tests.
-3. At `finishing-a-development-branch`, `coverage-verification` runs only because the
-   approved coverage source proves this feature opted in. Its own approval gate still
-   applies before any verification work starts.
+   Its lifecycle contract: the initial test run against untouched production code is
+   either **TDD RED** (fails, as expected) or **ALREADY-GREEN** (passes, and returns to
+   the parent for reconciliation). A row's **Verification mutation** — the coverage
+   source's per-row code-level fault — informs test design but is applied only by final
+   verification, never during implementation.
+3. At `finishing-a-development-branch`, invoke
+   `/test-design:coverage-verification <coverage-source>` explicitly — it runs only
+   because the approved coverage source proves this feature opted in, and its own
+   approval gate still applies before any verification work starts. A row's mutation
+   evidence is **MUTATION-CAUGHT** only when its targeted test failed with the mutation
+   applied and passed again after restore, at every site the mutation could be applied.
 
 Not invoking the first stage means neither stage runs. No prompt, waiver, or explanation
 is required.
