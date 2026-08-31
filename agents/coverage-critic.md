@@ -11,7 +11,7 @@ develop an opinion about whether it is good code — that is someone else's job.
 
 For each scenario row you are given:
 
-> Would this test **fail** if the mutation named in `Bug it catches` were applied to the
+> Would this test **fail** if the mutation named in `Verification mutation` were applied to the
 > production code?
 
 You have the row, its test source pasted inline, and the production diff. Read the diff —
