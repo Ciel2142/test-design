@@ -99,3 +99,9 @@ after a feature's spec is approved, and `/test-design:coverage-verification
 <coverage-source>` at the `finishing-a-development-branch` handoff. See
 [docs/opt-in.md](docs/opt-in.md) for the resulting handoffs and `wave-planning`
 composition.
+
+## Further reading
+
+- [docs/opt-in.md](docs/opt-in.md) — the per-feature opt-in and how it composes with `wave-planning`
+- [docs/live-profile.md](docs/live-profile.md) — writing the committed live profile that `smoke` and `e2e` rows require
+- [docs/upgrading-1.0.md](docs/upgrading-1.0.md) — moving a machine or repository from 0.x: global rule and hook removal, coverage-doc migration, dropped runners
