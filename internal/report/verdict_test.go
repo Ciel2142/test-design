@@ -950,3 +950,28 @@ func TestComputeNaturalCanaryKeepsRealWeakVerdict(t *testing.T) {
 	}
 	wantReason(t, rep, layer2, "SC-01", "WEAK")
 }
+
+// covers: SC-05
+func TestDeriveLayer2BlocksWeakVacuousMissing(t *testing.T) {
+	for _, verdict := range []string{"WEAK", "VACUOUS", "MISSING"} {
+		t.Run(verdict, func(t *testing.T) {
+			in := greenInputs()
+			in.Batches[2].Verdicts[1] = CriticVerdict{RowID: "SC-03", Verdict: verdict, Reason: "critic found " + verdict}
+
+			r := mustCompute(t, in)
+
+			wantVerdict(t, r, "BLOCKED")
+			rn := wantReason(t, r, "2", "SC-03", verdict)
+			if !strings.Contains(rn.Detail, "critic found "+verdict) {
+				t.Errorf("reason detail = %q, want the critic reason", rn.Detail)
+			}
+			sc03 := rowOf(t, r, "SC-03")
+			if sc03.Layer2.Verdict != verdict {
+				t.Errorf("SC-03 Layer2.Verdict = %q, want %q", sc03.Layer2.Verdict, verdict)
+			}
+			if sc03.Layer2.Verdict == "HOLDS" {
+				t.Errorf("SC-03 Layer2 = %+v, want the row not covered", sc03.Layer2)
+			}
+		})
+	}
+}
