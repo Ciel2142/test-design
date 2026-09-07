@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"test-design/internal/subprocess"
 )
 
 // Diff returns the unified diff of w's tracked changes relative to its
@@ -49,7 +51,7 @@ func untrackedFileDiff(dir, path string) (string, error) {
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	err := cmd.Run()
+	err := subprocess.Run(cmd, subprocess.UtilityTimeout)
 
 	var exitErr *exec.ExitError
 	if err == nil || (errors.As(err, &exitErr) && exitErr.ExitCode() == 1) {

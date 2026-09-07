@@ -32,13 +32,24 @@ go run -C "$CLAUDE_PLUGIN_ROOT" ./cmd/test-design-verifier <op> …
 This requires a Go 1.26+ toolchain on the machine running the skill. The module has no
 third-party dependencies, so no separate build step or committed binary is needed.
 
+Before any `go run -C`, capture the **absolute target repository** while still in
+that repository, not in the plugin checkout:
+
+```bash
+TARGET_REPO=$(git rev-parse --show-toplevel)
+```
+
+Use that captured absolute value for every `repoRoot` and `-repo`. Source paths remain
+relative to that target root; `-C` changes the process directory to the plugin and must
+never make the plugin the verification target.
+
 ## Floor rule — when to skip this stage
 
 If the feature has **≤2 behaviors and no persistence, no concurrency, and no external
 dependency**, do not produce a separate document. Append a `## Test coverage` section to
 the approved spec containing the scenario table, the `## Verification` block, the
 `Baseline:` header line, and a `## Baseline failures` section; present that amendment for
-approval, then proceed to `superpowers:writing-plans`. The section follows the same
+approval, then use the planning handoff below. The section follows the same
 schema, ID allocation, and two-commit baseline protocol as a standalone coverage source —
 the floor rule only changes where it lives, never what it must contain.
 
@@ -51,7 +62,7 @@ no persistence. Appending the coverage source to the spec instead."
 1. **Allocate the starting ID.** Before sweeping, run
 
    ```text
-   go run -C "$CLAUDE_PLUGIN_ROOT" ./cmd/test-design-verifier next-id -repo . -area <area>
+   go run -C "$CLAUDE_PLUGIN_ROOT" ./cmd/test-design-verifier next-id -repo "$TARGET_REPO" -area <area>
    ```
 
    Always pass `-area`, even as the empty string for a single-project repo (`-area ""`):
@@ -218,7 +229,7 @@ be known before that commit exists:
    with this JSON document on stdin:
 
    ```json
-   {"schemaVersion":"1","repoRoot":".","coverageSource":"<repo-relative path>","runID":"<id>"}
+   {"schemaVersion":"1","repoRoot":"<captured absolute TARGET_REPO>","coverageSource":"<repo-relative path>","runID":"<id>"}
    ```
 
    `baseline` refuses `dirty-repository` on an uncommitted tree — step 3 is the fix for that
@@ -262,41 +273,16 @@ Amendments **append** rows with new IDs — allocated from `next-id`, the same a
 — and move superseded ones to `## Retired`, with user approval. Never renumber, never
 silently edit a row an implementer already tagged against.
 
-## Migration
+## Migration — only for an old source
 
-A document whose scenario table still puts its mutation-naming column third and `Expected`
-fifth — the pre-registry five-column order — is refused by the verifier's parser, which
-names the old header it found in its error and reports that document as unparseable.
-Migrating it:
-
-1. **Rename and reorder the column.** Move the old third column — the one naming the
-   mutation each row demonstrates — to fifth position and rename it `Verification
-   mutation`; move `Expected` from fifth to third. The result is `| ID | Behavior |
-   Expected | Level | Verification mutation | Risk |`, cell contents unchanged apart from
-   the move — a row's mutation text does not need rewriting, only relocating.
-2. **Add the `## Verification` block.** An old document captured its baseline by hand and
-   carries no machine-readable runner configuration; add the block described
-   [above](#verification-block), sourcing `runner-kind`, `runner-root`, and
-   `runner-command` from however the project's suite is actually run today.
-3. **Resolve a registry collision, if one exists.** The repository ID registry harvests IDs
-   from both header forms so an unmigrated document's IDs stay visible to `next-id`, but two
-   documents defining the same ID is a hard failure. If migration surfaces a pre-registry
-   collision, renumber the newer document's rows once, in the same change as the rename,
-   updating every `covers:` tag in its test source to match. This is the one exception to
-   "never renumbered" — it applies only to a collision inherited from before the registry
-   existed; every ID allocated through `next-id` from here on stays fixed.
-4. **Prove acceptance.** Run:
-
-   ```text
-   go run -C "$CLAUDE_PLUGIN_ROOT" ./cmd/test-design-verifier preflight -source <path> -repo .
-   ```
-
-   A successful `preflightOutput` — not a refusal — is the migration's done condition.
+If the parser identifies an old header or registry collision, **read
+[migration](references/migration.md) in full before editing that source**. A new source
+does not need migration context.
 
 ## Definition of done
 
-- [ ] Starting ID allocated from `next-id` before any row was numbered; no row numbered
-      from one
+- [ ] Starting ID allocated from `next-id` before any row was numbered; start at one
+      only when the allocator returns `next: 1`
 - [ ] Behavior list confirmed by the user before sweeping
 - [ ] No row pruned or downgraded on the grounds that a test already exists
 - [ ] Every behavior group has a `Ruled out:` line citing spec or code facts
@@ -313,10 +299,12 @@ Migrating it:
 
 ## Next stage
 
-**REQUIRED SUB-SKILL:** `superpowers:writing-plans`. Tell it to cite SC-IDs in each task's
-test steps, so every row maps to a task and an uncovered row is visible as a plan gap.
-This opt-in also commits the feature to `coverage-verification` at the
-`finishing-a-development-branch` handoff.
+If the user's installed workflow requires wave planning, hand off first to
+`wave-planning`; otherwise proceed directly to `superpowers:writing-plans`. This plugin
+does not install or mandate a wave-planning dependency. In either path, require the
+eventual plan to cite SC-IDs in each task's test steps, so every row maps to a task and
+an uncovered row is visible as a plan gap. This opt-in also commits the feature to
+`coverage-verification` at the `finishing-a-development-branch` handoff.
 
 Hand it this lifecycle contract, verbatim, for the implementer of every task carrying an
 SC-tagged test:

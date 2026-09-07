@@ -20,6 +20,9 @@ const liveAttemptEvidenceFile = "live-attempt.json"
 type prepareLiveOutput struct {
 	evidence.Envelope
 	RunID        string          `json:"runID"`
+	RepoCommit string `json:"repoCommit"`
+	Source string `json:"source"`
+	SourceSHA256 string `json:"sourceSha256"`
 	WorktreePath string          `json:"worktreePath"`
 	RunDir       string          `json:"runDir"`
 	ProfilePath  string          `json:"profilePath"`
@@ -29,6 +32,9 @@ type prepareLiveOutput struct {
 type liveAttemptOutput struct {
 	evidence.Envelope
 	RunID   string `json:"runID"`
+	RepoCommit string `json:"repoCommit"`
+	Source string `json:"source"`
+	SourceSHA256 string `json:"sourceSha256"`
 	Profile string `json:"profile"`
 	Refusal string `json:"refusal"`
 }
@@ -93,20 +99,20 @@ func prepareLiveHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer) 
 	defer func() { _ = dispose() }()
 
 	if src.LiveProfile == "" {
-		return failProfileUnavailable(runDir, req.RunID, "", errors.New("no live-profile configured for coverage source "+src.Path))
+		return failProfileUnavailable(runDir, req.RunID, repoCommit, src, "", errors.New("no live-profile configured for coverage source "+src.Path))
 	}
 	profileRelPath, confineErr := confinedRelPath("prepare-live", "live-profile", "live-profile-outside-repo", src.LiveProfile)
 	if confineErr != nil {
-		return failProfileUnavailable(runDir, req.RunID, src.LiveProfile, fmt.Errorf("%s: %s", confineErr.Code, confineErr.Message))
+		return failProfileUnavailable(runDir, req.RunID, repoCommit, src, src.LiveProfile, fmt.Errorf("%s: %s", confineErr.Code, confineErr.Message))
 	}
 	profileAbsPath := filepath.Join(req.RepoRoot, filepath.FromSlash(profileRelPath))
 
 	profile, err := live.LoadProfile(profileAbsPath)
 	if err != nil {
-		return failProfileUnavailable(runDir, req.RunID, src.LiveProfile, err)
+		return failProfileUnavailable(runDir, req.RunID, repoCommit, src, src.LiveProfile, err)
 	}
 	if err := profile.Validate(req.RunID); err != nil {
-		return failProfileUnavailable(runDir, req.RunID, src.LiveProfile, err)
+		return failProfileUnavailable(runDir, req.RunID, repoCommit, src, src.LiveProfile, err)
 	}
 
 	descriptor := substituteRunID(profile, req.RunID)
@@ -121,6 +127,9 @@ func prepareLiveHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer) 
 
 	st := &live.State{
 		RunID:        req.RunID,
+		RepoCommit: repoCommit,
+		Source: src.Path,
+		SourceSHA256: src.SHA256,
 		WorktreePath: wt.Path,
 		Snapshot:     snapshotJSON,
 		ProfilePath:  profileRelPath,
@@ -137,6 +146,9 @@ func prepareLiveHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer) 
 	out := prepareLiveOutput{
 		Envelope:     evidence.Envelope{SchemaVersion: evidence.SchemaVersion, VerifierVersion: evidence.VerifierVersion},
 		RunID:        req.RunID,
+		RepoCommit: st.RepoCommit,
+		Source: st.Source,
+		SourceSHA256: st.SourceSHA256,
 		WorktreePath: wt.Path,
 		RunDir:       runDir,
 		ProfilePath:  profileRelPath,
@@ -151,11 +163,14 @@ func hasApplicableLiveRows(src *coverage.Source) bool {
 
 // failProfileUnavailable writes attempt evidence first: a run that never
 // starts still leaves finalize an auditable record to yield PARTIAL against.
-func failProfileUnavailable(runDir, runID, profileName string, cause error) *cliError {
+func failProfileUnavailable(runDir, runID, repoCommit string, src *coverage.Source, profileName string, cause error) *cliError {
 	attemptPath := filepath.Join(runDir, liveAttemptEvidenceFile)
 	doc := liveAttemptOutput{
 		Envelope: evidence.Envelope{SchemaVersion: evidence.SchemaVersion, VerifierVersion: evidence.VerifierVersion},
 		RunID:    runID,
+		RepoCommit: repoCommit,
+		Source: src.Path,
+		SourceSHA256: src.SHA256,
 		Profile:  profileName,
 		Refusal:  cause.Error(),
 	}

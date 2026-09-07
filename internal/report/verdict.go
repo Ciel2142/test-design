@@ -248,6 +248,9 @@ func deriveLayer2(rs *reasonSet, in *Inputs, active []coverage.Row) map[string]C
 		if voided[b.BatchID] {
 			continue
 		}
+		if b.CanaryUnavailableReason != "" {
+			rs.add(sevPartial, layer2, "", "critic-canary-unavailable", "batch %s: %s", b.BatchID, b.CanaryUnavailableReason)
+		}
 		for _, v := range b.Verdicts {
 			refs[v.RowID] = CriticRef{Verdict: v.Verdict, BatchID: b.BatchID, DispatchID: b.DispatchID}
 			reasons[v.RowID] = v.Reason
@@ -463,6 +466,7 @@ func deriveBatches(batches []Batch) []BatchReport {
 			RunID:        b.RunID,
 			Rows:         b.Rows,
 			InheritsFrom: b.InheritsFrom,
+			CanaryUnavailableReason: b.CanaryUnavailableReason,
 			Voided:       voided[b.BatchID],
 			Verdicts:     b.Verdicts,
 		}

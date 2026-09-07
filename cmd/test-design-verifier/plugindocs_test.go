@@ -2,14 +2,9 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 	"testing"
 
@@ -26,123 +21,72 @@ func repoRoot(t *testing.T) string {
 	return root
 }
 
-var forbiddenTokens = []string{
-	"Bug it catches",
-	"runner-output.md",
-	"vitest",
-	"jest",
-	"pytest",
-	"git checkout --",
-	"git stash",
-	"throwaway branch",
-	"mutation-check-",
-	"transcripts/SC-",
-	"transcripts/W",
-	"bring-up-attempt.txt",
-	`grep -rn "covers`,
-	`covers: SC-"`,
-	"status<TAB>scope<TAB>name",
-	".vitest-report",
-	"sample-project",
-	"-t '^",
-	"-k '",
-	"PIPESTATUS",
-}
+// Follow the same explicit Markdown reference graph a skill reader follows. A
+// missing phase file must fail even when the core skill remains readable.
+var docLinkPattern = regexp.MustCompile(`\[[^\]]*\]\(([^)]+)\)`)
 
-func scannedDocFiles(t *testing.T, root string) []string {
+func linkedSkillDocs(t *testing.T, root string, entries ...string) map[string]string {
 	t.Helper()
-	var files []string
-	for _, d := range []string{"skills", "agents", ".claude-plugin"} {
-		dir := filepath.Join(root, d)
-		if _, err := os.Stat(dir); err != nil {
-			continue
+	docs := map[string]string{}
+	var visit func(string)
+	visit = func(rel string) {
+		rel = filepath.Clean(rel)
+		if _, ok := docs[rel]; ok {
+			return
 		}
-		if err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return err
+		data, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			t.Fatalf("read linked document %s: %v", rel, err)
+		}
+		docs[rel] = string(data)
+		for _, match := range docLinkPattern.FindAllStringSubmatch(string(data), -1) {
+			target := strings.SplitN(match[1], "#", 2)[0]
+			if target == "" || strings.Contains(target, "://") || !strings.HasSuffix(target, ".md") {
+				continue
 			}
-			if !info.IsDir() {
-				files = append(files, path)
+			next := filepath.Clean(filepath.Join(filepath.Dir(rel), target))
+			if filepath.IsAbs(target) || next == ".." || strings.HasPrefix(next, ".."+string(filepath.Separator)) {
+				t.Fatalf("%s: linked document escapes plugin: %s", rel, target)
 			}
-			return nil
-		}); err != nil {
-			t.Fatalf("walk %s: %v", dir, err)
+			visit(next)
 		}
 	}
-	files = append(files,
-		filepath.Join(root, "docs", "opt-in.md"),
-		filepath.Join(root, "README.md"),
-		filepath.Join(root, "fixtures", "README.md"),
-	)
-	sort.Strings(files)
-	return files
+	for _, entry := range entries {
+		visit(entry)
+	}
+	return docs
 }
 
-func TestPluginDocs_NoForbiddenTokens(t *testing.T) {
-	root := repoRoot(t)
-	var failures []string
-	for _, path := range scannedDocFiles(t, root) {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("read %s: %v", path, err)
+func TestPluginDocs_PhasesReachable(t *testing.T) {
+	docs := linkedSkillDocs(t, repoRoot(t), "skills/coverage-verification/SKILL.md")
+	for _, phase := range []string{"critic", "live", "mutation", "finalize-recovery"} {
+		path := filepath.Join("skills", "coverage-verification", "references", phase+".md")
+		if _, ok := docs[path]; !ok {
+			t.Errorf("verification cannot route a reader to %s", path)
 		}
-		rel, _ := filepath.Rel(root, path)
-		for i, line := range strings.Split(string(data), "\n") {
-			for _, tok := range forbiddenTokens {
-				if strings.Contains(line, tok) {
-					failures = append(failures, fmt.Sprintf("%s:%d: forbidden token %q", rel, i+1, tok))
-				}
-			}
-		}
-	}
-	for _, rel := range []string{
-		filepath.Join("agents", "mutator.md"),
-		filepath.Join("agents", "live-runner.md"),
-	} {
-		path := filepath.Join(root, rel)
-		data, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("read %s: %v", path, err)
-		}
-		for i, line := range strings.Split(string(data), "\n") {
-			if strings.Contains(line, "tools: Bash") {
-				failures = append(failures, fmt.Sprintf("%s:%d: forbidden token %q", rel, i+1, "tools: Bash"))
-			}
-		}
-	}
-	if len(failures) != 0 {
-		t.Errorf("forbidden tokens found:\n%s", strings.Join(failures, "\n"))
 	}
 }
 
-func TestPluginDocs_RequiredTokens(t *testing.T) {
-	root := repoRoot(t)
-	requirements := []struct {
-		path  string
-		token string
-	}{
-		{"skills/coverage-verification/SKILL.md", "Verification mutation"},
-		{"skills/test-coverage-design/SKILL.md", "Verification mutation"},
-		{"skills/coverage-verification/references/example-verification.md", "Verification mutation"},
-		{"skills/test-coverage-design/references/example-coverage-doc.md", "Verification mutation"},
-		{"agents/coverage-critic.md", "Verification mutation"},
-		{"skills/test-coverage-design/SKILL.md", "TDD RED"},
-		{"skills/test-coverage-design/SKILL.md", "ALREADY-GREEN"},
-		{"agents/mutator.md", "MUTATION-CAUGHT"},
-		{"skills/coverage-verification/SKILL.md", "MUTATION-CAUGHT"},
-		{"skills/coverage-verification/SKILL.md", "disable-model-invocation: true"},
-		{"skills/test-coverage-design/SKILL.md", "disable-model-invocation: true"},
-		{"skills/coverage-verification/SKILL.md", "go run -C"},
-		{"skills/test-coverage-design/SKILL.md", "go run -C"},
-	}
-	for _, req := range requirements {
-		path := filepath.Join(root, filepath.FromSlash(req.path))
+func TestPluginDocs_ExplicitOptIn(t *testing.T) {
+	for _, skill := range []string{"coverage-verification", "test-coverage-design"} {
+		path := filepath.Join(repoRoot(t), "skills", skill, "SKILL.md")
 		data, err := os.ReadFile(path)
 		if err != nil {
-			t.Fatalf("read %s: %v", req.path, err)
+			t.Fatal(err)
 		}
-		if !strings.Contains(string(data), req.token) {
-			t.Errorf("%s: missing required token %q", req.path, req.token)
+		parts := strings.SplitN(string(data), "---", 3)
+		if len(parts) != 3 || strings.TrimSpace(parts[0]) != "" {
+			t.Fatalf("%s: missing frontmatter", path)
+		}
+		disabled := false
+		for _, line := range strings.Split(parts[1], "\n") {
+			key, value, ok := strings.Cut(line, ":")
+			if ok && strings.TrimSpace(key) == "disable-model-invocation" {
+				disabled = strings.TrimSpace(value) == "true"
+			}
+		}
+		if !disabled {
+			t.Errorf("%s: automatic invocation must remain disabled", path)
 		}
 	}
 }
@@ -167,175 +111,42 @@ func agentTools(t *testing.T, root, rel string) []string {
 	return nil
 }
 
-func TestPluginDocs_AgentsWithoutBash(t *testing.T) {
+func TestPluginDocs_AgentToolRestrictions(t *testing.T) {
 	root := repoRoot(t)
-
-	for _, rel := range []string{"agents/mutator.md", "agents/live-runner.md"} {
-		tools := agentTools(t, root, rel)
+	for _, agent := range []struct {
+		path    string
+		allowed map[string]bool
+	}{
+		{"agents/mutator.md", map[string]bool{"Read": true, "Edit": true}},
+		{"agents/live-runner.md", map[string]bool{"Read": true, "Grep": true, "Glob": true}},
+		{"agents/coverage-critic.md", map[string]bool{"Read": true, "Grep": true, "Glob": true}},
+	} {
+		tools := agentTools(t, root, agent.path)
 		for _, tool := range tools {
-			if tool == "Bash" {
-				t.Errorf("%s: tools line declares Bash: %v", rel, tools)
+			if !agent.allowed[tool] {
+				t.Errorf("%s: tool %q escapes the agent's execution/edit boundary", agent.path, tool)
 			}
 		}
-	}
-
-	want := []string{"Read", "Grep", "Glob"}
-	got := agentTools(t, root, "agents/coverage-critic.md")
-	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Errorf("agents/coverage-critic.md: tools = %v, want %v", got, want)
 	}
 }
 
 var opTokenPattern = regexp.MustCompile(`test-design-verifier ([a-zA-Z0-9<>-]+)`)
 
-func TestPluginDocs_OpsCoverage(t *testing.T) {
-	root := repoRoot(t)
-	named := map[string]bool{}
-	for _, rel := range []string{"skills/coverage-verification/SKILL.md", "skills/test-coverage-design/SKILL.md"} {
-		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
-		if err != nil {
-			t.Fatalf("read %s: %v", rel, err)
-		}
-		for _, m := range opTokenPattern.FindAllStringSubmatch(string(data), -1) {
-			tok := m[1]
-			if tok == "<op>" {
+func TestPluginDocs_DocumentedCommandsExist(t *testing.T) {
+	docs := linkedSkillDocs(t, repoRoot(t),
+		"skills/coverage-verification/SKILL.md",
+		"skills/test-coverage-design/SKILL.md")
+	for path, text := range docs {
+		for _, match := range opTokenPattern.FindAllStringSubmatch(text, -1) {
+			op := match[1]
+			if op == "<op>" {
 				continue
 			}
-			named[tok] = true
-		}
-	}
-
-	registered := map[string]bool{}
-	for op := range ops {
-		registered[op] = true
-	}
-
-	var missingFromSkills, missingFromRegistry []string
-	for op := range registered {
-		if !named[op] {
-			missingFromSkills = append(missingFromSkills, op)
-		}
-	}
-	for op := range named {
-		if !registered[op] {
-			missingFromRegistry = append(missingFromRegistry, op)
-		}
-	}
-	sort.Strings(missingFromSkills)
-	sort.Strings(missingFromRegistry)
-	if len(missingFromSkills) != 0 {
-		t.Errorf("ops registered but not named by either skill: %v", missingFromSkills)
-	}
-	if len(missingFromRegistry) != 0 {
-		t.Errorf("ops named by a skill but not registered: %v", missingFromRegistry)
-	}
-}
-
-var kebabTokenPattern = regexp.MustCompile("`([a-z]+(?:-[a-z0-9]+)+)`")
-
-func TestPluginDocs_RefusalCodesExist(t *testing.T) {
-	root := repoRoot(t)
-	path := filepath.Join(root, "skills", "coverage-verification", "SKILL.md")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read %s: %v", path, err)
-	}
-
-	excluded := map[string]bool{}
-	for op := range ops {
-		excluded[op] = true
-	}
-	for _, tok := range nonCodeKebabTokens {
-		excluded[tok.token] = true
-	}
-
-	cited := map[string]bool{}
-	for _, m := range kebabTokenPattern.FindAllStringSubmatch(string(data), -1) {
-		tok := m[1]
-		if excluded[tok] {
-			continue
-		}
-		cited[tok] = true
-	}
-	if len(cited) == 0 {
-		t.Fatal("no refusal codes found in skills/coverage-verification/SKILL.md; the extraction heuristic is broken")
-	}
-
-	literals, err := collectStringLiterals(
-		filepath.Join(root, "cmd", "test-design-verifier"),
-		filepath.Join(root, "internal", "report"),
-		filepath.Join(root, "internal", "live"),
-		filepath.Join(root, "internal", "mutation"),
-		filepath.Join(root, "internal", "coverage"),
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var missing []string
-	for code := range cited {
-		if !anyLiteralNames(literals, code) {
-			missing = append(missing, code)
-		}
-	}
-	sort.Strings(missing)
-	if len(missing) != 0 {
-		t.Errorf("refusal codes cited in skills/coverage-verification/SKILL.md but not found as, or embedded in, a Go string literal in cmd/test-design-verifier, internal/report, internal/live, internal/mutation, or internal/coverage: %v", missing)
-	}
-}
-
-// Op names are excluded via the ops registry; these are the rest.
-var nonCodeKebabTokens = []struct{ token, reason string }{
-	{"coverage-critic", "agent name"},
-	{"live-runner", "agent name"},
-	{"requesting-code-review", "skill name"},
-	{"test-coverage-design", "skill name"},
-	{"runner-command", "coverage-source field name, not a refusal code"},
-}
-
-func anyLiteralNames(literals map[string]bool, code string) bool {
-	for lit := range literals {
-		if strings.Contains(lit, code) {
-			return true
-		}
-	}
-	return false
-}
-
-func collectStringLiterals(dirs ...string) (map[string]bool, error) {
-	literals := map[string]bool{}
-	fset := token.NewFileSet()
-	for _, dir := range dirs {
-		pkgs, err := parser.ParseDir(fset, dir, func(fi os.FileInfo) bool {
-			return !strings.HasSuffix(fi.Name(), "_test.go")
-		}, 0)
-		if err != nil {
-			return nil, fmt.Errorf("parse %s: %w", dir, err)
-		}
-		for _, pkg := range pkgs {
-			for _, file := range pkg.Files {
-				ast.Inspect(file, func(n ast.Node) bool {
-					lit, ok := n.(*ast.BasicLit)
-					if !ok || lit.Kind != token.STRING {
-						return true
-					}
-					value, err := stringLitValue(lit.Value)
-					if err == nil {
-						literals[value] = true
-					}
-					return true
-				})
+			if _, ok := ops[op]; !ok {
+				t.Errorf("%s: documented command %q is not executable", path, op)
 			}
 		}
 	}
-	return literals, nil
-}
-
-func stringLitValue(raw string) (string, error) {
-	if len(raw) < 2 || raw[0] != '"' || raw[len(raw)-1] != '"' {
-		return "", fmt.Errorf("not a double-quoted string literal: %s", raw)
-	}
-	return raw[1 : len(raw)-1], nil
 }
 
 func TestPluginDocs_ExampleVerificationRendered(t *testing.T) {

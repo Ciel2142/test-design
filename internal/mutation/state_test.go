@@ -13,6 +13,10 @@ import (
 func sampleState() *State {
 	return &State{
 		RowID:        "SC-02",
+		RunID: "run-abc123",
+		RepoCommit: "abc123",
+		Source: "spec.md",
+		SourceSHA256: "source-sha",
 		Identity:     Identity{Scope: "fixturemod/orders", Name: "TestValidateQuantityRejectsZero"},
 		WorktreePath: "/tmp/wt-example",
 		Snapshot:     json.RawMessage(`{"headCommit":"abc123"}`),
@@ -153,6 +157,10 @@ func TestLoadStateEmptyRequiredFieldsFailClosed(t *testing.T) {
 		corrupt func(*State)
 	}{
 		{"empty rowID", func(s *State) { s.RowID = "" }},
+		{"empty runID", func(s *State) { s.RunID = "" }},
+		{"empty repoCommit", func(s *State) { s.RepoCommit = "" }},
+		{"empty source", func(s *State) { s.Source = "" }},
+		{"empty sourceSha256", func(s *State) { s.SourceSHA256 = "" }},
 		{"empty worktreePath", func(s *State) { s.WorktreePath = "" }},
 		{"empty identity", func(s *State) { s.Identity = Identity{} }},
 	}

@@ -162,3 +162,15 @@ func TestNextIDHandler_CrossDocumentCollisionErrorNamesBothPaths(t *testing.T) {
 		t.Errorf("error message = %q, want it to name SC-03", got.Message)
 	}
 }
+
+func TestNextIDHandler_MissingRepoCannotAllocate(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	missing := filepath.Join(t.TempDir(), "missing")
+	code := run([]string{"next-id", "--repo", missing, "--area", ""}, nil, &stdout, &stderr)
+	if code != exitError || stdout.Len() != 0 {
+		t.Fatalf("missing repository allocated an ID: exit=%d stdout=%s stderr=%s", code, &stdout, &stderr)
+	}
+	if got := decodeError(t, &stderr); got.Code != "registry-error" {
+		t.Fatalf("refusal = %q, want registry-error", got.Code)
+	}
+}

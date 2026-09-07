@@ -103,6 +103,11 @@ func writeMarkdownLayer2(b *strings.Builder, r *Report) {
 			escapeCell(canaryRow), escapeCell(canaryKind), escapeCell(weakening), escapeCell(caught),
 			escapeCell(inheritsFrom), batch.Voided)
 	}
+	for _, batch := range r.Batches {
+		if batch.CanaryUnavailableReason != "" {
+			fmt.Fprintf(b, "\nCanary unavailable (%s): %s\n", batch.BatchID, batch.CanaryUnavailableReason)
+		}
+	}
 	b.WriteString("\n")
 }
 

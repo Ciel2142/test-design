@@ -86,6 +86,7 @@ type traceOutput struct {
 	FindingCounts  map[string]int `json:"findingCounts"`
 	RowAccounting  rowAccounting  `json:"rowAccounting"`
 	EvidencePath   string         `json:"evidencePath"`
+	DispatchPath   string         `json:"dispatchPath"`
 	RunDir         string         `json:"runDir"`
 }
 
@@ -257,6 +258,10 @@ func traceOp(req *verifyRequest, stdout io.Writer, between func()) *cliError {
 	if err := evidence.WriteJSON(evidencePath, &ev); err != nil {
 		return &cliError{Code: "evidence-write-failed", Message: fmt.Sprintf("trace: %v", err)}
 	}
+	dispatchPath, err := writeDispatchInputs(src, &ev, suiteDir, runDir)
+	if err != nil {
+		return &cliError{Code: "dispatch-inputs-failed", Message: fmt.Sprintf("trace: %v", err)}
+	}
 
 	if cliErr := dispose(); cliErr != nil {
 		return cliErr
@@ -282,6 +287,7 @@ func traceOp(req *verifyRequest, stdout io.Writer, between func()) *cliError {
 		FindingCounts:  ev.FindingCounts,
 		RowAccounting:  ev.RowAccounting,
 		EvidencePath:   evidencePath,
+		DispatchPath:  dispatchPath,
 		RunDir:         runDir,
 	}
 	return writeStdout(stdout, out)

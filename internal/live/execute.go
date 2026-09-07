@@ -1,7 +1,7 @@
 package live
 
 import (
-	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -13,31 +13,33 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"test-design/internal/subprocess"
 )
 
 const (
 	stdoutRawFile = "stdout.raw"
 	stderrRawFile = "stderr.raw"
+	combinedRawFile = "combined.raw"
 )
 
-// StepResult is one ExecuteStep call's outcome: whether the process started,
-// its exit status, its captured streams (on disk under runDir, and in memory
-// for predicate evaluation), and start/finish timestamps.
+var ErrOutputLimit = errors.New("live output limit exceeded")
+
+// StepResult retains file-backed raw evidence, not duplicate in-memory streams.
+// Err distinguishes incomplete capture/execution from ordinary nonzero exits.
 type StepResult struct {
-	Started    bool
+	Started bool
 	ExitStatus int
-	StartedAt  string
+	StartedAt string
 	FinishedAt string
 	StdoutPath string
 	StderrPath string
-	Stdout     []byte
-	Stderr     []byte
-	Combined   []byte
+	CombinedPath string
+	Err error
+	outputBytes int64
 }
 
-// SanitizedEnv returns only the parent entries whose name is on the
-// allowlist, in allowlist order — never the full parent environment. A
-// missing allowlisted name is simply absent from the result.
+// SanitizedEnv returns only allowlisted parent entries, in allowlist order.
 func SanitizedEnv(parent []string, allowlist []string) []string {
 	byName := make(map[string]string, len(parent))
 	for _, kv := range parent {
@@ -47,7 +49,6 @@ func SanitizedEnv(parent []string, allowlist []string) []string {
 		}
 		byName[name] = value
 	}
-
 	env := make([]string, 0, len(allowlist))
 	for _, name := range allowlist {
 		value, ok := byName[name]
@@ -59,89 +60,110 @@ func SanitizedEnv(parent []string, allowlist []string) []string {
 	return env
 }
 
-// ExecuteStep runs step.Command with env in dir, capturing stdout and stderr
-// individually and interleaved as "combined" to files under runDir. A start
-// failure (e.g. missing binary) is returned as an error; a nonzero exit is a
-// normal result carried in StepResult, not an error — same stance as
-// cmd/test-design-verifier's runSuite. env is used verbatim: it never falls
-// back to os.Environ(), so an unsanitized env is the caller's mistake, not
-// this function's.
-func ExecuteStep(step Step, env []string, dir, runDir string) (*StepResult, error) {
+// ExecuteStep captures stdout, stderr, and their interleaving directly to files.
+// The byte budget counts emitted bytes once across both streams. On overflow it
+// retains the captured prefix, terminates the process group, and returns an error
+// alongside raw evidence. Nonzero exits remain normal results for predicates.
+func ExecuteStep(step Step, env []string, dir, runDir string, limits Limits) (*StepResult, error) {
 	if len(step.Command) == 0 {
 		return nil, fmt.Errorf("execute step: empty command")
 	}
-
-	var stdoutBuf, stderrBuf bytes.Buffer
-	// stdout and stderr are copied by separate goroutines inside cmd.Run(),
-	// so the buffer they both feed needs its own lock, not a bare bytes.Buffer.
-	combinedBuf := &syncBuffer{}
-	cmd := exec.Command(step.Command[0], step.Command[1:]...)
+	if limits.Timeout < 0 || limits.OutputBytes < 0 {
+		return nil, fmt.Errorf("execute step: limits must not be negative")
+	}
+	if limits.Timeout == 0 { limits.Timeout = defaultTimeout }
+	if limits.OutputBytes == 0 { limits.OutputBytes = defaultMaxOutputBytes }
+	res := &StepResult{
+		ExitStatus: -1,
+		StdoutPath: filepath.Join(runDir, stdoutRawFile),
+		StderrPath: filepath.Join(runDir, stderrRawFile),
+		CombinedPath: filepath.Join(runDir, combinedRawFile),
+		outputBytes: limits.OutputBytes,
+	}
+	var files []*os.File
+	for _, path := range []string{res.StdoutPath, res.StderrPath, res.CombinedPath} {
+		file, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+		if err != nil {
+			for _, open := range files { _ = open.Close() }
+			return nil, fmt.Errorf("execute step: create raw capture: %w", err)
+		}
+		files = append(files, file)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	capture := &fileCapture{combined: files[2], remaining: limits.OutputBytes, cancel: cancel}
+	cmd := exec.CommandContext(ctx, step.Command[0], step.Command[1:]...)
 	cmd.Dir = dir
+	// A nil Env inherits the parent; even a nil input must mean no variables.
 	cmd.Env = env
-	cmd.Stdout = io.MultiWriter(&stdoutBuf, combinedBuf)
-	cmd.Stderr = io.MultiWriter(&stderrBuf, combinedBuf)
-
-	started := time.Now().UTC()
-	runErr := cmd.Run()
-	finished := time.Now().UTC()
-
+	if cmd.Env == nil { cmd.Env = []string{} }
+	cmd.Stdout = &captureWriter{capture: capture, stream: files[0]}
+	cmd.Stderr = &captureWriter{capture: capture, stream: files[1]}
+	res.StartedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	runErr := subprocess.Run(cmd, limits.Timeout)
+	res.FinishedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	res.Started = cmd.Process != nil
+	if cmd.ProcessState != nil { res.ExitStatus = cmd.ProcessState.ExitCode() }
+	capture.mu.Lock()
+	for _, file := range files {
+		if err := file.Close(); err != nil && capture.err == nil { capture.err = err }
+	}
+	captureErr := capture.err
+	capture.mu.Unlock()
+	if captureErr != nil { runErr = captureErr }
 	var exitErr *exec.ExitError
-	switch {
-	case runErr == nil:
-	case errors.As(runErr, &exitErr):
-	default:
-		return nil, fmt.Errorf("execute step: run %s in %s: %w", strings.Join(redactCommand(step.Command), " "), dir, runErr)
+	if runErr != nil && !errors.As(runErr, &exitErr) {
+		res.Err = fmt.Errorf("execute step: run %s in %s: %w", strings.Join(redactCommand(step.Command), " "), dir, runErr)
+		if !res.Started { return nil, res.Err }
+		return res, res.Err
 	}
+	return res, nil
+}
 
-	stdoutPath := filepath.Join(runDir, stdoutRawFile)
-	if err := os.WriteFile(stdoutPath, stdoutBuf.Bytes(), 0o644); err != nil {
-		return nil, fmt.Errorf("execute step: write stdout: %w", err)
+// One lock serializes both streams, their shared budget, and combined ordering.
+// Only the small os/exec copy buffers are resident during execution.
+type fileCapture struct {
+	mu sync.Mutex
+	combined *os.File
+	remaining int64
+	cancel context.CancelFunc
+	err error
+}
+
+type captureWriter struct {
+	capture *fileCapture
+	stream *os.File
+}
+
+func (w *captureWriter) Write(p []byte) (int, error) {
+	c := w.capture
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.err != nil { return 0, c.err }
+	allowed := len(p)
+	if int64(allowed) > c.remaining { allowed = int(c.remaining) }
+	n, err := w.stream.Write(p[:allowed])
+	c.remaining -= int64(n)
+	if n > 0 {
+		_, combinedErr := c.combined.Write(p[:n])
+		if err == nil { err = combinedErr }
 	}
-	stderrPath := filepath.Join(runDir, stderrRawFile)
-	if err := os.WriteFile(stderrPath, stderrBuf.Bytes(), 0o644); err != nil {
-		return nil, fmt.Errorf("execute step: write stderr: %w", err)
+	if err == nil && allowed < len(p) { err = ErrOutputLimit }
+	if err != nil {
+		c.err = err
+		c.cancel()
 	}
-
-	return &StepResult{
-		Started:    true,
-		ExitStatus: cmd.ProcessState.ExitCode(),
-		StartedAt:  started.Format(time.RFC3339Nano),
-		FinishedAt: finished.Format(time.RFC3339Nano),
-		StdoutPath: stdoutPath,
-		StderrPath: stderrPath,
-		Stdout:     stdoutBuf.Bytes(),
-		Stderr:     stderrBuf.Bytes(),
-		Combined:   combinedBuf.Bytes(),
-	}, nil
+	return n, err
 }
 
-// syncBuffer lets two of cmd.Run()'s internal copy goroutines (one per
-// stream) write into the same buffer without racing.
-type syncBuffer struct {
-	mu  sync.Mutex
-	buf bytes.Buffer
-}
-
-func (b *syncBuffer) Write(p []byte) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.Write(p)
-}
-
-func (b *syncBuffer) Bytes() []byte {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.Bytes()
-}
-
-// EvaluatePredicates reports whether every predicate holds against res.
-// failed lists each violated predicate in order.
+// EvaluatePredicates fails closed for incomplete execution or unreadable capture.
 func EvaluatePredicates(preds []Predicate, res *StepResult) (pass bool, failed []Predicate) {
 	failed = []Predicate{}
+	if res == nil || res.Err != nil {
+		return false, append(failed, preds...)
+	}
 	for _, pred := range preds {
-		if !predicateHolds(pred, res) {
-			failed = append(failed, pred)
-		}
+		if !predicateHolds(pred, res) { failed = append(failed, pred) }
 	}
 	return len(failed) == 0, failed
 }
@@ -150,34 +172,41 @@ func predicateHolds(pred Predicate, res *StepResult) bool {
 	switch pred.Form {
 	case "exit-code":
 		want, err := strconv.Atoi(pred.Value)
-		if err != nil {
-			return false
-		}
-		return res.ExitStatus == want
-	case "matches":
+		return err == nil && res.ExitStatus == want
+	case "matches", "not-matches":
 		re, err := regexp.Compile(pred.Value)
-		if err != nil {
-			return false
-		}
-		return re.Match(streamBytes(pred.Stream, res))
-	case "not-matches":
-		re, err := regexp.Compile(pred.Value)
-		if err != nil {
-			return false
-		}
-		return !re.Match(streamBytes(pred.Stream, res))
+		if err != nil { return false }
+		data, err := streamBytes(pred.Stream, res)
+		if err != nil { return false }
+		matched := re.Match(data)
+		return matched == (pred.Form == "matches")
 	default:
 		return false
 	}
 }
 
-func streamBytes(stream string, res *StepResult) []byte {
+func streamBytes(stream string, res *StepResult) ([]byte, error) {
+	path := res.CombinedPath
 	switch stream {
-	case "stdout":
-		return res.Stdout
-	case "stderr":
-		return res.Stderr
-	default:
-		return res.Combined
+	case "stdout": path = res.StdoutPath
+	case "stderr": path = res.StderrPath
 	}
+	file, err := os.Open(path)
+	if err != nil { return nil, fmt.Errorf("read live capture: %w", err) }
+	defer file.Close()
+	limit := res.outputBytes
+	if limit == 0 { limit = defaultMaxOutputBytes }
+	// Stat first avoids allocating an oversized capture even if a file changed
+	// since execution. LimitReader also bounds growth during the read.
+	info, err := file.Stat()
+	if err != nil { return nil, err }
+	if info.Size() > limit { return nil, ErrOutputLimit }
+	data, err := io.ReadAll(io.LimitReader(file, limit))
+	if err != nil { return nil, err }
+	var extra [1]byte
+	if n, err := file.Read(extra[:]); n != 0 || err != io.EOF {
+		if err != nil && err != io.EOF { return nil, err }
+		return nil, ErrOutputLimit
+	}
+	return data, nil
 }

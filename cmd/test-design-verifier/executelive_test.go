@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"test-design/internal/live"
 )
 
 const (
@@ -762,5 +764,82 @@ func TestExecuteLive_GapRowMustNotBeBound(t *testing.T) {
 	}
 	if !strings.Contains(got.Message, "SC-13") {
 		t.Errorf("message = %q, want it to name SC-13", got.Message)
+	}
+}
+
+func TestExecuteLive_MissingRowPredicatesRefused(t *testing.T) {
+	repo := liveFixtureRepo(t)
+	commitLiveProfileOverride(t, repo, map[string]any{"walkthrough": [][]string{{"/usr/bin/false"}}})
+	prep := preparedLive(t, repo, "live-no-predicates")
+	planPath := writePlanFile(t, map[string]any{
+		"schemaVersion": "1",
+		"steps": []map[string]any{{
+			"expectation": "unsupported pass claim", "command": []string{"/usr/bin/false"},
+			"scBindings": []string{"SC-11", "SC-12"},
+		}},
+	})
+	code, _, stderr := runVerifyOp(t, "execute-live", executeLiveRequestJSON(t, repo, prep.RunDir, planPath, writeGapTraceEvidence(t, "SC-13")))
+	if code != exitError || decodeCLIError(t, stderr).Code != "missing-row-predicates" {
+		t.Fatalf("predicate-free row was not refused: code=%d stderr=%s", code, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(prep.WorktreePath, "scratch-live-no-predicates.txt")); !os.IsNotExist(err) {
+		t.Fatalf("start ran before refusal: %v", err)
+	}
+}
+
+func TestLiveRunLimitsPreserveEvidenceAndRunIndependentCleanup(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		command string
+		outputBytes int64
+	}{
+		{"timeout", "echo ready; sleep 20", 1024},
+		{"output", "printf 123456789; sleep 20", 8},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			profile := &live.Profile{
+				TimeoutSeconds: 1, CleanupTimeoutSeconds: 3, MaxOutputBytes: tc.outputBytes,
+				Cleanup: [][]string{{"/bin/sh", "-c", "sleep 1.2; printf cleaned > cleanup-marker"}},
+				CleanupEvidence: []live.Predicate{{Form: "exit-code", Value: "0"}},
+			}
+			run := newLiveRun(t.TempDir(), dir, profile)
+			run.execute(&live.Plan{Steps: []live.Step{{
+				Command: []string{"/bin/sh", "-c", tc.command}, SCBindings: []string{"SC-1"},
+				Predicates: []live.Predicate{{Form: "not-matches", Stream: "stdout", Value: "ERROR"}},
+			}}})
+			if run.verdicts["SC-1"] != verdictInconclusive || len(run.executionErrors) == 0 {
+				t.Fatalf("limited command verdict=%q errors=%v", run.verdicts["SC-1"], run.executionErrors)
+			}
+			marker, err := os.ReadFile(filepath.Join(dir, "cleanup-marker"))
+			if err != nil || string(marker) != "cleaned" || !run.cleanupOK {
+				t.Fatalf("independent cleanup = %q, %v, cleanupOK=%v", marker, err, run.cleanupOK)
+			}
+			raw, err := os.ReadFile(filepath.Join(run.runDir, "step-1", "stdout.raw"))
+			if err != nil || len(raw) == 0 {
+				t.Fatalf("missing failure raw evidence: %q, %v", raw, err)
+			}
+			found := false
+			for _, artifact := range run.rawArtifacts {
+				if artifact.Path == filepath.Join(run.runDir, "step-1", "stdout.raw") && artifact.SHA256 != "" {
+					found = true
+				}
+			}
+			if !found { t.Fatal("failure raw capture was not included in evidence") }
+		})
+	}
+}
+
+func TestExecuteLiveDisposesWorktreeAfterEvidenceWriteFailure(t *testing.T) {
+	repo := liveFixtureRepo(t)
+	prep := preparedLive(t, repo, "live-write-failure")
+	if err := os.Mkdir(filepath.Join(prep.RunDir, liveEvidenceFile), 0o755); err != nil { t.Fatal(err) }
+	code, _, stderr := runVerifyOp(t, "execute-live", executeLiveRequestJSON(t, repo, prep.RunDir,
+		filepath.Join(repo, filepath.FromSlash(liveFixturePlanPath)), writeGapTraceEvidence(t, "SC-13")))
+	if code != exitError || decodeCLIError(t, stderr).Code != "evidence-write-failed" {
+		t.Fatalf("code=%d stderr=%s", code, stderr)
+	}
+	if _, err := os.Stat(prep.WorktreePath); !os.IsNotExist(err) {
+		t.Fatalf("worktree survived post-attach error: %v", err)
 	}
 }

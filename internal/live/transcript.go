@@ -34,7 +34,10 @@ var (
 // value, in that case.
 func ReduceTranscript(step Step, res *StepResult, parentEnv []string, allowlist []string) (*ReducedStep, error) {
 	pass, failed := EvaluatePredicates(step.Predicates, res)
-	decisive := decisiveOutput(step.Predicates, failed, res)
+	decisive, err := decisiveOutput(step.Predicates, failed, res)
+	if err != nil {
+		return nil, err
+	}
 	command := redactCommand(step.Command)
 
 	// redactCommand misses secrets in plain argv slots (e.g. `mysql -p <value>`);
@@ -61,25 +64,29 @@ func ReduceTranscript(step Step, res *StepResult, parentEnv []string, allowlist 
 // violated predicate's evidence when the step failed, else the first
 // predicate's evidence as a representative pass sample, else a bounded tail
 // when the step carries no predicates at all.
-func decisiveOutput(preds []Predicate, failed []Predicate, res *StepResult) string {
+func decisiveOutput(preds []Predicate, failed []Predicate, res *StepResult) (string, error) {
 	if len(failed) > 0 {
 		return decisiveOutputFor(failed[0], res)
 	}
 	if len(preds) > 0 {
 		return decisiveOutputFor(preds[0], res)
 	}
-	return boundedTail(res.Combined, decisiveTailCap)
+	data, err := streamBytes("combined", res)
+	return boundedTail(data, decisiveTailCap), err
 }
 
-func decisiveOutputFor(pred Predicate, res *StepResult) string {
-	data := streamBytes(pred.Stream, res)
+func decisiveOutputFor(pred Predicate, res *StepResult) (string, error) {
+	data, err := streamBytes(pred.Stream, res)
+	if err != nil {
+		return "", err
+	}
 	if pred.Form != "matches" {
-		return boundedTail(data, decisiveTailCap)
+		return boundedTail(data, decisiveTailCap), nil
 	}
 	if excerpt, ok := matchWithContext(data, pred.Value); ok {
-		return excerpt
+		return excerpt, nil
 	}
-	return boundedTail(data, decisiveTailCap)
+	return boundedTail(data, decisiveTailCap), nil
 }
 
 func matchWithContext(data []byte, pattern string) (string, bool) {

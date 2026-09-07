@@ -1,7 +1,9 @@
 package report
 
 import (
+	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -200,5 +202,44 @@ func TestLoadMutationMissingRunIDNamesField(t *testing.T) {
 	}
 	if fieldErr.Field != "runId" {
 		t.Errorf("Field = %q, want %q", fieldErr.Field, "runId")
+	}
+}
+
+func TestLoadEvidenceRequiresProvenance(t *testing.T) {
+	for _, kind := range []string{"live", "mutation", "live-attempt", "mutation-attempt"} {
+		t.Run(kind, func(t *testing.T) {
+			for _, field := range []string{"repoCommit", "source", "sourceSha256"} {
+				t.Run(field, func(t *testing.T) {
+					doc := map[string]any{
+						"schemaVersion": "1", "verifierVersion": "1.1.0",
+						"runId": "run-1", "rowID": "SC-01", "refusal": "runner unavailable",
+						"repoCommit": "head-1", "source": "spec.md", "sourceSha256": "sha-1",
+					}
+					delete(doc, field)
+					body, err := json.Marshal(doc)
+					if err != nil {
+						t.Fatal(err)
+					}
+					path := filepath.Join(t.TempDir(), "evidence.json")
+					if err := os.WriteFile(path, body, 0o600); err != nil {
+						t.Fatal(err)
+					}
+					switch kind {
+					case "live":
+						_, err = LoadLive(path)
+					case "mutation":
+						_, err = LoadMutation(path)
+					case "live-attempt":
+						_, err = LoadLiveAttempt(path)
+					case "mutation-attempt":
+						_, err = LoadAttempt(path)
+					}
+					var missing *FieldMissingError
+					if !errors.As(err, &missing) || missing.Field != field {
+						t.Fatalf("missing %s accepted or misreported: %v", field, err)
+					}
+				})
+			}
+		})
 	}
 }

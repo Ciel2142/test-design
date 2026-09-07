@@ -20,6 +20,7 @@ import (
 	"test-design/internal/junitxml"
 	"test-design/internal/jvmrun"
 	"test-design/internal/runrecord"
+	"test-design/internal/subprocess"
 )
 
 type verifyRequest struct {
@@ -141,7 +142,7 @@ func gitOutput(repoRoot string, args ...string) (string, error) {
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
+	if err := subprocess.Run(cmd, subprocess.UtilityTimeout); err != nil {
 		return "", fmt.Errorf("git %s (in %s): %w: %s", strings.Join(args, " "), repoRoot, err, strings.TrimSpace(stderr.String()))
 	}
 	return stdout.String(), nil
@@ -247,7 +248,7 @@ func runSuite(op, dir, runDir string, command []string) (*suiteRun, *cliError) {
 	cmd.Stderr = stderrOut
 
 	started := time.Now().UTC()
-	runErr := cmd.Run()
+	runErr := subprocess.Run(cmd, subprocess.SuiteTimeout)
 	finished := time.Now().UTC()
 
 	var exitErr *exec.ExitError

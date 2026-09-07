@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"test-design/internal/evidence"
 )
@@ -22,12 +23,43 @@ type Profile struct {
 	EnvAllowlist     []string    `json:"envAllowlist"`
 	ResourcePrefixes []string    `json:"resourcePrefixes"`
 	Endpoints        []string    `json:"endpoints"`
+	TimeoutSeconds        int64 `json:"timeoutSeconds,omitempty"`
+	CleanupTimeoutSeconds int64 `json:"cleanupTimeoutSeconds,omitempty"`
+	MaxOutputBytes        int64 `json:"maxOutputBytes,omitempty"`
 }
 
 type Predicate struct {
 	Form   string `json:"form"`
 	Stream string `json:"stream"`
 	Value  string `json:"value"`
+}
+
+const (
+	defaultTimeout = 120 * time.Second
+	defaultCleanupTimeout = 30 * time.Second
+	defaultMaxOutputBytes int64 = 16777216
+)
+
+type Limits struct {
+	Timeout time.Duration
+	OutputBytes int64
+}
+
+// Limits returns independent deadlines for ordinary and cleanup commands.
+// Validate must succeed before a profile is used for execution.
+func (p *Profile) Limits(cleanup bool) Limits {
+	seconds, timeout := p.TimeoutSeconds, defaultTimeout
+	if cleanup {
+		seconds, timeout = p.CleanupTimeoutSeconds, defaultCleanupTimeout
+	}
+	if seconds > 0 {
+		timeout = time.Duration(seconds) * time.Second
+	}
+	output := p.MaxOutputBytes
+	if output == 0 {
+		output = defaultMaxOutputBytes
+	}
+	return Limits{Timeout: timeout, OutputBytes: output}
 }
 
 // LoadProfile fails closed: a missing or unreadable file, malformed JSON, or
@@ -53,6 +85,13 @@ func LoadProfile(path string) (*Profile, error) {
 // process starts. runID is accepted for future {run-id} substitution
 // callers; this task performs no substitution.
 func (p *Profile) Validate(runID string) error {
+	if p.TimeoutSeconds < 0 || p.CleanupTimeoutSeconds < 0 || p.MaxOutputBytes < 0 {
+		return fmt.Errorf("live profile: invalid-limits: limits must not be negative")
+	}
+	const maxSeconds = int64((1<<63 - 1) / time.Second)
+	if p.TimeoutSeconds > maxSeconds || p.CleanupTimeoutSeconds > maxSeconds {
+		return fmt.Errorf("live profile: invalid-limits: timeout exceeds supported duration")
+	}
 	if p.Classification != "local" && p.Classification != "ephemeral" {
 		return fmt.Errorf("live profile: unsupported-classification %q", p.Classification)
 	}

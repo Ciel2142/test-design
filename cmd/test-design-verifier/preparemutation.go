@@ -27,6 +27,10 @@ type identityOutput struct {
 
 type prepareMutationOutput struct {
 	evidence.Envelope
+	RunID string `json:"runID"`
+	RepoCommit string `json:"repoCommit"`
+	Source string `json:"source"`
+	SourceSHA256 string `json:"sourceSha256"`
 	RowID        string         `json:"rowID"`
 	Identity     identityOutput `json:"identity"`
 	RunnerKind   string         `json:"runnerKind"`
@@ -119,6 +123,10 @@ func prepareMutationHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writ
 		return &cliError{Code: "state-write-failed", Message: fmt.Sprintf("prepare-mutation: marshal snapshot: %v", err)}
 	}
 	st := &mutation.State{
+		RunID: req.RunID,
+		RepoCommit: repoCommit,
+		Source: src.Path,
+		SourceSHA256: src.SHA256,
 		RowID:        row.ID,
 		Identity:     identity,
 		WorktreePath: wt.Path,
@@ -135,6 +143,10 @@ func prepareMutationHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writ
 
 	out := prepareMutationOutput{
 		Envelope:     evidence.Envelope{SchemaVersion: evidence.SchemaVersion, VerifierVersion: evidence.VerifierVersion},
+		RunID: st.RunID,
+		RepoCommit: st.RepoCommit,
+		Source: st.Source,
+		SourceSHA256: st.SourceSHA256,
 		RowID:        row.ID,
 		Identity:     identityOutput{Scope: identity.Scope, Name: identity.Name},
 		RunnerKind:   src.Runner.Kind,

@@ -50,6 +50,9 @@ func preflightHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer) *c
 	if sourcePath == "" {
 		return &cliError{Code: "missing-source", Message: "preflight: --source is required"}
 	}
+	if !filepath.IsAbs(sourcePath) {
+		sourcePath = filepath.Join(repoRoot, sourcePath)
+	}
 	relSource, cliErr := repoRelative(repoRoot, sourcePath)
 	if cliErr != nil {
 		return cliErr

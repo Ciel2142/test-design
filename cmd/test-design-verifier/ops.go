@@ -5,8 +5,6 @@ import (
 	"io"
 )
 
-// Task 7 swaps each ops entry's handler for the real implementation; this
-// type and the registry shape must not change to make that possible.
 type opHandler func(fs *flag.FlagSet, requestBody []byte, stdout io.Writer) *cliError
 
 type opSpec struct {
@@ -50,6 +48,10 @@ var ops = map[string]opSpec{
 	"finalize": {
 		newFlags: newFinalizeFlags,
 		handler:  finalizeHandler,
+	},
+	"record-attempt": {
+		newFlags: newRecordAttemptFlags,
+		handler:  recordAttemptHandler,
 	},
 }
 

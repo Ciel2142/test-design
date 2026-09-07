@@ -75,9 +75,11 @@ does. A bare verdict is not usable.
 
 ## The canary
 
-**Only when your prompt says this batch carries a canary.** A dispatch that says it carries
-none is re-running rows already covered by a canaried batch — ignore this whole section
-there, and in particular do not infer that a lone row must be the weak one.
+**Only when your prompt says this batch carries a canary.** A dispatch can carry none
+because it re-runs real-source rows from a caught-canary batch, or because it explicitly
+records an unavailable snapshot/fixture canary. In either case ignore this section;
+do not infer that a lone row must be weak. The parent accounts for unavailable canaries
+as PARTIAL rather than claiming inherited evidence.
 
 When it does: the batch contains **one** test the dispatcher already knows is weak; it may
 be a real test or a deliberately weakened copy — you cannot tell by how it arrives, because

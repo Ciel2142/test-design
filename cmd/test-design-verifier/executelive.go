@@ -134,7 +134,7 @@ func executeLiveHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer) 
 // worktree is disposed of and before the final Compare; it is nil in
 // production and exists so a test can mutate the original repository at
 // exactly the moment the op is blind to it.
-func executeLiveOp(req *executeLiveRequest, stdout io.Writer, between func()) *cliError {
+func executeLiveOp(req *executeLiveRequest, stdout io.Writer, between func()) (opErr *cliError) {
 	src, cliErr := loadVerifiedSource("execute-live", req.RepoRoot, req.CoverageSource)
 	if cliErr != nil {
 		return cliErr
@@ -147,6 +147,9 @@ func executeLiveOp(req *executeLiveRequest, stdout io.Writer, between func()) *c
 	var descriptor live.Profile
 	if err := json.Unmarshal(st.Descriptor, &descriptor); err != nil {
 		return &cliError{Code: "descriptor-invalid", Message: fmt.Sprintf("execute-live: decode descriptor: %v", err)}
+	}
+	if err := descriptor.Validate(st.RunID); err != nil {
+		return &cliError{Code: "descriptor-invalid", Message: fmt.Sprintf("execute-live: %v", err)}
 	}
 
 	gaps, cliErr := layer1GapRows(req.TraceEvidence)
@@ -175,6 +178,18 @@ func executeLiveOp(req *executeLiveRequest, stdout io.Writer, between func()) *c
 	if err != nil {
 		return &cliError{Code: "worktree-attach-failed", Message: fmt.Sprintf("execute-live: %v", err)}
 	}
+	disposed := false
+	defer func() {
+		if !disposed {
+			if err := ctrl.Dispose(wt); err != nil {
+				if opErr == nil {
+					opErr = &cliError{Code: "worktree-dispose-failed", Message: fmt.Sprintf("execute-live: %v", err)}
+				} else {
+					opErr.Message += fmt.Sprintf("; dispose worktree: %v", err)
+				}
+			}
+		}
+	}()
 
 	run := newLiveRun(req.RunDir, wt.Path, &descriptor)
 	run.execute(pl)
@@ -202,6 +217,7 @@ func executeLiveOp(req *executeLiveRequest, stdout io.Writer, between func()) *c
 		return &cliError{Code: "evidence-write-failed", Message: fmt.Sprintf("execute-live: %v", err)}
 	}
 
+	disposed = true
 	if err := ctrl.Dispose(wt); err != nil {
 		return &cliError{Code: "worktree-dispose-failed", Message: fmt.Sprintf("execute-live: %v", err)}
 	}
@@ -444,12 +460,15 @@ func (r *liveRun) exec(phase string, index int, step live.Step) (res *live.StepR
 		return nil, nil, false
 	}
 
-	res, err := live.ExecuteStep(step, r.env, r.workDir, dir)
+	cleanup := phase == "cleanup" || phase == "plan-cleanup"
+	res, err := live.ExecuteStep(step, r.env, r.workDir, dir, r.descriptor.Limits(cleanup))
+	if res != nil {
+		r.recordRaw(res)
+	}
 	if err != nil {
 		r.recordError(phase, index, err)
 		return nil, nil, false
 	}
-	r.recordRaw(res)
 
 	reduced, err = live.ReduceTranscript(step, res, r.parentEnv, r.descriptor.EnvAllowlist)
 	if err != nil {
@@ -460,7 +479,7 @@ func (r *liveRun) exec(phase string, index int, step live.Step) (res *live.StepR
 }
 
 func (r *liveRun) recordRaw(res *live.StepResult) {
-	for _, path := range []string{res.StdoutPath, res.StderrPath} {
+	for _, path := range []string{res.StdoutPath, res.StderrPath, res.CombinedPath} {
 		sum, err := evidence.SHA256File(path)
 		if err != nil {
 			r.executionErrors = append(r.executionErrors, fmt.Sprintf("hash %s: %v", path, err))

@@ -100,6 +100,10 @@ func TestE2E_FinalizePipeline(t *testing.T) {
 	if err := evidence.WriteJSON(attemptPath, map[string]string{
 		"schemaVersion":   evidence.SchemaVersion,
 		"verifierVersion": evidence.VerifierVersion,
+		"runID": e2eFinalizeRunID,
+		"repoCommit": tr.RepoCommit,
+		"source": src.Path,
+		"sourceSha256": src.SHA256,
 		"rowID":           "SC-10",
 		"refusal":         "runner-start-failed",
 	}); err != nil {

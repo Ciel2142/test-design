@@ -42,7 +42,7 @@ runs as `go run -C "$CLAUDE_PLUGIN_ROOT" ./cmd/test-design-verifier <op> …`.
 
 Both skills drive every mechanical step — the repository snapshot, the disposable
 worktrees, the suite runs, the tag binding, the live plan execution, the mutation
-apply/evaluate cycle, and the verdict computation — through nine ops of one Go
+apply/evaluate cycle, and the verdict computation — through ten ops of one Go
 executable:
 
 | Op | What it does |
@@ -56,6 +56,7 @@ executable:
 | `prepare-live` | opens a disposable worktree and the run's live-profile descriptor for layer 3 |
 | `execute-live` | validates and runs a live plan against the real system, capturing reduced transcripts |
 | `finalize` | validates the evidence from all four layers, computes the verdict, and publishes the report |
+| `record-attempt` | records an observed live or mutation refusal with verifier-stamped run, source, and commit identity |
 
 ## Lifecycle vocabulary
 
@@ -83,7 +84,7 @@ docs/superpowers/coverage/transcripts/<run-id>/                  every evidence 
 Clone, then point a local marketplace at the clone:
 
 ```bash
-git clone http://192.168.1.34:3000/service/test-design.git
+git clone http://100.64.0.5:3000/service/test-design.git
 claude plugin marketplace add ./test-design
 claude plugin install test-design@test-design
 ```

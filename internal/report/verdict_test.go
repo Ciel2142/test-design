@@ -86,6 +86,7 @@ func greenLive() *LiveEvidence {
 		RunID:        "run-1",
 		Source:       greenSourcePath,
 		SourceSHA256: "sha-source-1",
+		RepoCommit: "head-1",
 		RowVerdicts: []LiveRowVerdict{
 			{RowID: "SC-02", Verdict: "LIVE-PASS"},
 			{RowID: "SC-03", Verdict: "LIVE-PASS"},
@@ -101,6 +102,9 @@ func greenMutations() []MutationInput {
 		EvidencePath: "run/mutation-SC-02.json",
 		Evidence: &MutationEvidence{
 			RunID: "run-1",
+			RepoCommit: "head-1",
+			Source: greenSourcePath,
+			SourceSHA256: "sha-source-1",
 			RowID: "SC-02",
 			Sites: []MutationSiteOutcome{
 				{Site: "pkg/b.go:12", Outcome: "caught"},
@@ -390,6 +394,7 @@ func TestComputeMutationEnvironmentalIsPartial(t *testing.T) {
 		Outcome:             "environmental",
 		Reason:              "docker unavailable",
 		AttemptEvidencePath: "run/mutation-attempt-SC-02.json",
+		Attempt: &Attempt{RunID: "run-1", RowID: "SC-02", RepoCommit: "head-1", Source: greenSourcePath, SourceSHA256: "sha-source-1", Refusal: "docker unavailable"},
 	}}
 
 	r := mustCompute(t, in)
@@ -465,7 +470,7 @@ func TestComputeAcknowledgementDoesNotAcknowledgeNonPartial(t *testing.T) {
 func TestComputeLiveProfileUnavailableIsPartial(t *testing.T) {
 	in := greenInputs()
 	in.Live = nil
-	in.LiveAttempt = &LiveAttempt{RunID: "run-1", Profile: "profiles/live.json", Refusal: "missing-profile"}
+	in.LiveAttempt = &LiveAttempt{RunID: "run-1", RepoCommit: "head-1", Source: greenSourcePath, SourceSHA256: "sha-source-1", Profile: "profiles/live.json", Refusal: "missing-profile"}
 
 	r := mustCompute(t, in)
 
@@ -915,4 +920,33 @@ func TestComputeAmbiguityFindingOnPassingRowRefusesHoldingCritic(t *testing.T) {
 	in.Trace.FindingCounts = map[string]int{"ambiguity": 1}
 
 	wantComputeRefusal(t, in, CodeMissingVerdict)
+}
+
+func TestComputeCanaryUnavailableIsAuditedPartial(t *testing.T) {
+	in := greenInputs()
+	in.Batches = in.Batches[1:]
+	for i := range in.Batches {
+		in.Batches[i].InheritsFrom = ""
+		in.Batches[i].CanaryUnavailableReason = "Only snapshot assertions exist; no safe prompt-only weakening is possible."
+	}
+	rep := mustCompute(t, in)
+	if rep.Verdict != VerdictPartial || rep.Layers.Layer2.Status != statusPartial {
+		t.Fatalf("canary-free verdict = %s, layer2 = %+v", rep.Verdict, rep.Layers.Layer2)
+	}
+	wantReason(t, rep, layer2, "", "critic-canary-unavailable")
+	if rep.Batches[0].CanaryUnavailableReason != in.Batches[0].CanaryUnavailableReason {
+		t.Fatal("report lost the audited canary exception")
+	}
+}
+
+func TestComputeNaturalCanaryKeepsRealWeakVerdict(t *testing.T) {
+	in := greenInputs()
+	in.Batches[0].Canary = &Canary{RowID: "SC-01", Kind: "natural", Caught: true}
+	in.Batches[0].Verdicts = []CriticVerdict{{RowID: "SC-01", Verdict: "WEAK", Reason: "boundary assertion absent"}}
+	in.Batches = []Batch{in.Batches[0], in.Batches[2]}
+	rep := mustCompute(t, in)
+	if rep.Verdict != VerdictBlocked || rowOf(t, rep, "SC-01").Layer2.Verdict != "WEAK" {
+		t.Fatalf("natural weakness was suppressed: %+v", rep)
+	}
+	wantReason(t, rep, layer2, "SC-01", "WEAK")
 }

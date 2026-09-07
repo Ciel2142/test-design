@@ -20,7 +20,15 @@ copied either into a personal hook configuration, remove it — nothing in 1.0 e
 
 **Install a Go 1.26+ toolchain.** Every op runs as
 `go run -C "$CLAUDE_PLUGIN_ROOT" ./cmd/test-design-verifier <op> …`. There is no build step
-and no committed binary, but `go` must be on `PATH` wherever a skill runs.
+and no committed binary, but `go` must be on `PATH` wherever a skill runs. Capture the
+absolute target root before changing directories, not from the plugin checkout:
+
+```bash
+TARGET_REPO=$(git rev-parse --show-toplevel)
+```
+
+Every request's `repoRoot` is that absolute value, and every `-repo` uses
+`"$TARGET_REPO"`; source paths are relative to that target, not the plugin.
 
 **Update the plugin** so `CLAUDE_PLUGIN_ROOT` points at a 1.0 checkout. The marketplace is
 the local clone, so pull it first:
@@ -64,12 +72,12 @@ A 0.5 coverage doc is refused by 1.0's parser until migrated. Three things chang
    and counts it printed.
 
 The step-by-step procedure, including what to do when two old documents collide on an SC
-ID, is the `## Migration` section of
-[`skills/test-coverage-design/SKILL.md`](../skills/test-coverage-design/SKILL.md). The done
+ID, is the conditional
+[migration reference](../skills/test-coverage-design/references/migration.md). The done
 condition is a successful
 
 ```text
-go run -C "$CLAUDE_PLUGIN_ROOT" ./cmd/test-design-verifier preflight -source <path> -repo .
+go run -C "$CLAUDE_PLUGIN_ROOT" ./cmd/test-design-verifier preflight -source <path> -repo "$TARGET_REPO"
 ```
 
 `covers: SC-nn` tags in test source are unchanged and do not need touching, unless the
@@ -92,13 +100,23 @@ evidence document under `transcripts/<run-id>/`. Two consequences worth knowing 
 first run:
 
 - **`PARTIAL` needs an acknowledgement.** `finalize` publishes a `PARTIAL` report with
-  `acknowledged: false`. It is not a finished gate until rerun with the acknowledgement
-  line, and that rerun refuses `source-not-reproducible` while the first report sits
-  uncommitted in the tree — commit or discard it first.
-- **A dirty tree refuses.** `baseline` and `prepare-mutation` refuse `dirty-repository`;
-  `trace`, `prepare-live`, and `finalize` refuse `source-not-reproducible`. All mean the
-  same thing — uncommitted changes in the repository — and the fix is always to commit or
-  discard them. There is no `--force`.
+  `acknowledged: false`. It is not a finished gate until rerun with the user's actual
+  acknowledgement after publication. Keep HEAD unchanged: preserve scratch evidence,
+  then restore/remove only the exact generated publication files before that rerun.
+  Committing the first report moves HEAD and requires a new full verification run.
+  Follow the mandatory [finalize/recovery procedure](../skills/coverage-verification/references/finalize-recovery.md).
+- **A dirty tree refuses.** There is no `--force`. Resolve user/source changes without
+  deleting unrelated work; a changed commit requires fresh evidence. Generated PARTIAL
+  publication recovery is the exact-file procedure linked above, not a blanket discard.
+
+## 1.1 evidence hardening
+
+Version 1.1.0 retains schemaVersion `"1"` and the existing baseline schema. Live/mutation
+evidence and attempts now require `repoCommit`, `source`, and `sourceSha256`, in addition
+to run and row identities. Regenerate old unbound evidence with a freshly approved full
+run; do not fill missing fields from current HEAD or rename/re-stamp old evidence.
+The executable's `record-attempt` operation records actual agent/environment refusals;
+controllers no longer hand-write attempt envelopes.
 
 ## What did not change
 

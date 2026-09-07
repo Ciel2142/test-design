@@ -32,6 +32,11 @@ type diffSummaryOutput struct {
 
 type evaluateMutationOutput struct {
 	evidence.Envelope
+	RunID string `json:"runId"`
+	RowID string `json:"rowID"`
+	RepoCommit string `json:"repoCommit"`
+	Source string `json:"source"`
+	SourceSHA256 string `json:"sourceSha256"`
 	Site              string                 `json:"site"`
 	Outcome           string                 `json:"outcome"`
 	Diff              diffSummaryOutput      `json:"diff"`
@@ -58,6 +63,9 @@ type mutationEvidence struct {
 	evidence.Envelope
 	RunID         string                 `json:"runId"`
 	RowID         string                 `json:"rowID"`
+	RepoCommit string `json:"repoCommit"`
+	Source string `json:"source"`
+	SourceSHA256 string `json:"sourceSha256"`
 	Identity      identityOutput         `json:"identity"`
 	RunnerKind    string                 `json:"runnerKind"`
 	SuiteCommand  []string               `json:"suiteCommand"`
@@ -125,6 +133,13 @@ func evaluateMutationOp(req *evaluateMutationRequest, stdout io.Writer, between 
 	st, err := mutation.LoadState(req.RunDir)
 	if err != nil {
 		return &cliError{Code: "state-load-failed", Message: fmt.Sprintf("evaluate-mutation: %v", err)}
+	}
+	head, cliErr := headCommit("evaluate-mutation", req.RepoRoot)
+	if cliErr != nil {
+		return cliErr
+	}
+	if st.RunID != req.RunID || st.RepoCommit != head || st.Source != src.Path || st.SourceSHA256 != src.SHA256 {
+		return &cliError{Code: "stale-evidence", Message: "evaluate-mutation: prepared state does not match request run/source/HEAD; prepare again"}
 	}
 	for _, so := range st.Sites {
 		if so.Site == req.Site {
@@ -218,6 +233,11 @@ func evaluateMutationOp(req *evaluateMutationRequest, stdout io.Writer, between 
 
 	out := evaluateMutationOutput{
 		Envelope:          evidence.Envelope{SchemaVersion: evidence.SchemaVersion, VerifierVersion: evidence.VerifierVersion},
+		RunID: st.RunID,
+		RowID: st.RowID,
+		RepoCommit: st.RepoCommit,
+		Source: st.Source,
+		SourceSHA256: st.SourceSHA256,
 		Site:              req.Site,
 		Outcome:           outcome,
 		Diff:              diffSummaryOutput{File: summary.File, Hunks: summary.Hunks},
@@ -261,7 +281,10 @@ func evaluateMutationOp(req *evaluateMutationRequest, stdout io.Writer, between 
 	evidencePath := filepath.Join(req.RunDir, "mutation-evidence.json")
 	ev := mutationEvidence{
 		Envelope:      out.Envelope,
-		RunID:         req.RunID,
+		RunID:         st.RunID,
+		RepoCommit: st.RepoCommit,
+		Source: st.Source,
+		SourceSHA256: st.SourceSHA256,
 		RowID:         st.RowID,
 		Identity:      identityOutput{Scope: st.Identity.Scope, Name: st.Identity.Name},
 		RunnerKind:    src.Runner.Kind,

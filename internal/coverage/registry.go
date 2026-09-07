@@ -37,6 +37,13 @@ var areaPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 // two documents, or twice within one document, is a hard failure naming the
 // ID and the document path(s) involved.
 func BuildRegistry(repoRoot string) (*Registry, error) {
+	info, err := os.Stat(repoRoot)
+	if err != nil {
+		return nil, fmt.Errorf("build registry: repository root %s: %w", repoRoot, err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("build registry: repository root %s is not a directory", repoRoot)
+	}
 	owners := make(map[string]Owner)
 
 	if err := scanRegistryDir(repoRoot, filepath.Join("docs", "superpowers", "coverage"), "*-coverage.md", owners); err != nil {

@@ -18,6 +18,9 @@ const stateFileName = "live-state.json"
 type State struct {
 	SchemaVersion string          `json:"schemaVersion"`
 	RunID         string          `json:"runID"`
+	RepoCommit string `json:"repoCommit"`
+	Source string `json:"source"`
+	SourceSHA256 string `json:"sourceSha256"`
 	WorktreePath  string          `json:"worktreePath"`
 	Snapshot      json.RawMessage `json:"snapshot"`
 	ProfilePath   string          `json:"profilePath"`
@@ -83,6 +86,9 @@ func LoadState(runDir string) (*State, error) {
 	}
 	if st.RunID == "" {
 		return nil, fmt.Errorf("load live state %s: runID is empty", path)
+	}
+	if st.RepoCommit == "" || st.Source == "" || st.SourceSHA256 == "" {
+		return nil, fmt.Errorf("load live state %s: repoCommit, source and sourceSha256 are required; regenerate prepared state", path)
 	}
 	if st.WorktreePath == "" {
 		return nil, fmt.Errorf("load live state %s: worktreePath is empty", path)

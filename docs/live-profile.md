@@ -43,6 +43,13 @@ source with no such row omits the key and layer 3 reports `n/a`.
 | `envAllowlist` | `[]string` | Names of environment variables the commands inherit from the verifier's process. Everything else is stripped. See "Environment and secrets". |
 | `resourcePrefixes` | `[]string` | Every name or prefix the run may create. Each entry **must** contain `{run-id}`; the verifier refuses `run-id-missing-from-resources` otherwise, so two concurrent runs can never collide on a fixture. |
 | `endpoints` | `[]string` | URLs or `host:port` pairs the plan may reference. Under `local`, each must resolve to loopback. Under `ephemeral`, list what the environment exposes. May be `[]`. |
+| `timeoutSeconds` | integer, optional | Per-command start/health/walkthrough timeout; default 120 seconds. |
+| `cleanupTimeoutSeconds` | integer, optional | Independent per-command cleanup timeout; default 30 seconds, so an interrupted walkthrough does not consume cleanup's deadline. |
+| `maxOutputBytes` | integer, optional | Maximum captured output per command; default 16777216 bytes. Excess output is not accepted as passing evidence. |
+
+For these optional limits, omission or zero uses the default; negative values are invalid.
+Commands are bounded, including descendant processes; interruption or a deadline is an
+execution error, not an ordinary expected nonzero exit. Cleanup still runs with its own limit.
 
 ### Predicate shape
 
@@ -55,6 +62,8 @@ source with no such row omits the key and layer 3 reports `n/a`.
 Exactly these three forms. `exit-code` takes no `stream`; `matches` and `not-matches`
 require one and compile `value` as a Go regular expression. Richer evaluation belongs in a
 checked-in project script whose exit code or output the predicates observe.
+Every SC-bound plan step must include at least one predicate. Merely running a command
+does not establish a row's expected behavior, even if that command exits successfully.
 
 ### `{run-id}` substitution
 
@@ -74,6 +83,7 @@ process starts. A refusal names the rule broken:
 | `undeclared-command` | A step's `argv[0]` must appear as `argv[0]` of some entry in `start`, `health`, `walkthrough`, or `cleanup`. Declaring `["curl", "-s", "http://localhost:8080/health"]` under `health` declares `curl` for every step. |
 | `shell-invocation-rejected` | `sh -c`, `bash -c`, `zsh -c`, `dash -c`, and a single-token command containing whitespace are refused. A recipe that needs shell semantics is a checked-in script invoked by path. An interpreter such as `python3 -c` passes this guard only if the profile declares `python3`; declaring it is the project's decision. |
 | `undeclared-endpoint` | Any token shaped like a URL or `host:port` must equal a declared endpoint or extend one with `/`, `?`, or `#`. |
+| `missing-row-predicates` | A step with SC bindings must have at least one predicate; unchecked execution cannot prove a row. |
 | `inexpressible-predicate` | A predicate outside the three forms above, a non-integer `exit-code`, or a regex that does not compile. |
 | `unbound-row` / `unknown-row` / `gap-row-bound` | Every applicable row not already a layer-1 gap must be bound by at least one step; no step may bind a row outside the applicable set or a row layer 1 already reported as a gap. |
 

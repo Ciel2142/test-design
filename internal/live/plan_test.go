@@ -201,6 +201,35 @@ func applicableRows() []coverage.Row {
 	}
 }
 
+func TestValidateRefusesBoundStepWithoutPredicates(t *testing.T) {
+	profile := &Profile{Walkthrough: [][]string{{"/usr/bin/false"}}}
+	for _, cleanup := range []bool{false, true} {
+		pl := &Plan{Steps: []Step{{Expectation: "setup", Command: []string{"/usr/bin/false"}}}}
+		bound := Step{Expectation: "must prove SC-1", Command: []string{"/usr/bin/false"}, SCBindings: []string{"SC-1"}}
+		if cleanup {
+			pl.Cleanup = []Step{bound}
+		} else {
+			pl.Steps = append(pl.Steps, bound)
+		}
+		err := pl.Validate(profile, []coverage.Row{{ID: "SC-1"}}, nil)
+		if err == nil || !strings.Contains(err.Error(), "missing-row-predicates") {
+			t.Fatalf("cleanup=%v: Validate() = %v, want missing-row-predicates", cleanup, err)
+		}
+	}
+}
+
+func TestValidateAllowsUnboundPredicateFreeSetupAndExplicitNonzero(t *testing.T) {
+	profile := &Profile{Walkthrough: [][]string{{"/usr/bin/false"}}}
+	pl := &Plan{Steps: []Step{
+		{Expectation: "unbound setup", Command: []string{"/usr/bin/false"}},
+		{Expectation: "expected refusal", Command: []string{"/usr/bin/false"}, SCBindings: []string{"SC-1"},
+			Predicates: []Predicate{{Form: "exit-code", Value: "1"}}},
+	}}
+	if err := pl.Validate(profile, []coverage.Row{{ID: "SC-1"}}, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestValidateAcceptsWellFormedPlan(t *testing.T) {
 	pl := &Plan{
 		SchemaVersion: evidence.SchemaVersion,

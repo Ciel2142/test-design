@@ -573,3 +573,34 @@ func assertEvidenceFile(t *testing.T, path, wantRunID, wantRowID, wantRunnerKind
 		t.Error("evidence.SuiteCommand is empty, want the redacted suite command")
 	}
 }
+
+func TestEvaluateMutation_RejectsPreparedIdentityMismatch(t *testing.T) {
+	for _, mismatch := range []string{"run", "commit", "source", "sha"} {
+		t.Run(mismatch, func(t *testing.T) {
+			repo := fixtureRepo(t)
+			prep := preparedMutation(t, repo, "identity-check", "SC-09")
+			st, err := mutation.LoadState(prep.RunDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch mismatch {
+			case "run":
+				st.RunID = "other-run"
+			case "commit":
+				st.RepoCommit = strings.Repeat("a", 40)
+			case "source":
+				st.Source = "other-spec.md"
+			case "sha":
+				st.SourceSHA256 = "other-sha"
+			}
+			if err := mutation.WriteState(prep.RunDir, st); err != nil {
+				t.Fatal(err)
+			}
+			code, _, stderr := runVerifyOp(t, "evaluate-mutation",
+				evaluateMutationRequestJSON(t, repo, "identity-check", prep.RunDir, "guard", true))
+			if code != exitError || !strings.Contains(stderr, "stale-evidence") {
+				t.Fatalf("identity mismatch accepted: code=%d stderr=%s", code, stderr)
+			}
+		})
+	}
+}

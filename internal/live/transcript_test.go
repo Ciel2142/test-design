@@ -16,8 +16,8 @@ func TestReduceTranscriptPassResult(t *testing.T) {
 	}
 	res := &StepResult{
 		ExitStatus: 0,
-		Stdout:     []byte("status: ready\n"),
-		Combined:   []byte("status: ready\n"),
+		StdoutPath: writeTestCapture(t, "status: ready\n"),
+		CombinedPath: writeTestCapture(t, "status: ready\n"),
 	}
 
 	rs, err := ReduceTranscript(step, res, nil, nil)
@@ -48,8 +48,8 @@ func TestReduceTranscriptFailResult(t *testing.T) {
 	}
 	res := &StepResult{
 		ExitStatus: 0,
-		Stdout:     []byte("status: down\n"),
-		Combined:   []byte("status: down\n"),
+		StdoutPath: writeTestCapture(t, "status: down\n"),
+		CombinedPath: writeTestCapture(t, "status: down\n"),
 	}
 
 	rs, err := ReduceTranscript(step, res, nil, nil)
@@ -67,7 +67,7 @@ func TestReduceTranscriptRedactsCommand(t *testing.T) {
 		Command:     []string{"curl", "--token=abc123def456", "http://127.0.0.1:8099"},
 		Predicates:  []Predicate{{Form: "exit-code", Value: "0"}},
 	}
-	res := &StepResult{ExitStatus: 0}
+	res := &StepResult{ExitStatus: 0, CombinedPath: writeTestCapture(t, "")}
 
 	rs, err := ReduceTranscript(step, res, nil, nil)
 	if err != nil {
@@ -91,7 +91,7 @@ func TestReduceTranscriptDecisiveOutputForMatchesIncludesContext(t *testing.T) {
 	}
 	res := &StepResult{
 		ExitStatus: 0,
-		Stdout:     []byte("line before\nserver listening on :8099\nline after\n"),
+		StdoutPath: writeTestCapture(t, "line before\nserver listening on :8099\nline after\n"),
 	}
 
 	rs, err := ReduceTranscript(step, res, nil, nil)
@@ -112,7 +112,7 @@ func TestReduceTranscriptDecisiveOutputForExitCodeIsTail(t *testing.T) {
 	}
 	res := &StepResult{
 		ExitStatus: 0,
-		Combined:   []byte(longOutput),
+		CombinedPath: writeTestCapture(t, longOutput),
 	}
 
 	rs, err := ReduceTranscript(step, res, nil, nil)
@@ -138,7 +138,7 @@ func TestReduceTranscriptRedactionBarrierBlocksNonAllowlistedEnvValue(t *testing
 	}
 	res := &StepResult{
 		ExitStatus: 0,
-		Combined:   []byte("connecting with password " + secretValue),
+		CombinedPath: writeTestCapture(t, "connecting with password " + secretValue),
 	}
 	parentEnv := []string{secretName + "=" + secretValue, "PATH=/usr/bin"}
 	allowlist := []string{"PATH"}
@@ -166,7 +166,7 @@ func TestReduceTranscriptRedactionBarrierAllowsAllowlistedEnvValue(t *testing.T)
 	}
 	res := &StepResult{
 		ExitStatus: 0,
-		Combined:   []byte("base url is http://allowed-value-here"),
+		CombinedPath: writeTestCapture(t, "base url is http://allowed-value-here"),
 	}
 	parentEnv := []string{"BASE_URL=http://allowed-value-here"}
 	allowlist := []string{"BASE_URL"}
@@ -188,7 +188,7 @@ func TestReduceTranscriptRedactionBarrierSkipsShortValues(t *testing.T) {
 	}
 	res := &StepResult{
 		ExitStatus: 0,
-		Combined:   []byte("port is 8080"),
+		CombinedPath: writeTestCapture(t, "port is 8080"),
 	}
 	parentEnv := []string{"PORT=8080", "PATH=/usr/bin"} // "8080" is 4 chars, below the 6-char floor
 	allowlist := []string{"PATH"}
@@ -211,7 +211,7 @@ func TestReduceTranscriptRedactionBarrierCatchesSecretInUnmatchedArgvSlot(t *tes
 		Command:     []string{"mysql", "-p", secretValue},
 		Predicates:  []Predicate{{Form: "exit-code", Value: "0"}},
 	}
-	res := &StepResult{ExitStatus: 0, Combined: []byte("connected")}
+	res := &StepResult{ExitStatus: 0, CombinedPath: writeTestCapture(t, "connected")}
 	parentEnv := []string{secretName + "=" + secretValue}
 	allowlist := []string{}
 
@@ -239,7 +239,7 @@ func TestReduceTranscriptNeverContainsCanaryValue(t *testing.T) {
 	}
 	res := &StepResult{
 		ExitStatus: 0,
-		Combined:   []byte("output includes " + canaryValue + " inline"),
+		CombinedPath: writeTestCapture(t, "output includes " + canaryValue + " inline"),
 	}
 	parentEnv := []string{"CANARY_VAR=" + canaryValue}
 	allowlist := []string{}

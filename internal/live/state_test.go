@@ -13,6 +13,9 @@ import (
 func sampleState() *State {
 	return &State{
 		RunID:        "run-abc123",
+		RepoCommit: "abc123",
+		Source: "spec.md",
+		SourceSHA256: "source-sha",
 		WorktreePath: "/tmp/wt-example",
 		Snapshot:     json.RawMessage(`{"headCommit":"abc123"}`),
 		ProfilePath:  "verifier.toml",
@@ -156,6 +159,9 @@ func TestLoadStateEmptyRequiredFieldsFailClosed(t *testing.T) {
 		corrupt func(*State)
 	}{
 		{"empty runID", func(s *State) { s.RunID = "" }},
+		{"empty repoCommit", func(s *State) { s.RepoCommit = "" }},
+		{"empty source", func(s *State) { s.Source = "" }},
+		{"empty sourceSha256", func(s *State) { s.SourceSHA256 = "" }},
 		{"empty worktreePath", func(s *State) { s.WorktreePath = "" }},
 		{"empty profilePath", func(s *State) { s.ProfilePath = "" }},
 		{"empty descriptor", func(s *State) { s.Descriptor = nil }},

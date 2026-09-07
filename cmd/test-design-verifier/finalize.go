@@ -206,9 +206,11 @@ func finalizeOp(req *finalizeRequest, stdout io.Writer, between func()) *cliErro
 			})
 		}
 		if m.AttemptEvidencePath != "" {
-			if _, err := report.LoadAttempt(m.AttemptEvidencePath); err != nil {
+			attempt, err := report.LoadAttempt(m.AttemptEvidencePath)
+			if err != nil {
 				return evidenceLoadError(err)
 			}
+			m.Attempt = attempt
 			transcripts = append(transcripts, worktree.PublishFile{
 				RepoRelPath: repoPath(artifactDir, "transcripts", req.RunID, "mutation-attempt-"+m.RowID+".json"),
 				SourcePath:  m.AttemptEvidencePath,
@@ -289,15 +291,18 @@ func finalizeOp(req *finalizeRequest, stdout io.Writer, between func()) *cliErro
 	return writeStdout(stdout, out)
 }
 
-// artifactStem derives the verification artifact names from the coverage
-// source name; without the convention there is no name to publish under.
+// artifactStem keeps coverage-doc names compatible and derives inline-spec
+// artifacts from the complete Markdown basename in the same directory.
 func artifactStem(coverageSource string) (dir, stem string, cliErr *cliError) {
 	base := filepath.Base(filepath.FromSlash(coverageSource))
 	stem, ok := strings.CutSuffix(base, coverageSourceSuffix)
+	if !ok {
+		stem, ok = strings.CutSuffix(base, ".md")
+	}
 	if !ok || stem == "" {
 		return "", "", &cliError{
 			Code:    "source-name-unconventional",
-			Message: fmt.Sprintf("finalize: coverage source %q does not end in %q, so no artifact stem can be derived", base, coverageSourceSuffix),
+			Message: fmt.Sprintf("finalize: coverage source %q must have a nonempty Markdown basename", base),
 		}
 	}
 	dir = filepath.ToSlash(filepath.Dir(filepath.FromSlash(coverageSource)))

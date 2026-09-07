@@ -7,6 +7,11 @@ on the machine running either skill — every mechanical step runs through the p
 Go executable, `go run -C "$CLAUDE_PLUGIN_ROOT" ./cmd/test-design-verifier <op> …`, which
 has no third-party dependencies and needs no build step or committed binary.
 
+Before any such command, capture the absolute target repository while in the project,
+not the plugin: `TARGET_REPO=$(git rev-parse --show-toplevel)`. Requests use that absolute
+value as `repoRoot`; flags use `-repo "$TARGET_REPO"` and target-relative source paths.
+The plugin's `-C` working directory is never the target root.
+
 ## Installation behavior
 
 Installation does not:
@@ -58,3 +63,5 @@ test-coverage-design → wave-planning → (per wave: writing-plans → execute)
 ```
 
 One feature branch spans all waves. `coverage-verification` runs once after the final wave.
+Wave planning is an optional installed workflow, not a dependency this plugin introduces.
+Without it, design hands directly to `superpowers:writing-plans`.

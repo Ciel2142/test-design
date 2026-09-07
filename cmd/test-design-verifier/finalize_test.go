@@ -100,6 +100,9 @@ func newFinalizeFixtureFor(t *testing.T, repo, coverageSource string) *finalizeF
 		f.writeJSON(path, &report.MutationEvidence{
 			Envelope:      evidence.Envelope{SchemaVersion: evidence.SchemaVersion, VerifierVersion: evidence.VerifierVersion},
 			RunID:         f.runID,
+			RepoCommit: f.head,
+			Source: f.src.Path,
+			SourceSHA256: f.src.SHA256,
 			RowID:         row.ID,
 			Sites:         []report.MutationSiteOutcome{{Site: "orders/orders.go:12", Outcome: "caught"}},
 			SnapshotEqual: true,
@@ -160,6 +163,7 @@ func (f *finalizeFixture) writeLive(verdicts []report.LiveRowVerdict) string {
 		RunID:         f.runID,
 		Source:        f.src.Path,
 		SourceSHA256:  f.src.SHA256,
+		RepoCommit: f.head,
 		RowVerdicts:   verdicts,
 		CleanupOK:     true,
 		SnapshotEqual: true,
@@ -173,6 +177,9 @@ func (f *finalizeFixture) writeLiveAttempt(profile, refusal string) string {
 	f.writeJSON(path, &report.LiveAttempt{
 		Envelope: evidence.Envelope{SchemaVersion: evidence.SchemaVersion, VerifierVersion: evidence.VerifierVersion},
 		RunID:    f.runID,
+		RepoCommit: f.head,
+		Source: f.src.Path,
+		SourceSHA256: f.src.SHA256,
 		Profile:  profile,
 		Refusal:  refusal,
 	})
@@ -320,27 +327,30 @@ func TestFinalize_DecodesRequestDocument(t *testing.T) {
 	}
 }
 
-func TestFinalize_SourceNameUnconventionalRefused(t *testing.T) {
-	f := newFinalizeFixture(t)
-	body, err := json.Marshal(finalizeRequestJSON{
-		SchemaVersion:       evidence.SchemaVersion,
-		RepoRoot:            f.repo,
-		CoverageSource:      "docs/superpowers/coverage/2026-08-30-fixture.md",
-		RunID:               f.runID,
-		finalizeRequestBody: f.body,
-	})
+func TestFinalize_OrdinaryInlineSpecPublishes(t *testing.T) {
+	repo := fixtureRepo(t)
+	source := "docs/superpowers/coverage/ordinary-spec.md"
+	original, err := os.ReadFile(filepath.Join(repo, fixtureCoverageSource))
 	if err != nil {
-		t.Fatalf("marshal: %v", err)
+		t.Fatal(err)
 	}
-
-	exit, _, stderr := runVerifyOp(t, "finalize", string(body))
-
-	if exit != exitError {
-		t.Fatalf("exit code = %d, want %d", exit, exitError)
+	original = []byte(strings.ReplaceAll(string(original), fixtureCoverageSource, source))
+	original = []byte(strings.ReplaceAll(string(original), "Spec: docs/superpowers/specs/2026-08-30-fixture-design.md", "Spec: "+source))
+	if err := os.WriteFile(filepath.Join(repo, source), original, 0o644); err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(stderr, "source-name-unconventional") {
-		t.Errorf("stderr = %q, want the source-name-unconventional refusal", stderr)
+	mustGit(t, repo, "add", source)
+	mustGit(t, repo, "commit", "-m", "add inline coverage source")
+	f := newFinalizeFixtureFor(t, repo, source)
+	exit, stdout, stderr := f.run()
+	if exit != exitOK {
+		t.Fatalf("finalize inline source: %s", stderr)
 	}
+	out := decodeFinalizeOutput(t, stdout)
+	if out.JSONPath != "docs/superpowers/coverage/ordinary-spec-verification.json" || out.Verdict != report.VerdictPass {
+		t.Fatalf("inline result = %+v", out)
+	}
+	f.publishedReport(out.JSONPath)
 }
 
 func TestFinalize_DirtyRepositoryRefused(t *testing.T) {
@@ -416,6 +426,9 @@ func TestFinalize_MutationEvidenceForAnotherRunRefused(t *testing.T) {
 	path := f.body.Layer4.Rows[0].EvidencePath
 	f.writeJSON(path, &report.MutationEvidence{
 		Envelope:      evidence.Envelope{SchemaVersion: evidence.SchemaVersion, VerifierVersion: evidence.VerifierVersion},
+		RepoCommit: f.head,
+		Source: f.src.Path,
+		SourceSHA256: f.src.SHA256,
 		RunID:         "some-other-run",
 		RowID:         f.body.Layer4.Rows[0].RowID,
 		Sites:         []report.MutationSiteOutcome{{Site: "orders/orders.go:12", Outcome: "caught"}},
@@ -658,4 +671,83 @@ func TestFinalize_MutationAttemptEvidenceUnreadableRefused(t *testing.T) {
 	f.body.Layer4.Rows[0].AttemptEvidencePath = attemptPath
 
 	f.wantRefusal("evidence-unreadable")
+}
+
+func TestFinalize_PartialAcknowledgementAfterDiscardingOwnArtifacts(t *testing.T) {
+	f := newLiveFinalizeFixture(t)
+	f.body.Layer3 = &finalizeLayer3{AttemptEvidencePath: f.writeLiveAttempt(liveFixtureProfilePath, "profile unavailable")}
+	exit, stdout, stderr := f.run()
+	if exit != exitOK {
+		t.Fatalf("initial finalize: %s", stderr)
+	}
+	first := decodeFinalizeOutput(t, stdout)
+	rep := f.publishedReport(first.JSONPath)
+	if first.Verdict != report.VerdictPartial || first.Acknowledged {
+		t.Fatalf("initial result = %+v", first)
+	}
+	f.body.Acknowledgement = "PARTIAL accepted: live environment unavailable"
+	f.wantRefusal("source-not-reproducible")
+	paths := []string{first.JSONPath, first.MarkdownPath}
+	for _, ref := range rep.Transcripts {
+		paths = append(paths, ref.Path)
+	}
+	for _, path := range paths {
+		if err := os.Remove(filepath.Join(f.repo, filepath.FromSlash(path))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(first.RunDir, filepath.Base(first.JSONPath))); err != nil {
+		t.Fatalf("original report not preserved: %v", err)
+	}
+	exit, stdout, stderr = f.run()
+	if exit != exitOK {
+		t.Fatalf("same-HEAD acknowledged finalize: %s", stderr)
+	}
+	second := decodeFinalizeOutput(t, stdout)
+	ack := f.publishedReport(second.JSONPath)
+	if !ack.Acknowledged || ack.Verdict != report.VerdictPartial || ack.HeadCommit != f.head {
+		t.Fatalf("acknowledged report = %+v", ack)
+	}
+	for i, ref := range rep.Transcripts {
+		if ack.Transcripts[i] != ref {
+			t.Fatalf("evidence changed: %+v -> %+v", ref, ack.Transcripts[i])
+		}
+	}
+}
+
+func TestFinalize_MutationAttemptRequiresMatchingIdentity(t *testing.T) {
+	for _, mismatch := range []string{"run", "row", "commit", "source", "sha", "missing"} {
+		t.Run(mismatch, func(t *testing.T) {
+			f := newFinalizeFixture(t)
+			m := &f.body.Layer4.Rows[0]
+			attempt := &report.Attempt{
+				Envelope: f.trace.Envelope,
+				RunID: f.runID, RowID: m.RowID,
+				RepoCommit: f.head, Source: f.src.Path, SourceSHA256: f.src.SHA256,
+				Refusal: "runner unavailable",
+			}
+			code := report.CodeStaleEvidence
+			switch mismatch {
+			case "run":
+				attempt.RunID = "another-run"
+			case "row":
+				attempt.RowID = "SC-999"
+				code = report.CodeMutationRowMismatch
+			case "commit":
+				attempt.RepoCommit = strings.Repeat("a", 40)
+			case "source":
+				attempt.Source = "different-spec.md"
+			case "sha":
+				attempt.SourceSHA256 = "different-source"
+			case "missing":
+				attempt.RepoCommit = ""
+				code = "evidence-field-missing"
+			}
+			m.EvidencePath = ""
+			m.Outcome = "environmental"
+			m.AttemptEvidencePath = filepath.Join(f.dir, "attempt.json")
+			f.writeJSON(m.AttemptEvidencePath, attempt)
+			f.wantRefusal(code)
+		})
+	}
 }

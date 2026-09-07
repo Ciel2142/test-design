@@ -64,6 +64,7 @@ type LiveRowVerdict struct {
 type LiveEvidence struct {
 	evidence.Envelope
 	RunID           string           `json:"runId"`
+	RepoCommit      string           `json:"repoCommit"`
 	Source          string           `json:"source"`
 	SourceSHA256    string           `json:"sourceSha256"`
 	RowVerdicts     []LiveRowVerdict `json:"rowVerdicts"`
@@ -76,6 +77,9 @@ type LiveEvidence struct {
 type LiveAttempt struct {
 	evidence.Envelope
 	RunID   string `json:"runID"`
+	RepoCommit string `json:"repoCommit"`
+	Source string `json:"source"`
+	SourceSHA256 string `json:"sourceSha256"`
 	Profile string `json:"profile"`
 	Refusal string `json:"refusal"`
 }
@@ -86,6 +90,10 @@ type Attempt struct {
 	evidence.Envelope
 	RunID string `json:"runID"`
 	RowID string `json:"rowID"`
+	RepoCommit string `json:"repoCommit"`
+	Source string `json:"source"`
+	SourceSHA256 string `json:"sourceSha256"`
+	Refusal string `json:"refusal"`
 }
 
 type MutationSiteOutcome struct {
@@ -103,6 +111,9 @@ type MutationEvidence struct {
 	evidence.Envelope
 	RunID         string                `json:"runId"`
 	RowID         string                `json:"rowID"`
+	RepoCommit string `json:"repoCommit"`
+	Source string `json:"source"`
+	SourceSHA256 string `json:"sourceSha256"`
 	Sites         []MutationSiteOutcome `json:"sites"`
 	SnapshotEqual bool                  `json:"snapshotEqual"`
 }
@@ -137,6 +148,7 @@ type Batch struct {
 	Rows         []string        `json:"rows"`
 	Canary       *Canary         `json:"canary,omitempty"`
 	InheritsFrom string          `json:"inheritsFrom,omitempty"`
+	CanaryUnavailableReason string `json:"canaryUnavailableReason,omitempty"`
 	Voided       bool            `json:"voided,omitempty"`
 	Verdicts     []CriticVerdict `json:"verdicts"`
 }
@@ -148,6 +160,7 @@ type MutationInput struct {
 	Reason              string            `json:"reason,omitempty"`
 	AttemptEvidencePath string            `json:"attemptEvidencePath,omitempty"`
 	Evidence            *MutationEvidence `json:"-"`
+	Attempt             *Attempt          `json:"-"`
 }
 
 type Inputs struct {
@@ -204,6 +217,7 @@ type BatchReport struct {
 	Rows         []string        `json:"rows"`
 	Canary       *Canary         `json:"canary,omitempty"`
 	InheritsFrom string          `json:"inheritsFrom,omitempty"`
+	CanaryUnavailableReason string `json:"canaryUnavailableReason,omitempty"`
 	Voided       bool            `json:"voided"`
 	Verdicts     []CriticVerdict `json:"verdicts"`
 }

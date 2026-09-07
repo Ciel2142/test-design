@@ -52,6 +52,8 @@ rather than discovering them from a refusal:
 
 - **`empty`** — the plan needs at least one step, and every step needs a non-empty
   `expectation` and a non-empty `command`.
+  Every SC-bound step needs at least one predicate (`missing-row-predicates`);
+  an unchecked command is not evidence.
 - **Commands only from the declared surface.** Every step's `command[0]` (in `steps` and
   in `cleanup`) must equal the first argument of some command in the profile's `start`,
   `health`, `walkthrough`, or `cleanup` lists — that includes a checked-in script, as
@@ -100,60 +102,12 @@ If a row's expected behavior cannot be exercised through the profile's declared 
 and endpoints — no declared command reaches the code path, or the observable outcome has
 no expressible predicate — say so as your entire reply instead of forcing a step that
 would misrepresent the row: name the row and explain what is missing. The main thread
-records this as the row's `attemptEvidencePath` and the run continues for the rest of
-the rows.
+records the actual refusal through `record-attempt` as the **whole layer's**
+`attemptEvidencePath`, then continues to mutation. Per-row live continuation is not
+supported; do not return a partial plan or claim the remaining rows ran.
 
-## Complete example
+## Example — only when needed
 
-Given a profile whose `walkthrough` list declares `["echo", "live-fixture-ready"]` and
-`["printenv", "LIVE_FIXTURE_CANARY"]`, whose `cleanup` list declares `["rm", "-f", …]`, no
-declared endpoints, and applicable rows SC-11 (smoke, happy path) and SC-12 (e2e,
-non-happy path), with SC-13 in the layer-1 gap set:
-
-```json
-{
-  "schemaVersion": "1",
-  "steps": [
-    {
-      "expectation": "the happy walkthrough reaches the ready marker",
-      "command": ["echo", "live-fixture-ready"],
-      "predicates": [
-        {"form": "exit-code", "value": "0"},
-        {"form": "matches", "stream": "stdout", "value": "live-fixture-ready"}
-      ],
-      "scBindings": ["SC-11"]
-    },
-    {
-      "expectation": "the non-happy walkthrough is refused",
-      "command": ["echo", "live-fixture-accepted"],
-      "predicates": [
-        {"form": "matches", "stream": "stdout", "value": "live-fixture-refused"}
-      ],
-      "scBindings": ["SC-12"]
-    },
-    {
-      "expectation": "the walkthrough process cannot read a non-allowlisted secret",
-      "command": ["printenv", "LIVE_FIXTURE_CANARY"],
-      "predicates": [
-        {"form": "exit-code", "value": "1"}
-      ],
-      "scBindings": ["SC-11"]
-    }
-  ],
-  "cleanup": [
-    {
-      "expectation": "the walkthrough's own marker file is removed",
-      "command": ["rm", "-f", "walkthrough-marker.txt"],
-      "predicates": [
-        {"form": "exit-code", "value": "0"}
-      ],
-      "scBindings": []
-    }
-  ]
-}
-```
-
-SC-13 does not appear in any `scBindings` because it is in the gap set; every other
-applicable row (SC-11, SC-12) is bound at least once; every command's first token
-(`echo`, `printenv`, `rm`) is one the profile declares; no endpoint tokens appear, so
-nothing needs to match `endpoints`; every predicate is `exit-code` or `matches`.
+When a complete plan example is needed to resolve the JSON shape, **read
+[live plan example](../skills/coverage-verification/references/live-plan-example.md)**.
+Do not load it merely to copy fixture behavior into a real project plan.

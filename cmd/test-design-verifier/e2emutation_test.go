@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"test-design/internal/mutation"
+	"test-design/internal/report"
 )
 
 // The zero-selection and foreign-diff refusals are already proven end-to-end
@@ -107,6 +108,17 @@ func TestE2EMutation_GoTwoGuardMultiSite(t *testing.T) {
 		t.Fatal("evidencePath is empty, want the written evidence file's path")
 	}
 	assertEvidenceFile(t, siteB.EvidencePath, "e2emutation-go", "SC-10", "go", 2, []string{"caught", "survived"})
+	loaded, err := report.LoadMutation(siteB.EvidencePath)
+	if err != nil {
+		t.Fatalf("finalize consumer rejected real mutation evidence: %v", err)
+	}
+	src, cliErr := loadVerifiedSource("finalize", repo, fixtureCoverageSource)
+	if cliErr != nil {
+		t.Fatal(cliErr)
+	}
+	if loaded.RepoCommit != headBefore || loaded.Source != src.Path || loaded.SourceSHA256 != src.SHA256 {
+		t.Fatalf("mutation evidence does not describe measured source/commit: %+v", loaded)
+	}
 	if left := verifierWorktrees(t); len(left) != 0 {
 		t.Errorf("worktrees registered = %v, want the lastSite call to have disposed of it", left)
 	}

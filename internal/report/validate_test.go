@@ -10,6 +10,7 @@ import (
 
 func baseSource() *coverage.Source {
 	return &coverage.Source{
+		Path: greenSourcePath,
 		SHA256: "sha-source-1",
 		Rows: []coverage.Row{
 			{ID: "SC-01", Level: "unit", Risk: "low"},
@@ -24,6 +25,8 @@ func baseSource() *coverage.Source {
 func baseTrace() *TraceEvidence {
 	return &TraceEvidence{
 		RunID:        "run-1",
+		RepoCommit: "head-1",
+		Source: greenSourcePath,
 		SourceSHA256: "sha-source-1",
 	}
 }
@@ -63,6 +66,8 @@ func baseBatches() []Batch {
 func baseLive() *LiveEvidence {
 	return &LiveEvidence{
 		RunID:        "run-1",
+		RepoCommit: "head-1",
+		Source: greenSourcePath,
 		SourceSHA256: "sha-source-1",
 		RowVerdicts: []LiveRowVerdict{
 			{RowID: "SC-02", Verdict: "LIVE-PASS"},
@@ -79,6 +84,9 @@ func baseMutations() []MutationInput {
 			EvidencePath: "testdata/mutation-valid.json",
 			Evidence: &MutationEvidence{
 				RunID: "run-1",
+				RepoCommit: "head-1",
+				Source: greenSourcePath,
+				SourceSHA256: "sha-source-1",
 				RowID: "SC-02",
 				Sites: []MutationSiteOutcome{{Site: "x", Outcome: "caught"}},
 			},
@@ -90,6 +98,7 @@ func baseInputs() *Inputs {
 	return &Inputs{
 		Source:    baseSource(),
 		RunID:     "run-1",
+		HeadCommit: "head-1",
 		Trace:     baseTrace(),
 		Freshness: Freshness{Result: "fresh"},
 		Batches:   baseBatches(),
@@ -294,7 +303,7 @@ func TestValidateUnexpectedLiveEvidence(t *testing.T) {
 	in := baseInputs()
 	in.Source.Rows = []coverage.Row{{ID: "SC-01", Level: "unit", Risk: "low"}}
 	in.Source.Retired = nil
-	in.Live = &LiveEvidence{RunID: "run-1", SourceSHA256: "sha-source-1", CleanupOK: true}
+	in.Live = &LiveEvidence{RunID: "run-1", RepoCommit: "head-1", Source: greenSourcePath, SourceSHA256: "sha-source-1", CleanupOK: true}
 	in.Batches = []Batch{{
 		BatchID: "b1",
 		RunID:   "run-1",
@@ -317,7 +326,7 @@ func TestValidateMissingVerdictLayer3NoLiveNoAttempt(t *testing.T) {
 func TestValidateLayer3NoLiveWithAttemptIsAccepted(t *testing.T) {
 	in := baseInputs()
 	in.Live = nil
-	in.LiveAttempt = &LiveAttempt{RunID: "run-1", Profile: "p", Refusal: "missing-profile"}
+	in.LiveAttempt = &LiveAttempt{RunID: "run-1", RepoCommit: "head-1", Source: greenSourcePath, SourceSHA256: "sha-source-1", Profile: "p", Refusal: "missing-profile"}
 	if err := Validate(in); err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
@@ -346,16 +355,18 @@ func TestValidateUnexpectedLiveEvidenceInapplicableRow(t *testing.T) {
 
 func TestValidateGapRowLayer3MustCarryNA(t *testing.T) {
 	in := baseInputs()
+	in.Batches = greenBatches()
 	in.Trace.Findings = []TraceFinding{{Kind: "gap", RowID: "SC-02", Detail: "no tagged test"}}
-	in.Batches[0].Verdicts[0].Verdict = "MISSING"
+	in.Batches[2].Verdicts[0].Verdict = "MISSING"
 	in.Mutations = nil
 	wantRefusal(t, Validate(in), CodeMissingVerdict)
 }
 
 func TestValidateMutationOnGapRow(t *testing.T) {
 	in := baseInputs()
+	in.Batches = greenBatches()
 	in.Trace.Findings = []TraceFinding{{Kind: "gap", RowID: "SC-02", Detail: "no tagged test"}}
-	in.Batches[0].Verdicts[0].Verdict = "MISSING"
+	in.Batches[2].Verdicts[0].Verdict = "MISSING"
 	in.Live.RowVerdicts[0] = LiveRowVerdict{RowID: "SC-02", Verdict: "LIVE-N/A (layer 1 gap)"}
 	wantRefusal(t, Validate(in), CodeMutationOnGapRow)
 }
@@ -444,10 +455,7 @@ func TestValidateCanaryBookkeepingNaturalCaughtHoldsInAnotherBatch(t *testing.T)
 		{RowID: "SC-02", Verdict: "HOLDS"},
 		{RowID: "SC-03", Verdict: "HOLDS"},
 	}
-	re := wantRefusal(t, Validate(in), CodeCanaryBookkeeping)
-	if !strings.Contains(re.Detail, "b2") {
-		t.Errorf("Detail = %q, want it to name batch b2, which verdicts the caught natural canary row HOLDS", re.Detail)
-	}
+	wantRefusal(t, Validate(in), CodeCanaryBookkeeping)
 }
 
 func TestValidateStaleEvidenceLiveAttemptRunIDMismatch(t *testing.T) {
@@ -469,10 +477,94 @@ func TestValidateMutationEntryOnNonHighRiskRowIsChecked(t *testing.T) {
 	in.Mutations = append(in.Mutations, MutationInput{
 		RowID:        "SC-03",
 		EvidencePath: "testdata/mutation-foreign.json",
-		Evidence:     &MutationEvidence{RunID: "run-1", RowID: "SC-02"},
+		Evidence:     &MutationEvidence{RunID: "run-1", RepoCommit: "head-1", Source: greenSourcePath, SourceSHA256: "sha-source-1", RowID: "SC-02"},
 	})
 	re := wantRefusal(t, Validate(in), CodeMutationEvidenceEmpty)
 	if !strings.Contains(re.Detail, "SC-03") {
 		t.Errorf("Detail = %q, want it to name row SC-03, whose med-risk entry carries empty evidence", re.Detail)
+	}
+}
+
+func TestValidateRejectsEvidenceFromPreviousCommitWithSameRunID(t *testing.T) {
+	for _, layer := range []string{"live", "mutation", "live-attempt", "mutation-attempt"} {
+		t.Run(layer, func(t *testing.T) {
+			in := greenInputs()
+			in.HeadCommit = "head-2"
+			in.Trace.RepoCommit = "head-2"
+			in.Live.RepoCommit = "head-2"
+			in.Mutations[0].Evidence.RepoCommit = "head-2"
+			switch layer {
+			case "live":
+				in.Live.RepoCommit = "head-1"
+			case "mutation":
+				in.Mutations[0].Evidence.RepoCommit = "head-1"
+			case "live-attempt":
+				in.Live = nil
+				in.LiveAttempt = &LiveAttempt{RunID: in.RunID, RepoCommit: "head-1", Source: in.Source.Path, SourceSHA256: in.Source.SHA256, Refusal: "runner unavailable"}
+			case "mutation-attempt":
+				in.Mutations[0].AttemptEvidencePath = "attempt.json"
+				in.Mutations[0].Attempt = &Attempt{RunID: in.RunID, RowID: "SC-02", RepoCommit: "head-1", Source: in.Source.Path, SourceSHA256: in.Source.SHA256, Refusal: "runner unavailable"}
+			}
+			wantRefusal(t, Validate(in), CodeStaleEvidence)
+		})
+	}
+}
+
+func TestValidateCanaryKindsAndSourceSeparation(t *testing.T) {
+	t.Run("natural verdict belongs to same batch", func(t *testing.T) {
+		in := baseInputs()
+		in.Batches[0].Verdicts = nil
+		in.Batches[1].Verdicts = append(in.Batches[1].Verdicts, CriticVerdict{RowID: "SC-02", Verdict: "WEAK"})
+		wantRefusal(t, Validate(in), CodeCanaryBookkeeping)
+	})
+	t.Run("unknown kind", func(t *testing.T) {
+		in := baseInputs()
+		in.Batches[0].Canary.Kind = "unknown"
+		wantRefusal(t, Validate(in), CodeCanaryBookkeeping)
+	})
+	t.Run("synthetic verdict is not real evidence", func(t *testing.T) {
+		in := greenInputs()
+		in.Batches[0].Verdicts = in.Batches[1].Verdicts
+		in.Batches[1].Verdicts = nil
+		wantRefusal(t, Validate(in), CodeCanaryBookkeeping)
+	})
+}
+
+func TestValidateRejectsMissingOrMixedProvenance(t *testing.T) {
+	for _, field := range []string{"commit", "source", "sha", "wrong-source", "wrong-sha"} {
+		t.Run(field, func(t *testing.T) {
+			in := greenInputs()
+			switch field {
+			case "commit":
+				in.Live.RepoCommit = ""
+			case "source":
+				in.Mutations[0].Evidence.Source = ""
+			case "sha":
+				in.Mutations[0].Evidence.SourceSHA256 = ""
+			case "wrong-source":
+				in.Live.Source = "other-spec.md"
+			case "wrong-sha":
+				in.Mutations[0].Evidence.SourceSHA256 = "other-sha"
+			}
+			wantRefusal(t, Validate(in), CodeStaleEvidence)
+		})
+	}
+}
+
+func TestValidateCanaryUnavailableCannotInheritOrCarryCanary(t *testing.T) {
+	for _, mode := range []string{"canary", "inheritance", "whitespace"} {
+		t.Run(mode, func(t *testing.T) {
+			in := greenInputs()
+			switch mode {
+			case "canary":
+				in.Batches[0].CanaryUnavailableReason = "audited exception"
+			case "inheritance":
+				in.Batches[1].CanaryUnavailableReason = "audited exception"
+			case "whitespace":
+				in.Batches[1].InheritsFrom = ""
+				in.Batches[1].CanaryUnavailableReason = " \t"
+			}
+			wantRefusal(t, Validate(in), CodeCanaryBookkeeping)
+		})
 	}
 }

@@ -244,6 +244,7 @@ func TestRenderMarkdownLayer3NAAllGapsIsOneLine(t *testing.T) {
 			RunID:        "run-1",
 			Source:       greenSourcePath,
 			SourceSHA256: "sha-source-1",
+			RepoCommit: "head-1",
 			RowVerdicts: []LiveRowVerdict{
 				{RowID: "SC-01", Verdict: "LIVE-N/A (layer 1 gap)"},
 				{RowID: "SC-02", Verdict: "LIVE-N/A (layer 1 gap)"},

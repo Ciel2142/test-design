@@ -73,6 +73,9 @@ func LoadLive(path string) (*LiveEvidence, error) {
 	case ev.SourceSHA256 == "":
 		return nil, &FieldMissingError{Path: path, Field: "sourceSha256"}
 	}
+	if err := requireIdentity(path, ev.RepoCommit, ev.Source, ev.SourceSHA256); err != nil {
+		return nil, err
+	}
 	return &ev, nil
 }
 
@@ -86,6 +89,9 @@ func LoadLiveAttempt(path string) (*LiveAttempt, error) {
 		return nil, &FieldMissingError{Path: path, Field: "runID"}
 	case ev.Refusal == "":
 		return nil, &FieldMissingError{Path: path, Field: "refusal"}
+	}
+	if err := requireIdentity(path, ev.RepoCommit, ev.Source, ev.SourceSHA256); err != nil {
+		return nil, err
 	}
 	return &ev, nil
 }
@@ -101,6 +107,9 @@ func LoadMutation(path string) (*MutationEvidence, error) {
 	case ev.RowID == "":
 		return nil, &FieldMissingError{Path: path, Field: "rowID"}
 	}
+	if err := requireIdentity(path, ev.RepoCommit, ev.Source, ev.SourceSHA256); err != nil {
+		return nil, err
+	}
 	return &ev, nil
 }
 
@@ -109,5 +118,28 @@ func LoadAttempt(path string) (*Attempt, error) {
 	if err := decodeEvidence(path, &ev); err != nil {
 		return nil, err
 	}
+	switch {
+	case ev.RunID == "":
+		return nil, &FieldMissingError{Path: path, Field: "runID"}
+	case ev.RowID == "":
+		return nil, &FieldMissingError{Path: path, Field: "rowID"}
+	case ev.Refusal == "":
+		return nil, &FieldMissingError{Path: path, Field: "refusal"}
+	}
+	if err := requireIdentity(path, ev.RepoCommit, ev.Source, ev.SourceSHA256); err != nil {
+		return nil, err
+	}
 	return &ev, nil
+}
+
+func requireIdentity(path, commit, source, sha string) error {
+	switch {
+	case commit == "":
+		return &FieldMissingError{Path: path, Field: "repoCommit"}
+	case source == "":
+		return &FieldMissingError{Path: path, Field: "source"}
+	case sha == "":
+		return &FieldMissingError{Path: path, Field: "sourceSha256"}
+	}
+	return nil
 }

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"test-design/internal/evidence"
 )
@@ -43,6 +44,38 @@ func writeProfile(t *testing.T, dir string, data []byte) string {
 		t.Fatalf("WriteFile: %v", err)
 	}
 	return path
+}
+
+func TestProfileRejectsNegativeExecutionLimits(t *testing.T) {
+	for _, field := range []string{"timeoutSeconds", "cleanupTimeoutSeconds", "maxOutputBytes"} {
+		t.Run(field, func(t *testing.T) {
+			var p Profile
+			if err := json.Unmarshal(sampleProfileJSON(t, map[string]any{field: -1}), &p); err != nil {
+				t.Fatal(err)
+			}
+			if err := p.Validate("limits"); err == nil {
+				t.Fatalf("negative %s accepted", field)
+			}
+		})
+	}
+}
+
+func TestProfileSeparatesExecutionAndCleanupLimits(t *testing.T) {
+	var p Profile
+	if err := json.Unmarshal(sampleProfileJSON(t, map[string]any{
+		"timeoutSeconds": 1, "cleanupTimeoutSeconds": 3, "maxOutputBytes": 128,
+	}), &p); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Validate("limits"); err != nil {
+		t.Fatal(err)
+	}
+	if got := p.Limits(false); got.Timeout != time.Second || got.OutputBytes != 128 {
+		t.Fatalf("execution limits = %+v", got)
+	}
+	if got := p.Limits(true); got.Timeout != 3*time.Second || got.OutputBytes != 128 {
+		t.Fatalf("cleanup limits = %+v", got)
+	}
 }
 
 func TestLoadProfileMissingFileFailsClosed(t *testing.T) {

@@ -1,13 +1,32 @@
 package live
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"test-design/internal/subprocess"
 )
+
+func writeTestCapture(t *testing.T, data string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "capture.raw")
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func readTestCapture(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil { t.Fatal(err) }
+	return string(data)
+}
 
 func TestSanitizedEnv(t *testing.T) {
 	tests := []struct {
@@ -92,7 +111,7 @@ func TestExecuteStepChildNeverSeesNonAllowlistedEnv(t *testing.T) {
 	step := Step{Expectation: "env is sanitized", Command: []string{"/usr/bin/env"}}
 	runDir := t.TempDir()
 
-	res, err := ExecuteStep(step, env, runDir, runDir)
+	res, err := ExecuteStep(step, env, runDir, runDir, Limits{})
 	if err != nil {
 		t.Fatalf("ExecuteStep() error = %v, want nil", err)
 	}
@@ -102,11 +121,9 @@ func TestExecuteStepChildNeverSeesNonAllowlistedEnv(t *testing.T) {
 	if res.ExitStatus != 0 {
 		t.Fatalf("ExecuteStep() ExitStatus = %d, want 0", res.ExitStatus)
 	}
-	if strings.Contains(string(res.Stdout), canaryName) {
-		t.Errorf("child env leaked non-allowlisted var %s: stdout = %q", canaryName, res.Stdout)
-	}
-	if strings.Contains(string(res.Stdout), canaryValue) {
-		t.Errorf("child env leaked non-allowlisted value: stdout = %q", res.Stdout)
+	stdout := readTestCapture(t, res.StdoutPath)
+	if strings.Contains(stdout, canaryName) || strings.Contains(stdout, canaryValue) {
+		t.Errorf("child env leaked non-allowlisted canary: stdout = %q", stdout)
 	}
 }
 
@@ -119,7 +136,7 @@ func TestExecuteStepNonzeroExitIsNotAnError(t *testing.T) {
 	step := Step{Expectation: "fails", Command: []string{falsePath}}
 	runDir := t.TempDir()
 
-	res, err := ExecuteStep(step, []string{}, runDir, runDir)
+	res, err := ExecuteStep(step, []string{}, runDir, runDir, Limits{})
 	if err != nil {
 		t.Fatalf("ExecuteStep() error = %v, want nil for a nonzero exit", err)
 	}
@@ -129,13 +146,16 @@ func TestExecuteStepNonzeroExitIsNotAnError(t *testing.T) {
 	if res.ExitStatus == 0 {
 		t.Errorf("ExecuteStep() ExitStatus = 0, want nonzero")
 	}
+	if pass, _ := EvaluatePredicates([]Predicate{{Form: "exit-code", Value: "1"}}, res); !pass {
+		t.Fatal("ordinary nonzero expectation failed")
+	}
 }
 
 func TestExecuteStepStartFailureIsDistinctError(t *testing.T) {
 	step := Step{Expectation: "missing binary", Command: []string{"/no/such/binary-td-live-test"}}
 	runDir := t.TempDir()
 
-	res, err := ExecuteStep(step, []string{}, runDir, runDir)
+	res, err := ExecuteStep(step, []string{}, runDir, runDir, Limits{})
 	if err == nil {
 		t.Fatal("ExecuteStep() error = nil, want a start-failure error")
 	}
@@ -152,7 +172,7 @@ func TestExecuteStepStartFailureErrorIsRedacted(t *testing.T) {
 	}
 	runDir := t.TempDir()
 
-	_, err := ExecuteStep(step, []string{}, runDir, runDir)
+	_, err := ExecuteStep(step, []string{}, runDir, runDir, Limits{})
 	if err == nil {
 		t.Fatal("ExecuteStep() error = nil, want a start-failure error")
 	}
@@ -168,7 +188,7 @@ func TestExecuteStepEmptyCommandErrors(t *testing.T) {
 	step := Step{Expectation: "empty", Command: nil}
 	runDir := t.TempDir()
 
-	res, err := ExecuteStep(step, []string{}, runDir, runDir)
+	res, err := ExecuteStep(step, []string{}, runDir, runDir, Limits{})
 	if err == nil {
 		t.Fatal("ExecuteStep() error = nil, want error for empty command")
 	}
@@ -186,7 +206,7 @@ func TestExecuteStepCapturesTimestampsAndRawFiles(t *testing.T) {
 	runDir := t.TempDir()
 
 	before := time.Now().UTC()
-	res, err := ExecuteStep(step, []string{}, runDir, runDir)
+	res, err := ExecuteStep(step, []string{}, runDir, runDir, Limits{})
 	after := time.Now().UTC()
 	if err != nil {
 		t.Fatalf("ExecuteStep() error = %v", err)
@@ -204,16 +224,12 @@ func TestExecuteStepCapturesTimestampsAndRawFiles(t *testing.T) {
 		t.Errorf("timestamps out of range: started=%v finished=%v before=%v after=%v", started, finished, before, after)
 	}
 
-	if !strings.Contains(string(res.Stdout), "GREETING=hello-stdout") {
-		t.Errorf("res.Stdout = %q, want it to contain GREETING=hello-stdout", res.Stdout)
-	}
-
 	stdoutOnDisk, err := os.ReadFile(res.StdoutPath)
 	if err != nil {
 		t.Fatalf("read StdoutPath: %v", err)
 	}
-	if string(stdoutOnDisk) != string(res.Stdout) {
-		t.Errorf("stdout on disk = %q, want it to match res.Stdout = %q", stdoutOnDisk, res.Stdout)
+	if string(stdoutOnDisk) != "GREETING=hello-stdout\n" {
+		t.Errorf("stdout on disk = %q, want emitted environment", stdoutOnDisk)
 	}
 	if !strings.HasPrefix(res.StdoutPath, runDir) {
 		t.Errorf("StdoutPath = %q, want it under runDir %q", res.StdoutPath, runDir)
@@ -235,12 +251,12 @@ func TestExecuteStepRunsInGivenDir(t *testing.T) {
 	}
 
 	step := Step{Expectation: "runs in dir", Command: []string{pwdPath}}
-	res, err := ExecuteStep(step, []string{}, dir, dir)
+	res, err := ExecuteStep(step, []string{}, dir, dir, Limits{})
 	if err != nil {
 		t.Fatalf("ExecuteStep() error = %v", err)
 	}
 
-	got := strings.TrimSpace(string(res.Stdout))
+	got := strings.TrimSpace(readTestCapture(t, res.StdoutPath))
 	if got != resolvedDir {
 		t.Errorf("pwd output = %q, want %q", got, resolvedDir)
 	}
@@ -257,12 +273,13 @@ func TestExecuteStepCombinedStreamIsRaceSafe(t *testing.T) {
 	}
 	runDir := t.TempDir()
 
-	res, err := ExecuteStep(step, []string{}, runDir, runDir)
+	res, err := ExecuteStep(step, []string{}, runDir, runDir, Limits{})
 	if err != nil {
 		t.Fatalf("ExecuteStep() error = %v", err)
 	}
-	if !strings.Contains(string(res.Combined), "out-1") || !strings.Contains(string(res.Combined), "err-1") {
-		t.Errorf("Combined = %q, want both stdout and stderr lines", res.Combined)
+	combined := readTestCapture(t, res.CombinedPath)
+	if !strings.Contains(combined, "out-1") || !strings.Contains(combined, "err-1") {
+		t.Errorf("Combined = %q, want both stdout and stderr lines", combined)
 	}
 }
 
@@ -290,26 +307,26 @@ func TestEvaluatePredicates(t *testing.T) {
 		{
 			name:     "matches stdout holds",
 			preds:    []Predicate{{Form: "matches", Stream: "stdout", Value: "hel+o"}},
-			res:      &StepResult{Stdout: []byte("hello world")},
+			res:      &StepResult{StdoutPath: writeTestCapture(t, "hello world")},
 			wantPass: true,
 		},
 		{
 			name:       "matches stderr fails when absent",
 			preds:      []Predicate{{Form: "matches", Stream: "stderr", Value: "hello"}},
-			res:        &StepResult{Stderr: []byte("goodbye")},
+			res:        &StepResult{StderrPath: writeTestCapture(t, "goodbye")},
 			wantPass:   false,
 			wantFailed: []Predicate{{Form: "matches", Stream: "stderr", Value: "hello"}},
 		},
 		{
 			name:     "not-matches combined holds",
 			preds:    []Predicate{{Form: "not-matches", Stream: "combined", Value: "ERROR"}},
-			res:      &StepResult{Combined: []byte("all good")},
+			res:      &StepResult{CombinedPath: writeTestCapture(t, "all good")},
 			wantPass: true,
 		},
 		{
 			name:       "not-matches combined fails",
 			preds:      []Predicate{{Form: "not-matches", Stream: "combined", Value: "ERROR"}},
-			res:        &StepResult{Combined: []byte("an ERROR occurred")},
+			res:        &StepResult{CombinedPath: writeTestCapture(t, "an ERROR occurred")},
 			wantPass:   false,
 			wantFailed: []Predicate{{Form: "not-matches", Stream: "combined", Value: "ERROR"}},
 		},
@@ -319,12 +336,12 @@ func TestEvaluatePredicates(t *testing.T) {
 				{Form: "exit-code", Value: "0"},
 				{Form: "matches", Stream: "stdout", Value: "ready"},
 			},
-			res:        &StepResult{ExitStatus: 0, Stdout: []byte("not there")},
+			res:        &StepResult{ExitStatus: 0, StdoutPath: writeTestCapture(t, "not there")},
 			wantPass:   false,
 			wantFailed: []Predicate{{Form: "matches", Stream: "stdout", Value: "ready"}},
 		},
 		{
-			name:     "no predicates always pass",
+			name:     "unbound predicate-free result",
 			preds:    nil,
 			res:      &StepResult{ExitStatus: 1},
 			wantPass: true,
@@ -346,5 +363,65 @@ func TestEvaluatePredicates(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestExecuteStepTimeoutPreservesRawAndCannotPass(t *testing.T) {
+	dir := t.TempDir()
+	step := Step{Command: []string{"/bin/sh", "-c", "echo ready; sleep 20"},
+		Predicates: []Predicate{{Form: "matches", Stream: "stdout", Value: "ready"}}}
+	res, err := ExecuteStep(step, []string{}, dir, dir, Limits{Timeout: 100 * time.Millisecond, OutputBytes: 1024})
+	if !errors.Is(err, subprocess.ErrTimeout) || res == nil {
+		t.Fatalf("ExecuteStep() = %+v, %v, want timeout with raw evidence", res, err)
+	}
+	data, readErr := os.ReadFile(res.StdoutPath)
+	if readErr != nil || string(data) != "ready\n" {
+		t.Fatalf("raw capture = %q, %v", data, readErr)
+	}
+	if pass, _ := EvaluatePredicates(step.Predicates, res); pass {
+		t.Fatal("timed-out output satisfied predicates")
+	}
+}
+
+func TestExecuteStepOutputLimitCountsBothStreamsOnce(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		output string
+		wantError bool
+	}{
+		{"exact combined budget", "printf 1234; printf 5678 >&2", false},
+		{"combined overflow", "printf 1234; printf 56789 >&2; sleep 20", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			step := Step{Command: []string{"/bin/sh", "-c", tc.output}}
+			res, err := ExecuteStep(step, []string{}, dir, dir, Limits{Timeout: time.Second, OutputBytes: 8})
+			if (err != nil) != tc.wantError || res == nil {
+				t.Fatalf("ExecuteStep() = %+v, %v", res, err)
+			}
+			if tc.wantError && !errors.Is(err, ErrOutputLimit) {
+				t.Fatalf("error = %v, want output limit", err)
+			}
+			stdout, err := os.ReadFile(res.StdoutPath)
+			if err != nil { t.Fatal(err) }
+			stderr, err := os.ReadFile(res.StderrPath)
+			if err != nil { t.Fatal(err) }
+			combined, err := os.ReadFile(res.CombinedPath)
+			if err != nil { t.Fatal(err) }
+			if len(stdout)+len(stderr) != 8 || len(combined) != 8 {
+				t.Fatalf("capture byte counts = %d+%d, combined %d", len(stdout), len(stderr), len(combined))
+			}
+			if pass, _ := EvaluatePredicates(nil, res); pass == tc.wantError {
+				t.Fatalf("pass = %v with output error = %v", pass, tc.wantError)
+			}
+		})
+	}
+}
+
+func TestEvaluatePredicatesMissingCaptureCannotSatisfyAbsence(t *testing.T) {
+	res := &StepResult{StdoutPath: filepath.Join(t.TempDir(), "missing")}
+	preds := []Predicate{{Form: "not-matches", Stream: "stdout", Value: "ERROR"}}
+	if pass, _ := EvaluatePredicates(preds, res); pass {
+		t.Fatal("missing capture satisfied a negative predicate")
 	}
 }

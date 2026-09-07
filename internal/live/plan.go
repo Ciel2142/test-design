@@ -86,6 +86,9 @@ func (pl *Plan) Validate(p *Profile, applicable []coverage.Row, layer1Gaps map[s
 	allSteps = append(allSteps, pl.Cleanup...)
 
 	for _, step := range allSteps {
+		if len(step.SCBindings) > 0 && len(step.Predicates) == 0 {
+			return fmt.Errorf("live plan: missing-row-predicates %s", strings.Join(step.SCBindings, ", "))
+		}
 		for _, pred := range step.Predicates {
 			if err := validatePredicate(pred); err != nil {
 				return err

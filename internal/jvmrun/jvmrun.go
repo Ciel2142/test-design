@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -14,6 +13,7 @@ import (
 	"test-design/internal/coverage"
 	"test-design/internal/junitxml"
 	"test-design/internal/runrecord"
+	"test-design/internal/subprocess"
 )
 
 // Result is one JVM suite run normalized to the shared record contract.
@@ -29,31 +29,6 @@ type Result struct {
 	NormalizationError string
 }
 
-// ReportDirs resolves each glob's static directory prefix under root — the
-// directories cleared before a run. A glob whose first segment already
-// contains a meta character has no static prefix and contributes no
-// directory. Any glob escaping root (absolute or traversing above) errors.
-func ReportDirs(root string, globs []string) ([]string, error) {
-	seen := map[string]bool{}
-	var dirs []string
-	for _, glob := range globs {
-		if err := confineGlob(glob); err != nil {
-			return nil, err
-		}
-		prefix := staticPrefix(glob)
-		if prefix == "" {
-			continue
-		}
-		abs := filepath.Join(root, filepath.FromSlash(prefix))
-		if !seen[abs] {
-			seen[abs] = true
-			dirs = append(dirs, abs)
-		}
-	}
-	sort.Strings(dirs)
-	return dirs, nil
-}
-
 func confineGlob(glob string) error {
 	if glob == "" {
 		return errors.New("report-glob-escapes-root: empty glob")
@@ -61,42 +36,36 @@ func confineGlob(glob string) error {
 	if filepath.IsAbs(glob) {
 		return fmt.Errorf("report-glob-escapes-root: %q is absolute", glob)
 	}
-	cleaned := path.Clean(filepath.ToSlash(glob))
-	if cleaned == ".." || strings.HasPrefix(cleaned, "../") {
-		return fmt.Errorf("report-glob-escapes-root: %q traverses above the runner root", glob)
+	for _, segment := range strings.Split(filepath.ToSlash(glob), "/") {
+		if segment == ".." {
+			return fmt.Errorf("report-glob-escapes-root: %q contains traversal", glob)
+		}
+		if _, err := filepath.Match(segment, ""); err != nil {
+			return fmt.Errorf("report glob %q: %w", glob, err)
+		}
 	}
 	return nil
 }
 
-func staticPrefix(glob string) string {
-	var static []string
-	for _, seg := range strings.Split(path.Clean(filepath.ToSlash(glob)), "/") {
-		if strings.ContainsAny(seg, "*?[") {
-			break
-		}
-		static = append(static, seg)
-	}
-	if len(static) == 0 {
-		return ""
-	}
-	return path.Join(static...)
-}
-
-// Run clears the report directories, executes cfg.Command in the suite's
-// runner root, collects XML files matching cfg.ReportGlobs that are fresh
-// (mtime at-or-after command start), and normalizes them via junitxml.
-// Report-problem outcomes land in Result.NormalizationError; the error
-// return is reserved for infrastructure failures (escaping glob,
-// unstartable command, unwritable runDir).
+// Run removes only concrete preexisting report files, executes cfg.Command in
+// the suite's runner root, and normalizes newly produced reports via junitxml.
+// Report-problem outcomes land in Result.NormalizationError; the error return
+// is reserved for infrastructure failures, including unsafe report paths and
+// command timeout or cancellation.
 func Run(suiteDir, runDir string, cfg coverage.RunnerConfig) (*Result, error) {
 	root := filepath.Join(suiteDir, filepath.FromSlash(cfg.Root))
-	clearDirs, err := ReportDirs(root, cfg.ReportGlobs)
+	reportsRoot, err := os.OpenRoot(root)
 	if err != nil {
 		return nil, err
 	}
-	for _, dir := range clearDirs {
-		if err := os.RemoveAll(dir); err != nil {
-			return nil, fmt.Errorf("clear report dir %s: %w", dir, err)
+	defer reportsRoot.Close()
+	clearFiles, err := reportFiles(reportsRoot, cfg.ReportGlobs)
+	if err != nil {
+		return nil, err
+	}
+	for _, file := range clearFiles {
+		if err := reportsRoot.Remove(file); err != nil {
+			return nil, fmt.Errorf("clear report file %s: %w", file, err)
 		}
 	}
 
@@ -118,7 +87,7 @@ func Run(suiteDir, runDir string, cfg coverage.RunnerConfig) (*Result, error) {
 	cmd.Dir = root
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
-	runErr := cmd.Run()
+	runErr := subprocess.Run(cmd, subprocess.SuiteTimeout)
 	res.FinishedAt = time.Now().UTC().Format(time.RFC3339)
 	if runErr != nil {
 		var exitErr *exec.ExitError
@@ -128,10 +97,9 @@ func Run(suiteDir, runDir string, cfg coverage.RunnerConfig) (*Result, error) {
 		res.ExitStatus = exitErr.ExitCode()
 	}
 
-	// Truncate to whole seconds: a coarse-mtime filesystem rounds a fresh
-	// file's mtime down, which must not exclude it.
-	cutoff := start.Truncate(time.Second)
-	files, err := freshReports(root, cfg.ReportGlobs, cutoff)
+	// Every matching preexisting file was removed before execution. Collection
+	// therefore does not rely on rounded mtimes or filesystem clock precision.
+	files, err := reportFiles(reportsRoot, cfg.ReportGlobs)
 	if err != nil {
 		return nil, err
 	}
@@ -142,13 +110,9 @@ func Run(suiteDir, runDir string, cfg coverage.RunnerConfig) (*Result, error) {
 
 	var docs []*junitxml.Document
 	for _, file := range files {
-		doc, err := normalizeOne(file)
+		doc, err := normalizeOne(reportsRoot, file)
 		if err != nil {
-			rel, relErr := filepath.Rel(root, file)
-			if relErr != nil {
-				rel = file
-			}
-			res.NormalizationError = fmt.Sprintf("%s: %v", filepath.ToSlash(rel), err)
+			res.NormalizationError = fmt.Sprintf("%s: %v", filepath.ToSlash(file), err)
 			return res, nil
 		}
 		docs = append(docs, doc)
@@ -176,32 +140,75 @@ func Run(suiteDir, runDir string, cfg coverage.RunnerConfig) (*Result, error) {
 	return res, nil
 }
 
-func freshReports(root string, globs []string, cutoff time.Time) ([]string, error) {
+// reportFiles validates every pattern and match before callers remove anything.
+// Expansion uses rooted operations rather than filepath.Glob, which follows
+// directory symlinks and silently ignores filesystem errors.
+func reportFiles(root *os.Root, globs []string) ([]string, error) {
+	for _, glob := range globs {
+		if err := confineGlob(glob); err != nil {
+			return nil, err
+		}
+	}
 	seen := map[string]bool{}
 	var files []string
 	for _, glob := range globs {
-		matches, err := filepath.Glob(filepath.Join(root, filepath.FromSlash(glob)))
-		if err != nil {
-			return nil, fmt.Errorf("report glob %q: %w", glob, err)
-		}
-		for _, m := range matches {
-			if seen[m] {
-				continue
+		segments := strings.Split(filepath.Clean(filepath.FromSlash(glob)), string(filepath.Separator))
+		dirs := []string{"."}
+		for i, segment := range segments {
+			var next []string
+			for _, dir := range dirs {
+				f, err := root.Open(dir)
+				if err != nil {
+					return nil, fmt.Errorf("open report directory %s: %w", dir, err)
+				}
+				entries, readErr := f.ReadDir(-1)
+				closeErr := f.Close()
+				if err := errors.Join(readErr, closeErr); err != nil {
+					return nil, fmt.Errorf("read report directory %s: %w", dir, err)
+				}
+				for _, entry := range entries {
+					matched, err := filepath.Match(segment, entry.Name())
+					if err != nil {
+						return nil, fmt.Errorf("report glob %q: %w", glob, err)
+					}
+					if !matched {
+						continue
+					}
+					name := filepath.Join(dir, entry.Name())
+					info, err := root.Lstat(name)
+					if err != nil {
+						return nil, fmt.Errorf("stat report path %s: %w", name, err)
+					}
+					if info.Mode()&os.ModeSymlink != 0 {
+						return nil, fmt.Errorf("report-glob-escapes-root: symlink report path %s is not allowed", name)
+					}
+					if i < len(segments)-1 {
+						if info.IsDir() {
+							next = append(next, name)
+						}
+						continue
+					}
+					if info.IsDir() {
+						continue
+					}
+					if !info.Mode().IsRegular() {
+						return nil, fmt.Errorf("report path %s is not a regular file", name)
+					}
+					if !seen[name] {
+						seen[name] = true
+						files = append(files, name)
+					}
+				}
 			}
-			seen[m] = true
-			info, err := os.Stat(m)
-			if err != nil || info.IsDir() || info.ModTime().Before(cutoff) {
-				continue
-			}
-			files = append(files, m)
+			dirs = next
 		}
 	}
 	sort.Strings(files)
 	return files, nil
 }
 
-func normalizeOne(file string) (*junitxml.Document, error) {
-	f, err := os.Open(file)
+func normalizeOne(root *os.Root, file string) (*junitxml.Document, error) {
+	f, err := root.Open(file)
 	if err != nil {
 		return nil, err
 	}

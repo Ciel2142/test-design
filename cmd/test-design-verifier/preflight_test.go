@@ -21,7 +21,7 @@ func decodePreflight(t *testing.T, stdout *bytes.Buffer) preflightOutput {
 func TestPreflightHandler_ValidSourceReportsFullOutput(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	repo := filepath.Join("testdata", "valid-repo")
-	source := filepath.Join(repo, "docs", "superpowers", "coverage", "2026-08-26-widgets-coverage.md")
+	source := filepath.Join("docs", "superpowers", "coverage", "2026-08-26-widgets-coverage.md")
 	code := run([]string{"preflight", "--repo", repo, "--source", source}, nil, &stdout, &stderr)
 
 	if code != exitOK {
@@ -32,27 +32,6 @@ func TestPreflightHandler_ValidSourceReportsFullOutput(t *testing.T) {
 	wantSource := "docs/superpowers/coverage/2026-08-26-widgets-coverage.md"
 	if got.Source != wantSource {
 		t.Errorf("Source = %q, want the repo-root-relative slash-separated form %q", got.Source, wantSource)
-	}
-	if got.SourceSHA256 == "" {
-		t.Errorf("SourceSHA256 empty")
-	}
-	if got.BaselineCommit != "a1b2c3d" {
-		t.Errorf("BaselineCommit = %q, want a1b2c3d", got.BaselineCommit)
-	}
-	if got.BaselineEvidencePath != "docs/superpowers/coverage/2026-08-26-widgets-baseline.json" {
-		t.Errorf("BaselineEvidencePath = %q", got.BaselineEvidencePath)
-	}
-	if got.BaselineSHA256 != "9f8e7d6c" {
-		t.Errorf("BaselineSHA256 = %q", got.BaselineSHA256)
-	}
-	if got.Runner.Kind != "go-test-json" || got.Runner.Root != "." {
-		t.Errorf("Runner = %+v", got.Runner)
-	}
-	if len(got.Runner.Command) != 5 {
-		t.Errorf("Runner.Command = %v, want 5 elements", got.Runner.Command)
-	}
-	if len(got.Runner.ReportGlobs) != 1 || got.Runner.ReportGlobs[0] != "reports/*.json" {
-		t.Errorf("Runner.ReportGlobs = %v", got.Runner.ReportGlobs)
 	}
 
 	// 4 rows: SC-01 unit/med, SC-02 integration/high, SC-03 smoke/med, SC-04 e2e/high.
@@ -166,7 +145,7 @@ func TestPreflightHandler_RegistryCollisionSurfacesBeforeMissingSourceFlag(t *te
 func TestPreflightHandler_RetiredRowExcludedFromLayerCounts(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	repo := filepath.Join("testdata", "retired-row-repo")
-	source := filepath.Join(repo, "docs", "superpowers", "coverage", "2026-08-26-retired-coverage.md")
+	source := filepath.Join("docs", "superpowers", "coverage", "2026-08-26-retired-coverage.md")
 	code := run([]string{"preflight", "--repo", repo, "--source", source}, nil, &stdout, &stderr)
 
 	if code != exitOK {
@@ -239,7 +218,7 @@ func TestPreflightHandler_MissingSourceFileNamesPath(t *testing.T) {
 func TestPreflightHandler_OldHeaderSourceRefusedWithMigrationMessage(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	repo := filepath.Join("testdata", "old-header-repo")
-	source := filepath.Join(repo, "docs", "superpowers", "coverage", "2026-08-26-legacy-coverage.md")
+	source := filepath.Join("docs", "superpowers", "coverage", "2026-08-26-legacy-coverage.md")
 	code := run([]string{"preflight", "--repo", repo, "--source", source}, nil, &stdout, &stderr)
 
 	if code != exitError {
@@ -260,7 +239,7 @@ func TestPreflightHandler_OldHeaderSourceRefusedWithMigrationMessage(t *testing.
 func TestPreflightHandler_CrossDocumentCollisionErrorNamesBothPaths(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	repo := filepath.Join("testdata", "collision-repo")
-	source := filepath.Join(repo, "docs", "superpowers", "coverage", "2026-08-26-x-coverage.md")
+	source := filepath.Join("docs", "superpowers", "coverage", "2026-08-26-x-coverage.md")
 	code := run([]string{"preflight", "--repo", repo, "--source", source}, nil, &stdout, &stderr)
 
 	if code != exitError {

@@ -3,6 +3,7 @@ package report
 import (
 	"fmt"
 	"slices"
+	"strings"
 
 	"test-design/internal/coverage"
 )
@@ -72,22 +73,29 @@ func Validate(in *Inputs) error {
 }
 
 func validateStaleness(in *Inputs) error {
-	if in.Trace.RunID != in.RunID {
-		return refuse(CodeStaleEvidence, "trace runId %q does not match request runId %q", in.Trace.RunID, in.RunID)
-	}
-	if in.Trace.SourceSHA256 != in.Source.SHA256 {
-		return refuse(CodeStaleEvidence, "trace sourceSha256 %q does not match source sha256 %q", in.Trace.SourceSHA256, in.Source.SHA256)
-	}
-	if in.Live != nil {
-		if in.Live.RunID != in.RunID {
-			return refuse(CodeStaleEvidence, "live runId %q does not match request runId %q", in.Live.RunID, in.RunID)
+	matches := func(kind, runID, commit, source, sha string) error {
+		if runID == "" || commit == "" || source == "" || sha == "" ||
+			runID != in.RunID || commit != in.Trace.RepoCommit ||
+			source != in.Source.Path || sha != in.Source.SHA256 {
+			return refuse(CodeStaleEvidence, "%s identity does not match trace commit/source/run; regenerate evidence", kind)
 		}
-		if in.Live.SourceSHA256 != in.Source.SHA256 {
-			return refuse(CodeStaleEvidence, "live sourceSha256 %q does not match source sha256 %q", in.Live.SourceSHA256, in.Source.SHA256)
+		return nil
+	}
+	if err := matches("trace", in.Trace.RunID, in.Trace.RepoCommit, in.Trace.Source, in.Trace.SourceSHA256); err != nil {
+		return err
+	}
+	if in.HeadCommit == "" || in.Trace.RepoCommit != in.HeadCommit {
+		return refuse(CodeStaleEvidence, "trace commit does not match measured HEAD")
+	}
+	if ev := in.Live; ev != nil {
+		if err := matches("live", ev.RunID, ev.RepoCommit, ev.Source, ev.SourceSHA256); err != nil {
+			return err
 		}
 	}
-	if in.LiveAttempt != nil && in.LiveAttempt.RunID != in.RunID {
-		return refuse(CodeStaleEvidence, "live attempt runId %q does not match request runId %q", in.LiveAttempt.RunID, in.RunID)
+	if ev := in.LiveAttempt; ev != nil {
+		if err := matches("live attempt", ev.RunID, ev.RepoCommit, ev.Source, ev.SourceSHA256); err != nil {
+			return err
+		}
 	}
 	for _, b := range in.Batches {
 		if b.RunID != in.RunID {
@@ -95,8 +103,18 @@ func validateStaleness(in *Inputs) error {
 		}
 	}
 	for _, m := range in.Mutations {
-		if m.Evidence != nil && m.Evidence.RunID != in.RunID {
-			return refuse(CodeStaleEvidence, "mutation evidence for row %s runId %q does not match request runId %q", m.RowID, m.Evidence.RunID, in.RunID)
+		if ev := m.Evidence; ev != nil {
+			if err := matches("mutation", ev.RunID, ev.RepoCommit, ev.Source, ev.SourceSHA256); err != nil {
+				return err
+			}
+		}
+		if ev := m.Attempt; ev != nil {
+			if err := matches("mutation attempt", ev.RunID, ev.RepoCommit, ev.Source, ev.SourceSHA256); err != nil {
+				return err
+			}
+			if ev.RowID != m.RowID {
+				return refuse(CodeMutationRowMismatch, "row %s mutation attempt names row %s", m.RowID, ev.RowID)
+			}
 		}
 	}
 	return nil
@@ -206,6 +224,12 @@ func validateLayer2(in *Inputs, active []coverage.Row, gaps map[string]bool) err
 }
 
 func validateCanaryBookkeeping(b Batch, byID map[string]Batch, voided map[string]bool) error {
+	if b.CanaryUnavailableReason != "" {
+		if strings.TrimSpace(b.CanaryUnavailableReason) == "" || b.Canary != nil || b.InheritsFrom != "" {
+			return refuse(CodeCanaryBookkeeping, "batch %s canaryUnavailableReason must be nonempty and exclusive with canary/inheritance", b.BatchID)
+		}
+		return nil
+	}
 	if b.Canary == nil {
 		if b.InheritsFrom == "" {
 			return refuse(CodeCanaryBookkeeping, "canary-free batch %s does not inherit from a caught-canary batch", b.BatchID)
@@ -222,22 +246,32 @@ func validateCanaryBookkeeping(b Batch, byID map[string]Batch, voided map[string
 	}
 
 	switch b.Canary.Kind {
+	default:
+		return refuse(CodeCanaryBookkeeping, "batch %s has unknown canary kind %q", b.BatchID, b.Canary.Kind)
 	case "synthesized":
 		if b.Canary.Weakening == "" {
 			return refuse(CodeCanaryBookkeeping, "batch %s synthesized canary has empty weakening", b.BatchID)
+		}
+		for _, v := range b.Verdicts {
+			if v.RowID == b.Canary.RowID {
+				return refuse(CodeCanaryBookkeeping, "batch %s synthesized copy cannot supply a real-source verdict for row %s", b.BatchID, v.RowID)
+			}
 		}
 		if !hasRealSourceVerdict(b, byID, voided) {
 			return refuse(CodeCanaryBookkeeping, "batch %s synthesized canary row %s has no separate real-source verdict", b.BatchID, b.Canary.RowID)
 		}
 	case "natural":
-		if b.Canary.Caught {
-			for _, other := range byID {
-				for _, v := range other.Verdicts {
-					if v.RowID == b.Canary.RowID && v.Verdict == "HOLDS" {
-						return refuse(CodeCanaryBookkeeping, "batch %s natural canary row %s is caught, yet batch %s verdicts it HOLDS", b.BatchID, b.Canary.RowID, other.BatchID)
-					}
+		found := false
+		for _, v := range b.Verdicts {
+			if v.RowID == b.Canary.RowID {
+				found = true
+				if b.Canary.Caught && v.Verdict != "WEAK" && v.Verdict != "VACUOUS" {
+					return refuse(CodeCanaryBookkeeping, "batch %s caught natural canary must carry its real WEAK/VACUOUS verdict", b.BatchID)
 				}
 			}
+		}
+		if !found {
+			return refuse(CodeCanaryBookkeeping, "batch %s natural canary requires a verdict in the same batch", b.BatchID)
 		}
 	}
 	return nil
@@ -262,6 +296,9 @@ func validLiveVerdict(verdict string) bool {
 func hasRealSourceVerdict(canaryBatch Batch, byID map[string]Batch, voided map[string]bool) bool {
 	for id, b := range byID {
 		if id == canaryBatch.BatchID || voided[id] {
+			continue
+		}
+		if b.Canary != nil && b.Canary.Kind == "synthesized" && b.Canary.RowID == canaryBatch.Canary.RowID {
 			continue
 		}
 		if len(b.Rows) != 1 || b.Rows[0] != canaryBatch.Canary.RowID {
@@ -357,6 +394,9 @@ func validateLayer4(in *Inputs, active []coverage.Row, gaps map[string]bool) err
 		}
 		if m.EvidencePath != "" && m.Evidence == nil {
 			return refuse(CodeInvalidVerdict, "row %s names mutation evidence %s that was not loaded", m.RowID, m.EvidencePath)
+		}
+		if m.AttemptEvidencePath != "" && m.Attempt == nil {
+			return refuse(CodeMissingAttemptEvidence, "row %s names attempt evidence that was not loaded", m.RowID)
 		}
 	}
 

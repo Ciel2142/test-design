@@ -4,7 +4,7 @@ package evidence
 
 const (
 	SchemaVersion   = "1"
-	VerifierVersion = "0.6.0"
+	VerifierVersion = "1.1.0"
 )
 
 type Envelope struct {

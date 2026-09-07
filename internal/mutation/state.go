@@ -17,6 +17,10 @@ const stateFileName = "mutation-state.json"
 // only prepare's process ever held.
 type State struct {
 	SchemaVersion string          `json:"schemaVersion"`
+	RunID string `json:"runID"`
+	RepoCommit string `json:"repoCommit"`
+	Source string `json:"source"`
+	SourceSHA256 string `json:"sourceSha256"`
 	RowID         string          `json:"rowID"`
 	Identity      Identity        `json:"identity"`
 	WorktreePath  string          `json:"worktreePath"`
@@ -96,6 +100,9 @@ func LoadState(runDir string) (*State, error) {
 	}
 	if st.RowID == "" {
 		return nil, fmt.Errorf("load mutation state %s: rowID is empty", path)
+	}
+	if st.RunID == "" || st.RepoCommit == "" || st.Source == "" || st.SourceSHA256 == "" {
+		return nil, fmt.Errorf("load mutation state %s: runID, repoCommit, source and sourceSha256 are required; regenerate prepared state", path)
 	}
 	if st.WorktreePath == "" {
 		return nil, fmt.Errorf("load mutation state %s: worktreePath is empty", path)
