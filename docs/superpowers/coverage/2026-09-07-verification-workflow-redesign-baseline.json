@@ -1,0 +1,43 @@
+{
+  "schemaVersion": "1",
+  "verifierVersion": "0.6.0",
+  "repoCommit": "122401156dbf639afb5d7ce021e3a0ae2dbb0824",
+  "baselineCommit": "122401156dbf639afb5d7ce021e3a0ae2dbb0824",
+  "runnerKind": "go",
+  "command": [
+    "go",
+    "test",
+    "-count=1",
+    "-json",
+    "./..."
+  ],
+  "toolVersions": {
+    "go": "go version go1.26.3 darwin/arm64"
+  },
+  "counts": {
+    "passed": 865,
+    "failed": 1,
+    "skipped": 2
+  },
+  "failed": [
+    {
+      "scope": "test-design/cmd/test-design-verifier",
+      "name": "TestBaselineJVM_MavenE2EPublishesEvidence"
+    }
+  ],
+  "skipped": [
+    {
+      "scope": "test-design/cmd/test-design-verifier",
+      "name": "TestE2EMutation_GradleSingleSite"
+    },
+    {
+      "scope": "test-design/cmd/test-design-verifier",
+      "name": "TestTraceJVM_GradlePipeline"
+    }
+  ],
+  "reportSha256": "817fb0d260a445afc8fc53501458dac1cbe7989a6fa22fef349e217dde212f76",
+  "startedAt": "2026-09-07T18:29:38.847826Z",
+  "finishedAt": "2026-09-07T18:30:24.462357Z",
+  "exitStatus": 1,
+  "normalizationError": ""
+}

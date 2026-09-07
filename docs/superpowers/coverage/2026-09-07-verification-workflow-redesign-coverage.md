@@ -1,9 +1,9 @@
 # Coverage: verification workflow redesign
 
 Spec: docs/superpowers/specs/2026-09-07-verification-workflow-redesign.md
-Baseline: 122401156dbf639afb5d7ce021e3a0ae2dbb0824
+Baseline: 122401156dbf639afb5d7ce021e3a0ae2dbb0824 · 865 passed, 1 failed, 2 skipped
 
-Status: Coverage draft awaiting final source approval. The written spec, twelve behavior groups, mixed-evidence amendment, local harness setup and isolated two-commit baseline procedure are approved. Setup verification is not final feature verification; redesign implementation remains unauthorized.
+Status: Completed coverage source prepared for final user approval. The written spec, twelve behavior groups, mixed-evidence amendment, local harness setup and isolated two-commit baseline procedure are approved. Baseline evidence is captured, including one pre-existing failure. Setup verification is not final feature verification; redesign implementation remains unauthorized.
 
 Work record: `test-design-review-handoff-86t`. Target repository is this plugin itself (`test-design`); the installed plugin is only the tool driver. Specs/plans remain local under the repository ignore policy; coverage artifacts are intentionally committable.
 
@@ -20,7 +20,7 @@ Work record: `test-design-review-handoff-86t`. Target repository is this plugin 
 
 1. The user approved mandatory separate W-1 through W-3 evidence on 2026-09-07 (work-record comment 14). Meaningful agent review, consequence-based judgment, scope negotiation and automatic workflow behavior currently live in Markdown instructions, not executable guards. The installed code-mutation/Go-JVM binding schema cannot prove these through instruction-text assertions. A machine PASS alone must not be called full feature acceptance.
 2. The user authorized one real local harness as coverage setup. `.test-design/live-profiles/workflow-redesign-local.json` invokes `fixtures/workflow-redesign-live/recipe.py`; `service.go` supplies actual quote calculation over a private Unix socket. This replaces no verifier logic and requires no remote host, cluster, credential or production access. The existing scratch/echo fixture is intentionally unchanged.
-3. The user authorized coverage/setup-only commits and temporary clean linked-worktree baseline capture, without staging, resetting or stashing existing source edits. The baseline remains the merge-base above. The baseline operation must still run in a clean tree; no dirty-tree bypass or user-source checkpoint is implied.
+3. The user authorized coverage/setup-only commits and temporary clean linked-worktree baseline capture, without staging, resetting or stashing existing source edits. Coverage/setup source commit: `7575077`. The verifier captured the baseline in the isolated clean checkout at that commit and measured the merge-base above. No dirty-tree bypass or user-source checkpoint was used.
 
 ## Verification
 
@@ -29,13 +29,17 @@ Work record: `test-design-review-handoff-86t`. Target repository is this plugin 
 - runner-command: ["go", "test", "-count=1", "-json", "./..."]
 - report-globs: []
 - baseline-evidence: docs/superpowers/coverage/2026-09-07-verification-workflow-redesign-baseline.json
-- baseline-sha256: pending
+- baseline-sha256: 7428df4b74e1f123ec208ff5cbab7b1ff00aed7236f9db2118644c7ff0c2740d
 - live-profile: .test-design/live-profiles/workflow-redesign-local.json
 - final-command: ["/test-design:coverage-verification", "docs/superpowers/coverage/2026-09-07-verification-workflow-redesign-coverage.md"]
 
 ## Baseline failures
 
-Not captured. No passed/failed/skipped counts or baseline hash are claimed. `git merge-base HEAD main` returned the Baseline commit above. A parser/preflight success is not baseline execution, live readiness, or coverage proof.
+Captured through the installed verifier's `baseline` operation with run ID `baseline-redesign-20260907-setup`, using Go `go1.26.3 darwin/arm64`. The operation published evidence successfully; the recorded suite exit status is 1. This failure list is baseline accounting, not an existing-test coverage survey.
+
+- `test-design/cmd/test-design-verifier::TestBaselineJVM_MavenE2EPublishesEvidence` — `baselinejvm_test.go:136` reported `ToolVersions = map[mvn:Apache Maven 3.9.15 (98b2cdbfdb5f1ac8781f537ea9acccaed7922349)], want a java entry`.
+
+Skipped: `TestE2EMutation_GradleSingleSite` and `TestTraceJVM_GradlePipeline`, both in `test-design/cmd/test-design-verifier`. The evidence retains their identities. No green-baseline claim, rerun to hide the failure, or unrelated test/source repair was made.
 
 ## Live decision
 
