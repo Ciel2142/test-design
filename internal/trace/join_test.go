@@ -45,7 +45,12 @@ func TestJoinSingleBindingPassedProducesRowResultOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Join: %v", err)
 	}
-	wantResults := []RowResult{{RowID: "SC-01", Scope: "pkg", Name: "TestFoo", Status: runrecord.Passed, File: "pkg/foo_test.go", Line: 5, EndLine: 9}}
+	wantResults := []RowResult{{
+		RowID: "SC-01", Scope: "pkg", Name: "TestFoo", Status: runrecord.Passed, File: "pkg/foo_test.go", Line: 5, EndLine: 9,
+		Contributors: []Contributor{
+			{Scope: "pkg", Name: "TestFoo", Status: runrecord.Passed, Executed: true, File: "pkg/foo_test.go", Line: 5, EndLine: 9},
+		},
+	}}
 	if !reflect.DeepEqual(results, wantResults) {
 		t.Errorf("results = %+v, want %+v", results, wantResults)
 	}
@@ -142,12 +147,12 @@ func TestJoinSiteBindsRowButFamilyEmptyProducesGap(t *testing.T) {
 	}
 }
 
-func TestJoinTwoSitesBindSameRowProducesAmbiguity(t *testing.T) {
+func TestJoinTwoSitesBindSameRowProduceOneResultWithBothContributors(t *testing.T) {
 	reg, thisDoc := buildJoinTestRegistry(t)
 	src := basicSource(thisDoc, coverage.Row{ID: "SC-01"})
 	sites := []TagSite{
-		{ImportPath: "pkg", TestName: "TestFoo", File: "pkg/foo_test.go", Line: 5, IDs: []string{"SC-01"}},
-		{ImportPath: "pkg", TestName: "TestBar", File: "pkg/bar_test.go", Line: 9, IDs: []string{"SC-01"}},
+		{ImportPath: "pkg", TestName: "TestFoo", File: "pkg/foo_test.go", Line: 5, EndLine: 9, IDs: []string{"SC-01"}},
+		{ImportPath: "pkg", TestName: "TestBar", File: "pkg/bar_test.go", Line: 9, EndLine: 14, IDs: []string{"SC-01"}},
 	}
 	rep := &gotestjson.Report{Records: []runrecord.Record{
 		{Status: runrecord.Passed, Scope: "pkg", Name: "TestFoo"},
@@ -158,14 +163,18 @@ func TestJoinTwoSitesBindSameRowProducesAmbiguity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Join: %v", err)
 	}
-	if len(results) != 0 {
-		t.Errorf("results = %+v, want none (fail closed, no winner)", results)
+	wantResults := []RowResult{{
+		RowID: "SC-01", Scope: "pkg", Name: "TestBar", Status: runrecord.Passed, File: "pkg/bar_test.go", Line: 9, EndLine: 14,
+		Contributors: []Contributor{
+			{Scope: "pkg", Name: "TestBar", Status: runrecord.Passed, Executed: true, File: "pkg/bar_test.go", Line: 9, EndLine: 14},
+			{Scope: "pkg", Name: "TestFoo", Status: runrecord.Passed, Executed: true, File: "pkg/foo_test.go", Line: 5, EndLine: 9},
+		},
+	}}
+	if !reflect.DeepEqual(results, wantResults) {
+		t.Errorf("results = %+v, want %+v", results, wantResults)
 	}
-	if len(findings) != 1 || findings[0].Kind != "ambiguity" || findings[0].RowID != "SC-01" {
-		t.Fatalf("findings = %+v, want one ambiguity finding for SC-01", findings)
-	}
-	if !strings.Contains(findings[0].Detail, "pkg/foo_test.go:5") || !strings.Contains(findings[0].Detail, "pkg/bar_test.go:9") {
-		t.Errorf("Detail = %q, want both sites named", findings[0].Detail)
+	if len(findings) != 0 {
+		t.Errorf("findings = %+v, want none: two sites are two contributors, never ambiguity", findings)
 	}
 }
 
@@ -231,7 +240,7 @@ func TestJoinForeignIDProducesTagClassOnly(t *testing.T) {
 		t.Fatalf("Join: %v", err)
 	}
 	for _, f := range findings {
-		if f.Kind == "drift" || f.Kind == "overclaim" {
+		if f.Kind == "drift" {
 			t.Errorf("unexpected finding for foreign id: %+v", f)
 		}
 	}
@@ -268,7 +277,7 @@ func TestJoinUnknownIDProducesDriftAndTagClass(t *testing.T) {
 	}
 }
 
-func TestJoinSiteWithMoreThanTwoActiveIDsOverclaims(t *testing.T) {
+func TestJoinSiteWithThreeActiveIDsBindsEveryCitedRow(t *testing.T) {
 	reg, thisDoc := buildJoinTestRegistry(t)
 	src := basicSource(thisDoc,
 		coverage.Row{ID: "SC-01"},
@@ -276,7 +285,7 @@ func TestJoinSiteWithMoreThanTwoActiveIDsOverclaims(t *testing.T) {
 		coverage.Row{ID: "SC-03"},
 	)
 	sites := []TagSite{
-		{ImportPath: "pkg", TestName: "TestFoo", File: "pkg/foo_test.go", Line: 5, IDs: []string{"SC-01", "SC-02", "SC-03"}},
+		{ImportPath: "pkg", TestName: "TestFoo", File: "pkg/foo_test.go", Line: 5, EndLine: 9, IDs: []string{"SC-01", "SC-02", "SC-03"}},
 	}
 	rep := &gotestjson.Report{Records: []runrecord.Record{
 		{Status: runrecord.Passed, Scope: "pkg", Name: "TestFoo"},
@@ -286,27 +295,169 @@ func TestJoinSiteWithMoreThanTwoActiveIDsOverclaims(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Join: %v", err)
 	}
-	if len(results) != 0 {
-		t.Errorf("results = %+v, want none (overclaim site binds nothing)", results)
+	if len(results) != 3 {
+		t.Fatalf("results = %+v, want three row results (no count limit on active ids per site)", results)
 	}
-	overclaimCount := 0
-	gapCount := 0
-	for _, f := range findings {
-		switch f.Kind {
-		case "overclaim":
-			overclaimCount++
-			if !strings.Contains(f.Detail, "TestFoo") || !strings.Contains(f.Detail, "SC-01") || !strings.Contains(f.Detail, "SC-02") || !strings.Contains(f.Detail, "SC-03") {
-				t.Errorf("overclaim Detail = %q, want test name and all IDs", f.Detail)
-			}
-		case "gap":
-			gapCount++
+	for i, wantID := range []string{"SC-01", "SC-02", "SC-03"} {
+		got := results[i]
+		if got.RowID != wantID {
+			t.Errorf("results[%d].RowID = %q, want %q", i, got.RowID, wantID)
+		}
+		if got.Name != "TestFoo" || got.Status != runrecord.Passed {
+			t.Errorf("results[%d] = %+v, want TestFoo passed", i, got)
+		}
+		if len(got.Contributors) != 1 || got.Contributors[0].Name != "TestFoo" || !got.Contributors[0].Executed {
+			t.Errorf("results[%d].Contributors = %+v, want the one executed TestFoo contributor", i, got.Contributors)
 		}
 	}
-	if overclaimCount != 1 {
-		t.Errorf("overclaim findings = %d, want 1", overclaimCount)
+	if len(findings) != 0 {
+		t.Errorf("findings = %+v, want none", findings)
 	}
-	if gapCount != 3 {
-		t.Errorf("gap findings = %d, want 3 (each row unbound)", gapCount)
+}
+
+func TestJoinFailedContributorMarksRowRedAndKeepsBothIdentities(t *testing.T) {
+	reg, thisDoc := buildJoinTestRegistry(t)
+	src := basicSource(thisDoc, coverage.Row{ID: "SC-01"})
+	sites := []TagSite{
+		{ImportPath: "pkg", TestName: "TestPass", File: "pkg/a_test.go", Line: 5, EndLine: 9, IDs: []string{"SC-01"}},
+		{ImportPath: "pkg", TestName: "TestFail", File: "pkg/b_test.go", Line: 11, EndLine: 16, IDs: []string{"SC-01"}},
+	}
+	rep := &gotestjson.Report{Records: []runrecord.Record{
+		{Status: runrecord.Passed, Scope: "pkg", Name: "TestPass"},
+		{Status: runrecord.Failed, Scope: "pkg", Name: "TestFail"},
+	}}
+
+	results, findings, _, err := Join(src, reg, sites, rep)
+	if err != nil {
+		t.Fatalf("Join: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("results = %+v, want exactly one row result", results)
+	}
+	got := results[0]
+	if got.Status != runrecord.Failed {
+		t.Errorf("results[0].Status = %q, want %q (failed dominates the collapse)", got.Status, runrecord.Failed)
+	}
+	wantContributors := []Contributor{
+		{Scope: "pkg", Name: "TestPass", Status: runrecord.Passed, Executed: true, File: "pkg/a_test.go", Line: 5, EndLine: 9},
+		{Scope: "pkg", Name: "TestFail", Status: runrecord.Failed, Executed: true, File: "pkg/b_test.go", Line: 11, EndLine: 16},
+	}
+	if !reflect.DeepEqual(got.Contributors, wantContributors) {
+		t.Errorf("results[0].Contributors = %+v, want %+v (both identities retained)", got.Contributors, wantContributors)
+	}
+	if len(findings) != 1 || findings[0].Kind != "red" || findings[0].RowID != "SC-01" {
+		t.Fatalf("findings = %+v, want exactly one red finding for SC-01", findings)
+	}
+	if !strings.Contains(findings[0].Detail, "pkg/b_test.go:11") || !strings.Contains(findings[0].Detail, "TestFail") {
+		t.Errorf("Detail = %q, want it to name the failing contributor", findings[0].Detail)
+	}
+}
+
+func TestJoinSkippedContributorIsGapEvenWhenAnotherPasses(t *testing.T) {
+	reg, thisDoc := buildJoinTestRegistry(t)
+	src := basicSource(thisDoc, coverage.Row{ID: "SC-01"})
+	sites := []TagSite{
+		{ImportPath: "pkg", TestName: "TestPass", File: "pkg/a_test.go", Line: 5, EndLine: 9, IDs: []string{"SC-01"}},
+		{ImportPath: "pkg", TestName: "TestSkip", File: "pkg/b_test.go", Line: 11, EndLine: 16, IDs: []string{"SC-01"}},
+	}
+	rep := &gotestjson.Report{Records: []runrecord.Record{
+		{Status: runrecord.Passed, Scope: "pkg", Name: "TestPass"},
+		{Status: runrecord.Skipped, Scope: "pkg", Name: "TestSkip"},
+	}}
+
+	results, findings, _, err := Join(src, reg, sites, rep)
+	if err != nil {
+		t.Fatalf("Join: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("results = %+v, want exactly one row result", results)
+	}
+	got := results[0]
+	if got.Status != runrecord.Skipped {
+		t.Errorf("results[0].Status = %q, want %q (a skipped contributor withholds the pass)", got.Status, runrecord.Skipped)
+	}
+	wantContributors := []Contributor{
+		{Scope: "pkg", Name: "TestPass", Status: runrecord.Passed, Executed: true, File: "pkg/a_test.go", Line: 5, EndLine: 9},
+		{Scope: "pkg", Name: "TestSkip", Status: runrecord.Skipped, Executed: true, File: "pkg/b_test.go", Line: 11, EndLine: 16},
+	}
+	if !reflect.DeepEqual(got.Contributors, wantContributors) {
+		t.Errorf("results[0].Contributors = %+v, want %+v (both contributors kept)", got.Contributors, wantContributors)
+	}
+	if len(findings) != 1 || findings[0].Kind != "gap" || findings[0].RowID != "SC-01" {
+		t.Fatalf("findings = %+v, want exactly one gap finding for SC-01", findings)
+	}
+	if !strings.Contains(findings[0].Detail, "pkg/b_test.go:11") || !strings.Contains(findings[0].Detail, "TestSkip") {
+		t.Errorf("Detail = %q, want it to name the skipped contributor", findings[0].Detail)
+	}
+}
+
+func TestJoinUnexecutedContributorIsGapWithoutResultWhenNoneRan(t *testing.T) {
+	reg, thisDoc := buildJoinTestRegistry(t)
+	src := basicSource(thisDoc, coverage.Row{ID: "SC-01"})
+	sites := []TagSite{
+		{ImportPath: "pkg", TestName: "TestFoo", File: "pkg/foo_test.go", Line: 5, EndLine: 9, IDs: []string{"SC-01"}},
+		{ImportPath: "pkg", TestName: "TestBar", File: "pkg/bar_test.go", Line: 9, EndLine: 14, IDs: []string{"SC-01"}},
+	}
+	rep := &gotestjson.Report{Records: []runrecord.Record{
+		{Status: runrecord.Passed, Scope: "pkg", Name: "TestUnrelated"},
+	}}
+
+	results, findings, _, err := Join(src, reg, sites, rep)
+	if err != nil {
+		t.Fatalf("Join: %v", err)
+	}
+	if len(results) != 0 {
+		t.Errorf("results = %+v, want none: no contributor executed, so nothing is credited", results)
+	}
+	if len(findings) != 2 {
+		t.Fatalf("findings = %+v, want one gap per unexecuted contributor", findings)
+	}
+	var details []string
+	for _, f := range findings {
+		if f.Kind != "gap" || f.RowID != "SC-01" {
+			t.Errorf("finding = %+v, want a gap bound to SC-01", f)
+		}
+		details = append(details, f.Detail)
+	}
+	joined := strings.Join(details, " | ")
+	if !strings.Contains(joined, "pkg/foo_test.go:5") || !strings.Contains(joined, "pkg/bar_test.go:9") {
+		t.Errorf("details = %q, want each unexecuted contributor named", joined)
+	}
+}
+
+func TestJoinContributorsSortedByFileThenLine(t *testing.T) {
+	reg, thisDoc := buildJoinTestRegistry(t)
+	src := basicSource(thisDoc, coverage.Row{ID: "SC-01"})
+	sites := []TagSite{
+		{ImportPath: "pkg", TestName: "TestB", File: "pkg/b_test.go", Line: 4, EndLine: 8, IDs: []string{"SC-01"}},
+		{ImportPath: "pkg", TestName: "TestALate", File: "pkg/a_test.go", Line: 30, EndLine: 36, IDs: []string{"SC-01"}},
+		{ImportPath: "pkg", TestName: "TestAEarly", File: "pkg/a_test.go", Line: 10, EndLine: 14, IDs: []string{"SC-01"}},
+	}
+	rep := &gotestjson.Report{Records: []runrecord.Record{
+		{Status: runrecord.Passed, Scope: "pkg", Name: "TestB"},
+		{Status: runrecord.Passed, Scope: "pkg", Name: "TestALate"},
+		{Status: runrecord.Passed, Scope: "pkg", Name: "TestAEarly"},
+	}}
+
+	results, _, _, err := Join(src, reg, sites, rep)
+	if err != nil {
+		t.Fatalf("Join: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("results = %+v, want exactly one row result", results)
+	}
+	got := results[0]
+	wantOrder := []string{"TestAEarly", "TestALate", "TestB"}
+	if len(got.Contributors) != len(wantOrder) {
+		t.Fatalf("Contributors = %+v, want %d", got.Contributors, len(wantOrder))
+	}
+	for i, want := range wantOrder {
+		if got.Contributors[i].Name != want {
+			t.Errorf("Contributors[%d].Name = %q, want %q (sorted by File then Line)", i, got.Contributors[i].Name, want)
+		}
+	}
+	if got.Name != "TestAEarly" || got.File != "pkg/a_test.go" || got.Line != 10 || got.EndLine != 14 {
+		t.Errorf("primary identity = %+v, want the first contributor by File then Line", got)
 	}
 }
 
@@ -416,10 +567,10 @@ func TestJoinFamilyScopeIsolatesSameNameInDifferentPackages(t *testing.T) {
 func TestJoinPartitionInvariantOverActiveRows(t *testing.T) {
 	reg, thisDoc := buildJoinTestRegistry(t)
 	src := basicSource(thisDoc,
-		coverage.Row{ID: "SC-01"}, // passed, bound -> RowResult only
+		coverage.Row{ID: "SC-01"}, // passed, one site -> RowResult only
 		coverage.Row{ID: "SC-02"}, // no site -> gap only
 		coverage.Row{ID: "SC-03"}, // site binds, family empty -> gap only
-		coverage.Row{ID: "SC-05"}, // two sites bind -> ambiguity only
+		coverage.Row{ID: "SC-05"}, // two sites bind, both passed -> one RowResult, two contributors
 	)
 	sites := []TagSite{
 		{ImportPath: "pkg", TestName: "TestFoo", File: "pkg/foo_test.go", Line: 5, IDs: []string{"SC-01"}},
@@ -429,6 +580,8 @@ func TestJoinPartitionInvariantOverActiveRows(t *testing.T) {
 	}
 	rep := &gotestjson.Report{Records: []runrecord.Record{
 		{Status: runrecord.Passed, Scope: "pkg", Name: "TestFoo"},
+		{Status: runrecord.Passed, Scope: "pkg", Name: "TestBaz"},
+		{Status: runrecord.Passed, Scope: "pkg", Name: "TestQux"},
 	}}
 
 	results, findings, _, err := Join(src, reg, sites, rep)
@@ -438,10 +591,10 @@ func TestJoinPartitionInvariantOverActiveRows(t *testing.T) {
 
 	rowIDs := []string{"SC-01", "SC-02", "SC-03", "SC-05"}
 	for _, id := range rowIDs {
-		inResults := false
+		resultCount := 0
 		for _, r := range results {
 			if r.RowID == id {
-				inResults = true
+				resultCount++
 			}
 		}
 		findingCount := 0
@@ -450,11 +603,29 @@ func TestJoinPartitionInvariantOverActiveRows(t *testing.T) {
 				findingCount++
 			}
 		}
-		switch {
-		case inResults && findingCount == 0:
-		case !inResults && findingCount == 1:
-		default:
-			t.Errorf("row %s: inResults=%v findingCount=%d, want exactly one representation", id, inResults, findingCount)
+		if resultCount > 1 {
+			t.Errorf("row %s appears %d times in results, want at most once", id, resultCount)
+		}
+		if resultCount == 0 && findingCount == 0 {
+			t.Errorf("row %s appears neither in results nor in a row-bound finding", id)
+		}
+	}
+
+	var sc05 *RowResult
+	for i := range results {
+		if results[i].RowID == "SC-05" {
+			sc05 = &results[i]
+		}
+	}
+	if sc05 == nil {
+		t.Fatalf("results = %+v, want one credited SC-05 row result", results)
+	}
+	if len(sc05.Contributors) != 2 {
+		t.Errorf("SC-05 contributors = %+v, want both bound sites", sc05.Contributors)
+	}
+	for _, f := range findings {
+		if f.RowID == "SC-05" {
+			t.Errorf("finding = %+v, want none for the two-site SC-05 row", f)
 		}
 	}
 }
