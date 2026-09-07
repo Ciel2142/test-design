@@ -31,18 +31,22 @@ kind the trace op emits:
 - `TestOverclaimedCoverage` cites three active IDs on one test. Every distinct active ID a
   site cites binds, so it credits `SC-07` on its own and joins `SC-01` and `SC-05` as a
   second contributor. It is the fixture that proves cardinality alone is never a finding.
+  `SC-07` is `risk: high`, so crediting it also makes it layer-4 applicable.
 - `SC-09` is a test name (`TestSameName`) declared identically in both `orders` and
   `payments`; only the `orders` copy is tagged. This is the row that proves the join is
   scoped by the tag's file, not by the test name alone.
-- `SC-10` is the fixture's one bound `risk: high` row and the two-guard multi-site fixture:
-  its tagged test, `TestReserveGuard`, exercises only `Reserve`, while `orders.go` guards
-  both `Reserve` and `ReserveBatch` with the same shape of check. It carries the obligation
-  from `docs/superpowers/specs/2026-08-09-multi-site-mutation-design.md` — each guard must
-  be mutated and evaluated site-at-a-time, not collapsed into one row-level verdict —
+- `SC-10` is one of the fixture's two bound `risk: high` rows — `SC-07` is the other — and
+  the two-guard multi-site fixture: its tagged test, `TestReserveGuard`, exercises only
+  `Reserve`, while `orders.go` guards both `Reserve` and `ReserveBatch` with the same
+  shape of check. It carries the obligation from
+  `docs/superpowers/specs/2026-08-09-multi-site-mutation-design.md` — each guard must be
+  mutated and evaluated site-at-a-time, not collapsed into one row-level verdict —
   proved end-to-end by `TestE2EMutation_GoTwoGuardMultiSite`, which catches the `Reserve`
   mutant and lets the `ReserveBatch` mutant survive under its own site name. Separately,
-  `TestE2E_FinalizePipeline` reports `SC-10`'s mutation run `environmental` to reach a
-  `BLOCKED` verdict without invoking the `mutator` agent.
+  `TestE2E_FinalizePipeline` derives its layer-4 set from the trace — every active
+  `risk: high` row layer 1 did not leave as a gap, currently `SC-07` and `SC-10` — and
+  reports each row's mutation run `environmental` to reach a `BLOCKED` verdict without
+  invoking the `mutator` agent.
 
 `TestE2E_FixturePipeline` also asserts that two `trace` runs against the same repository
 state produce byte-identical evidence apart from timestamps and run IDs, and that `trace`
