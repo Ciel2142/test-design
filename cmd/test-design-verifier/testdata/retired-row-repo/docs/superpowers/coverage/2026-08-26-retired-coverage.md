@@ -13,6 +13,11 @@ Baseline: a1b2c3d · 2 passed, 0 failed, 0 skipped
 - baseline-sha256: 9f8e7d6c
 - final-command: ["/test-design:coverage-verification", "docs/superpowers/coverage/2026-08-26-retired-coverage.md"]
 
+## Live decision
+
+- decision: not-applicable
+- reason: the only e2e row, SC-02, is retired; no active smoke or e2e row remains
+
 ## Retired
 
 - SC-02 superseded by the runner contract; the row stays for traceability

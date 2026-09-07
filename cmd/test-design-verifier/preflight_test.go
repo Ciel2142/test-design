@@ -51,14 +51,30 @@ func TestPreflightHandler_ValidSourceReportsFullOutput(t *testing.T) {
 		t.Errorf("HighRiskCount = %d, want 2", got.HighRiskCount)
 	}
 	if !got.LiveProfileRequired {
-		t.Errorf("LiveProfileRequired = false, want true (layer 3 count > 0)")
+		t.Errorf("LiveProfileRequired = false, want true (decision required)")
 	}
 	if got.LiveProfile != ".test-design/live-profiles/local.json" {
 		t.Errorf("LiveProfile = %q", got.LiveProfile)
 	}
+	if got.LiveDecision.Decision != "required" {
+		t.Errorf("LiveDecision.Decision = %q, want %q", got.LiveDecision.Decision, "required")
+	}
+	if len(got.LiveDecision.Journeys) != 1 {
+		t.Fatalf("LiveDecision.Journeys = %+v, want exactly 1 journey", got.LiveDecision.Journeys)
+	}
+	j := got.LiveDecision.Journeys[0]
+	if j.ID != "J-1" || len(j.Scenarios) != 2 || j.Scenarios[0] != "SC-03" || j.Scenarios[1] != "SC-04" {
+		t.Errorf("LiveDecision.Journeys[0] = %+v, want J-1 over SC-03, SC-04", j)
+	}
 }
 
-func TestPreflightHandler_MissingLiveProfileReportsRequiredWithEmptyPath(t *testing.T) {
+// TestPreflightHandler_RequiredDecisionMissingLiveProfileRefused replaces the
+// pre-SC-06 TestPreflightHandler_MissingLiveProfileReportsRequiredWithEmptyPath:
+// under the decision-derived rule, a required decision with no live-profile
+// key is no longer a successful output with an empty LiveProfile — it is
+// refused by ValidateLiveDecision's target-missing code before layers are
+// computed.
+func TestPreflightHandler_RequiredDecisionMissingLiveProfileRefused(t *testing.T) {
 	dir := t.TempDir()
 	coverageDir := filepath.Join(dir, "docs", "superpowers", "coverage")
 	if err := os.MkdirAll(coverageDir, 0o755); err != nil {
@@ -80,6 +96,14 @@ Baseline: a1b2c3d · 1 passed, 0 failed, 0 skipped
 - baseline-sha256: abc123
 - final-command: ["/verify"]
 
+## Live decision
+
+- decision: required
+
+| Journey | Scenarios | Expected |
+|---|---|---|
+| J-1 | SC-01 | a downed dependency answers 503 on the deployed revision |
+
 ## Scenarios
 
 | ID | Behavior | Expected | Level | Verification mutation | Risk |
@@ -93,15 +117,21 @@ Baseline: a1b2c3d · 1 passed, 0 failed, 0 skipped
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"preflight", "--repo", dir, "--source", source}, nil, &stdout, &stderr)
 
-	if code != exitOK {
-		t.Fatalf("exit code = %d, want %d; stderr=%s", code, exitOK, stderr.String())
+	if code != exitError {
+		t.Fatalf("exit code = %d, want %d", code, exitError)
 	}
-	got := decodePreflight(t, &stdout)
-	if !got.LiveProfileRequired {
-		t.Errorf("LiveProfileRequired = false, want true")
+	if stdout.Len() != 0 {
+		t.Errorf("stdout = %q, want empty", stdout.String())
 	}
-	if got.LiveProfile != "" {
-		t.Errorf("LiveProfile = %q, want empty", got.LiveProfile)
+	got := decodeError(t, &stderr)
+	if got.Code != "live-decision-incomplete" {
+		t.Errorf("error code = %q, want %q", got.Code, "live-decision-incomplete")
+	}
+	if !strings.Contains(got.Message, "target-missing") {
+		t.Errorf("error message = %q, want it to contain %q", got.Message, "target-missing")
+	}
+	if !strings.Contains(got.Message, "live-profile") {
+		t.Errorf("error message = %q, want it to name %q", got.Message, "live-profile")
 	}
 }
 
@@ -167,7 +197,13 @@ func TestPreflightHandler_RetiredRowExcludedFromLayerCounts(t *testing.T) {
 		t.Errorf("HighRiskCount = %d, want 0", got.HighRiskCount)
 	}
 	if got.LiveProfileRequired {
-		t.Errorf("LiveProfileRequired = true, want false (no active smoke or e2e row)")
+		t.Errorf("LiveProfileRequired = true, want false (decision not-applicable: the only e2e row, SC-02, is retired)")
+	}
+	if got.LiveDecision.Decision != "not-applicable" {
+		t.Errorf("LiveDecision.Decision = %q, want %q", got.LiveDecision.Decision, "not-applicable")
+	}
+	if !strings.Contains(stdout.String(), `"journeys":[]`) {
+		t.Errorf("stdout = %s, want liveDecision.journeys rendered as [] (not null) when there are no journeys", stdout.String())
 	}
 }
 
@@ -254,5 +290,191 @@ func TestPreflightHandler_CrossDocumentCollisionErrorNamesBothPaths(t *testing.T
 	}
 	if !strings.Contains(got.Message, "2026-08-26-y-coverage.md") {
 		t.Errorf("error message = %q, want it to name 2026-08-26-y-coverage.md", got.Message)
+	}
+}
+
+func TestPreflightHandler_LiveDecisionMissingRefused(t *testing.T) {
+	dir := t.TempDir()
+	coverageDir := filepath.Join(dir, "docs", "superpowers", "coverage")
+	if err := os.MkdirAll(coverageDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	source := filepath.Join(coverageDir, "2026-08-26-no-decision-coverage.md")
+	content := `# Coverage: no-decision
+
+Spec: docs/superpowers/specs/2026-08-26-no-decision-design.md
+Baseline: a1b2c3d · 1 passed, 0 failed, 0 skipped
+
+## Verification
+
+- runner-kind: go-test-json
+- runner-root: .
+- runner-command: ["go", "test"]
+- report-globs: []
+- baseline-evidence: docs/superpowers/coverage/2026-08-26-no-decision-baseline.json
+- baseline-sha256: abc123
+- final-command: ["/verify"]
+
+## Scenarios
+
+| ID | Behavior | Expected | Level | Verification mutation | Risk |
+|----|----------|----------|-------|------------------------|------|
+| SC-01 | quantity at the lower bound is rejected | throws error, no row persisted | unit | guard omits equality check | med |
+`
+	if err := os.WriteFile(source, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"preflight", "--repo", dir, "--source", source}, nil, &stdout, &stderr)
+
+	if code != exitError {
+		t.Fatalf("exit code = %d, want %d", code, exitError)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("stdout = %q, want empty", stdout.String())
+	}
+	got := decodeError(t, &stderr)
+	if got.Code != "live-decision-incomplete" {
+		t.Errorf("error code = %q, want %q", got.Code, "live-decision-incomplete")
+	}
+	if !strings.Contains(got.Message, "missing") {
+		t.Errorf("error message = %q, want it to contain %q", got.Message, "missing")
+	}
+}
+
+func TestPreflightHandler_NotApplicableContradictingSmokeRowRefused(t *testing.T) {
+	dir := t.TempDir()
+	coverageDir := filepath.Join(dir, "docs", "superpowers", "coverage")
+	if err := os.MkdirAll(coverageDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	source := filepath.Join(coverageDir, "2026-08-26-contradiction-coverage.md")
+	content := `# Coverage: contradiction
+
+Spec: docs/superpowers/specs/2026-08-26-contradiction-design.md
+Baseline: a1b2c3d · 1 passed, 0 failed, 0 skipped
+
+## Verification
+
+- runner-kind: go-test-json
+- runner-root: .
+- runner-command: ["go", "test"]
+- report-globs: []
+- baseline-evidence: docs/superpowers/coverage/2026-08-26-contradiction-baseline.json
+- baseline-sha256: abc123
+- final-command: ["/verify"]
+
+## Live decision
+
+- decision: not-applicable
+- reason: every behavior is observable in process
+
+## Scenarios
+
+| ID | Behavior | Expected | Level | Verification mutation | Risk |
+|----|----------|----------|-------|------------------------|------|
+| SC-01 | dependency down answers 503 | 503 returned | smoke | error mapped wrong | med |
+`
+	if err := os.WriteFile(source, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"preflight", "--repo", dir, "--source", source}, nil, &stdout, &stderr)
+
+	if code != exitError {
+		t.Fatalf("exit code = %d, want %d", code, exitError)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("stdout = %q, want empty", stdout.String())
+	}
+	got := decodeError(t, &stderr)
+	if got.Code != "live-decision-incomplete" {
+		t.Errorf("error code = %q, want %q", got.Code, "live-decision-incomplete")
+	}
+	if !strings.Contains(got.Message, "contradiction") {
+		t.Errorf("error message = %q, want it to contain %q", got.Message, "contradiction")
+	}
+	if !strings.Contains(got.Message, "SC-01") {
+		t.Errorf("error message = %q, want it to name the contradicting row SC-01", got.Message)
+	}
+}
+
+// TestPreflightHandler_RequiredDecisionEmitsJourneysAndRequiresProfile locks
+// that LiveProfileRequired is derived from the decision, not from layer 3:
+// this document has no smoke or e2e row at all (layer3 == 0) yet its decision
+// is required (its journey cites a unit row), so LiveProfileRequired is true.
+func TestPreflightHandler_RequiredDecisionEmitsJourneysAndRequiresProfile(t *testing.T) {
+	dir := t.TempDir()
+	coverageDir := filepath.Join(dir, "docs", "superpowers", "coverage")
+	if err := os.MkdirAll(coverageDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	source := filepath.Join(coverageDir, "2026-08-26-required-no-live-rows-coverage.md")
+	content := `# Coverage: required-no-live-rows
+
+Spec: docs/superpowers/specs/2026-08-26-required-no-live-rows-design.md
+Baseline: a1b2c3d · 1 passed, 0 failed, 0 skipped
+
+## Verification
+
+- runner-kind: go-test-json
+- runner-root: .
+- runner-command: ["go", "test"]
+- report-globs: []
+- baseline-evidence: docs/superpowers/coverage/2026-08-26-required-no-live-rows-baseline.json
+- baseline-sha256: abc123
+- live-profile: .test-design/live-profiles/local.json
+- final-command: ["/verify"]
+
+## Live decision
+
+- decision: required
+- reason: the checkout path is only observable on a deployed revision
+
+| Journey | Scenarios | Expected |
+|---|---|---|
+| J-1 | SC-01 | the order appears in the deployed ledger |
+
+## Scenarios
+
+| ID | Behavior | Expected | Level | Verification mutation | Risk |
+|----|----------|----------|-------|------------------------|------|
+| SC-01 | quantity at the lower bound is rejected | throws error, no row persisted | unit | guard omits equality check | med |
+`
+	if err := os.WriteFile(source, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"preflight", "--repo", dir, "--source", source}, nil, &stdout, &stderr)
+
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d; stderr=%s", code, exitOK, stderr.String())
+	}
+	got := decodePreflight(t, &stdout)
+
+	if got.Layers.Layer3 != 0 {
+		t.Errorf("Layers.Layer3 = %d, want 0 (no smoke or e2e row in this document)", got.Layers.Layer3)
+	}
+	if !got.LiveProfileRequired {
+		t.Errorf("LiveProfileRequired = false, want true (decision required, even with no smoke/e2e row)")
+	}
+	if got.LiveDecision.Decision != "required" {
+		t.Errorf("LiveDecision.Decision = %q, want %q", got.LiveDecision.Decision, "required")
+	}
+	if len(got.LiveDecision.Journeys) != 1 {
+		t.Fatalf("LiveDecision.Journeys = %+v, want exactly 1 journey", got.LiveDecision.Journeys)
+	}
+	j := got.LiveDecision.Journeys[0]
+	if j.ID != "J-1" {
+		t.Errorf("Journeys[0].ID = %q, want %q", j.ID, "J-1")
+	}
+	if len(j.Scenarios) != 1 || j.Scenarios[0] != "SC-01" {
+		t.Errorf("Journeys[0].Scenarios = %+v, want [\"SC-01\"]", j.Scenarios)
+	}
+	if j.Expected != "the order appears in the deployed ledger" {
+		t.Errorf("Journeys[0].Expected = %q", j.Expected)
 	}
 }

@@ -13,6 +13,11 @@ Baseline: a1b2c3d · 1 passed, 0 failed, 0 skipped
 - baseline-sha256: 3b1f2a9c
 - final-command: ["/test-design:coverage-verification", "docs/superpowers/coverage/2026-08-26-y-coverage.md"]
 
+## Live decision
+
+- decision: not-applicable
+- reason: this document has no smoke or e2e rows
+
 ## Scenarios
 
 ### Behavior: y

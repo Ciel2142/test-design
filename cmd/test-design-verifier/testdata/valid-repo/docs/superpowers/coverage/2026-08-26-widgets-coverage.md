@@ -14,6 +14,15 @@ Baseline: a1b2c3d · 4 passed, 0 failed, 0 skipped
 - live-profile: .test-design/live-profiles/local.json
 - final-command: ["/test-design:coverage-verification", "docs/superpowers/coverage/2026-08-26-widgets-coverage.md"]
 
+## Live decision
+
+- decision: required
+- reason: the dependency-down and create-then-fetch paths are only observable on a deployed revision
+
+| Journey | Scenarios | Expected |
+|---|---|---|
+| J-1 | SC-03, SC-04 | a downed dependency answers 503 and a created widget round-trips on the deployed revision |
+
 ## Scenarios
 
 ### Behavior: create a widget

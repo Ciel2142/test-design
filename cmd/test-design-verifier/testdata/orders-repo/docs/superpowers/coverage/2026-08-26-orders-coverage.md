@@ -11,7 +11,17 @@ Baseline: a1b2c3d · 3 passed, 0 failed, 0 skipped
 - report-globs: []
 - baseline-evidence: docs/superpowers/coverage/2026-08-26-orders-baseline.json
 - baseline-sha256: 3b1f2a9c
+- live-profile: .test-design/live-profiles/local.json
 - final-command: ["/test-design:coverage-verification", "docs/superpowers/coverage/2026-08-26-orders-coverage.md"]
+
+## Live decision
+
+- decision: required
+- reason: the downed-dependency path is only observable on a deployed revision
+
+| Journey | Scenarios | Expected |
+|---|---|---|
+| J-1 | orders/SC-05 | a downed dependency answers 503 on the deployed revision |
 
 ## Retired
 
