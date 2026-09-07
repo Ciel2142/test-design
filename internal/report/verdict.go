@@ -161,6 +161,10 @@ func deriveLayer1(rs *reasonSet, tr *TraceEvidence, active []coverage.Row) map[s
 
 	findings := append([]TraceFinding(nil), tr.Findings...)
 	sort.Slice(findings, func(i, j int) bool {
+		pi, pj := findingKindPrecedence(findings[i].Kind), findingKindPrecedence(findings[j].Kind)
+		if pi != pj {
+			return pi < pj
+		}
 		if findings[i].Kind != findings[j].Kind {
 			return findings[i].Kind < findings[j].Kind
 		}
@@ -238,6 +242,24 @@ func deriveLayer1(rs *reasonSet, tr *TraceEvidence, active []coverage.Row) map[s
 		}
 	}
 	return out
+}
+
+// findingKindPrecedence orders a row's candidate findings the way
+// runrecord.Collapse orders contributor statuses: a failed contributor
+// (red) dominates a skipped one (gap), which dominates an ambiguous site
+// (ambiguity). Kinds outside that set keep the prior alphabetical-by-kind
+// tie-break, applied after this precedence in the caller's sort.
+func findingKindPrecedence(kind string) int {
+	switch kind {
+	case "red":
+		return 0
+	case "gap":
+		return 1
+	case "ambiguity":
+		return 2
+	default:
+		return 3
+	}
 }
 
 func deriveLayer2(rs *reasonSet, in *Inputs, active []coverage.Row) map[string]CriticRef {
@@ -461,14 +483,14 @@ func deriveBatches(batches []Batch) []BatchReport {
 	out := make([]BatchReport, 0, len(batches))
 	for _, b := range batches {
 		report := BatchReport{
-			BatchID:      b.BatchID,
-			DispatchID:   b.DispatchID,
-			RunID:        b.RunID,
-			Rows:         b.Rows,
-			InheritsFrom: b.InheritsFrom,
+			BatchID:                 b.BatchID,
+			DispatchID:              b.DispatchID,
+			RunID:                   b.RunID,
+			Rows:                    b.Rows,
+			InheritsFrom:            b.InheritsFrom,
 			CanaryUnavailableReason: b.CanaryUnavailableReason,
-			Voided:       voided[b.BatchID],
-			Verdicts:     b.Verdicts,
+			Voided:                  voided[b.BatchID],
+			Verdicts:                b.Verdicts,
 		}
 		if b.Canary != nil {
 			canary := *b.Canary

@@ -975,3 +975,30 @@ func TestDeriveLayer2BlocksWeakVacuousMissing(t *testing.T) {
 		})
 	}
 }
+
+func TestDeriveLayer1PrefersRedOverGapAcrossContributors(t *testing.T) {
+	tr := &TraceEvidence{
+		BaselineStatus: "ok",
+		RowResults: []TraceRowResult{
+			{RowID: "SC-01", Scope: "pkg/a", Name: "TestAlpha", Status: "failed"},
+		},
+		Findings: []TraceFinding{
+			{Kind: "gap", RowID: "SC-01", Detail: "SC-01: Test at pkg/a/skip_test.go:9 skipped"},
+			{Kind: "red", RowID: "SC-01", Detail: "SC-01: Test at pkg/a/fail_test.go:14 failed"},
+		},
+	}
+	active := []coverage.Row{{ID: "SC-01", Level: "unit", Risk: "low"}}
+	rs := newReasonSet()
+
+	out := deriveLayer1(rs, tr, active)
+
+	if out["SC-01"].Status != "red" {
+		t.Fatalf("SC-01 layer1 status = %q, want red (a failed contributor must outrank a skipped one)", out["SC-01"].Status)
+	}
+	if got := (reasonKey{rs.list[0].Layer, rs.list[0].RowID, rs.list[0].Code}); got != (reasonKey{layer1, "SC-01", "red"}) {
+		t.Fatalf("reason = %+v, want a blocking layer-1 red on SC-01", rs.list)
+	}
+	if !strings.Contains(rs.list[0].Detail, "fail_test.go:14") {
+		t.Errorf("reason detail = %q, want it to name the failing contributor", rs.list[0].Detail)
+	}
+}
