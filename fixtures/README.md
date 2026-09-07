@@ -12,17 +12,25 @@ Layer 1's fixture: two Go packages (`orders`, `payments`) sharing one module, ex
 `TestE2E_FinalizePipeline`. It proves the structural `covers:` binding and every finding
 kind the trace op emits:
 
-- `SC-01` is bound and passes — also the fixture that pins the trace evidence's binding
-  site (`file`, `line`, `endLine`) to an exact range in `orders/orders_test.go`.
-- `SC-02` and `SC-05` are bound and fail, yielding `red` findings.
-- `SC-03` and `SC-06` are cited by a skipped test, yielding `gap` findings.
-- `SC-04` and `SC-07` are cited by no test at all, also `gap`.
+- `SC-01` is bound and passes — also the fixture that pins the trace evidence's primary
+  binding site (`file`, `line`, `endLine`) to an exact range in `orders/orders_test.go`.
+  It is a two-contributor row: `TestOverclaimedCoverage` cites it as well.
+- `SC-02` and `SC-05` are bound and fail, yielding `red` findings. `SC-05` is the row whose
+  failing contributor (`TestAmountValidation`) is the primary while a second, passing
+  contributor (`TestOverclaimedCoverage`) also cites it.
+- `SC-03` and `SC-06` are cited by a skipped test, yielding `gap` findings. Both keep the
+  bound site in the dispatch inputs: only a row with no bound site is sourceless.
+- `SC-04` is cited by no test at all, yielding `gap`. Its `// covers: SC-04` comment is
+  free-floating between declarations, which is also the fixture's only `ambiguity`
+  finding — the one the tag scanner raises, not one the join invents from cardinality.
 - `SC-08` is cited by two different tests in two different packages
-  (`TestAmbiguousBindingOne` in `orders`, `TestAmbiguousBindingTwo` in `payments`),
-  yielding `ambiguity`.
+  (`TestAmbiguousBindingOne` in `orders`, `TestAmbiguousBindingTwo` in `payments`). Both
+  credit the row: one `RowResult` with two contributors, no `ambiguity`.
 - `SC-90` is retired but still cited by a test, and `SC-77` is cited by no row at all;
   both yield `drift` findings, and `SC-77` classifies as an unknown ID.
-- `TestOverclaimedCoverage` cites three active IDs on one test, yielding `overclaim`.
+- `TestOverclaimedCoverage` cites three active IDs on one test. Every distinct active ID a
+  site cites binds, so it credits `SC-07` on its own and joins `SC-01` and `SC-05` as a
+  second contributor. It is the fixture that proves cardinality alone is never a finding.
 - `SC-09` is a test name (`TestSameName`) declared identically in both `orders` and
   `payments`; only the `orders` copy is tagged. This is the row that proves the join is
   scoped by the tag's file, not by the test name alone.

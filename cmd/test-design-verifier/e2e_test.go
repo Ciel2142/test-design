@@ -78,6 +78,20 @@ func wantFinding(t *testing.T, ev traceEvidence, kind, rowID, detailSubstring st
 	t.Errorf("no %s finding for row %q containing %q; findings=%v", kind, rowID, detailSubstring, ev.Findings)
 }
 
+// wantContributors checks a row's contributors, in evidence order, are
+// exactly the named tests.
+func wantContributors(t *testing.T, ev traceEvidence, rowID string, names ...string) {
+	t.Helper()
+	got, ok := rowResultFor(ev, rowID)
+	if !ok {
+		t.Errorf("%s: no RowResult, want contributors %v", rowID, names)
+		return
+	}
+	if have := contributorNames(got.Contributors); !slices.Equal(have, names) {
+		t.Errorf("%s: contributors = %v, want %v", rowID, have, names)
+	}
+}
+
 var maskedEvidenceFields = regexp.MustCompile(`(?m)^(\s*"(runId|startedAt|finishedAt)": ).*$`)
 
 func maskVolatile(t *testing.T, path string) string {
@@ -127,6 +141,10 @@ func TestE2E_FixturePipeline(t *testing.T) {
 	if got, ok := rowResultFor(ev, "SC-01"); !ok || got.File != "orders/orders_test.go" || got.Line != 5 || got.EndLine != 10 {
 		t.Errorf("SC-01 site = %+v, want orders/orders_test.go:5-10", got)
 	}
+	// payments/payments_test.go:31 cites SC-07, SC-01 and SC-05: every
+	// distinct active ID at a site binds, so TestOverclaimedCoverage joins
+	// SC-01 and SC-05 as a second contributor and credits SC-07 alone.
+	wantContributors(t, ev, "SC-01", "TestValidateQuantityAccepts", "TestOverclaimedCoverage")
 	wantRowResult(t, ev, "SC-02", "failed")
 	wantFinding(t, ev, "red", "SC-02", "TestValidateQuantityRejectsZero")
 	wantRowResult(t, ev, "SC-03", "skipped")
@@ -134,12 +152,20 @@ func TestE2E_FixturePipeline(t *testing.T) {
 	wantFinding(t, ev, "gap", "SC-04", "no test cites SC-04")
 	wantRowResult(t, ev, "SC-05", "failed")
 	wantFinding(t, ev, "red", "SC-05", "TestAmountValidation")
+	wantContributors(t, ev, "SC-05", "TestAmountValidation", "TestOverclaimedCoverage")
 	wantRowResult(t, ev, "SC-06", "skipped")
 	wantFinding(t, ev, "gap", "SC-06", "TestCurrencyValidation")
-	wantFinding(t, ev, "overclaim", "", "TestOverclaimedCoverage")
-	wantFinding(t, ev, "gap", "SC-07", "no test cites SC-07")
-	wantFinding(t, ev, "ambiguity", "SC-08", "orders/orders_test.go:31")
-	wantFinding(t, ev, "ambiguity", "SC-08", "payments/payments_test.go:38")
+	wantRowResult(t, ev, "SC-07", "passed")
+	wantContributors(t, ev, "SC-07", "TestOverclaimedCoverage")
+	if got := findingsOf(ev, "overclaim", ""); len(got) != 0 {
+		t.Errorf("overclaim findings = %v, want none: citing three active IDs credits three rows", got)
+	}
+	// Two tests in two packages cite SC-08; both credit the row.
+	wantRowResult(t, ev, "SC-08", "passed")
+	wantContributors(t, ev, "SC-08", "TestAmbiguousBindingOne", "TestAmbiguousBindingTwo")
+	if got := findingsOf(ev, "ambiguity", "SC-08"); len(got) != 0 {
+		t.Errorf("SC-08 ambiguity findings = %v, want none: two sites binding one row is credit", got)
+	}
 	wantFinding(t, ev, "drift", "", "retired ID SC-90")
 	wantFinding(t, ev, "drift", "", "unknown ID SC-77")
 	wantFinding(t, ev, "ambiguity", "", "orders/orders_test.go:45")
