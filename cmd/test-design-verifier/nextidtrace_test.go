@@ -23,8 +23,9 @@ func TestActiveRowPasses(t *testing.T) {}
 func TestRetiredRowStillCited(t *testing.T) {}
 `
 
-// retiredHighestCoverageDoc retires SC-02, the highest scenario number this
-// document ever defined; only SC-01 remains active.
+// retiredHighestCoverageDoc defines SC-01 and SC-02 as scenario rows, the
+// same shape as testdata/retired-row-repo, and retires SC-02 — the highest
+// scenario number this document ever defined — so only SC-01 remains active.
 const retiredHighestCoverageDoc = `# Coverage: retired highest id
 
 Spec: docs/superpowers/specs/2026-09-07-retired-highest-design.md
@@ -51,6 +52,7 @@ Baseline: 0000000 · 0 passed, 0 failed, 0 skipped
 | ID | Behavior | Expected | Level | Verification mutation | Risk |
 |----|----------|----------|-------|------------------------|------|
 | SC-01 | active row is exercised | TestActiveRowPasses passes | unit | condition inverted | low |
+| SC-02 | checkout completes end to end | order confirmed | e2e | confirmation step removed | high |
 `
 
 // mustWriteFileAt writes contents to path, creating parent directories as
