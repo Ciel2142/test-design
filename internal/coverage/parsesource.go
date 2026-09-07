@@ -42,6 +42,11 @@ func ParseSource(path string) (*Source, error) {
 		return nil, err
 	}
 
+	liveDecision, err := parseLiveDecisionSection(path, lines, blocks)
+	if err != nil {
+		return nil, err
+	}
+
 	sha, err := evidence.SHA256File(path)
 	if err != nil {
 		return nil, fmt.Errorf("parse source %s: %w", path, err)
@@ -56,6 +61,7 @@ func ParseSource(path string) (*Source, error) {
 		SHA256:               sha,
 		Runner:               vf.Runner,
 		LiveProfile:          vf.LiveProfile,
+		LiveDecision:         liveDecision,
 		Rows:                 rows,
 		Retired:              retired,
 		FinalCommand:         vf.FinalCommand,

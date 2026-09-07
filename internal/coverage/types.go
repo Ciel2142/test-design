@@ -34,6 +34,7 @@ type Source struct {
 	SHA256               string
 	Runner               RunnerConfig
 	LiveProfile          string
+	LiveDecision         *LiveDecision
 	Rows                 []Row
 	Retired              []string
 	FinalCommand         []string
