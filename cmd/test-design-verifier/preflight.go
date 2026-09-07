@@ -25,18 +25,31 @@ type layerCounts struct {
 	Layer4 int `json:"layer4"`
 }
 
+type liveJourneyOutput struct {
+	ID        string   `json:"id"`
+	Scenarios []string `json:"scenarios"`
+	Expected  string   `json:"expected"`
+}
+
+type liveDecisionOutput struct {
+	Decision string              `json:"decision"`
+	Reason   string              `json:"reason"`
+	Journeys []liveJourneyOutput `json:"journeys"`
+}
+
 type preflightOutput struct {
 	evidence.Envelope
-	Source               string       `json:"source"`
-	SourceSHA256         string       `json:"sourceSha256"`
-	BaselineCommit       string       `json:"baselineCommit"`
-	BaselineEvidencePath string       `json:"baselineEvidencePath"`
-	BaselineSHA256       string       `json:"baselineSha256"`
-	Runner               runnerOutput `json:"runner"`
-	Layers               layerCounts  `json:"layers"`
-	HighRiskCount        int          `json:"highRiskCount"`
-	LiveProfileRequired  bool         `json:"liveProfileRequired"`
-	LiveProfile          string       `json:"liveProfile"`
+	Source               string             `json:"source"`
+	SourceSHA256         string             `json:"sourceSha256"`
+	BaselineCommit       string             `json:"baselineCommit"`
+	BaselineEvidencePath string             `json:"baselineEvidencePath"`
+	BaselineSHA256       string             `json:"baselineSha256"`
+	Runner               runnerOutput       `json:"runner"`
+	Layers               layerCounts        `json:"layers"`
+	HighRiskCount        int                `json:"highRiskCount"`
+	LiveProfileRequired  bool               `json:"liveProfileRequired"`
+	LiveProfile          string             `json:"liveProfile"`
+	LiveDecision         liveDecisionOutput `json:"liveDecision"`
 }
 
 func preflightHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer) *cliError {
@@ -63,7 +76,25 @@ func preflightHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer) *c
 		return &cliError{Code: "parse-source-failed", Message: fmt.Sprintf("preflight: %v", err)}
 	}
 
+	if err := coverage.ValidateLiveDecision(src); err != nil {
+		return &cliError{Code: "live-decision-incomplete", Message: fmt.Sprintf("preflight: %v", err)}
+	}
+
 	layers, highRisk := computeLayers(src.Rows, src.Retired)
+
+	journeys := make([]liveJourneyOutput, 0, len(src.LiveDecision.Journeys))
+	for _, j := range src.LiveDecision.Journeys {
+		journeys = append(journeys, liveJourneyOutput{
+			ID:        j.ID,
+			Scenarios: j.Scenarios,
+			Expected:  j.Expected,
+		})
+	}
+	liveDecision := liveDecisionOutput{
+		Decision: src.LiveDecision.Decision,
+		Reason:   src.LiveDecision.Reason,
+		Journeys: journeys,
+	}
 
 	out := preflightOutput{
 		Envelope:             evidence.Envelope{SchemaVersion: evidence.SchemaVersion, VerifierVersion: evidence.VerifierVersion},
@@ -80,8 +111,9 @@ func preflightHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer) *c
 		},
 		Layers:              layers,
 		HighRiskCount:       highRisk,
-		LiveProfileRequired: layers.Layer3 > 0,
+		LiveProfileRequired: src.LiveDecision.Decision == coverage.LiveRequired,
 		LiveProfile:         src.LiveProfile,
+		LiveDecision:        liveDecision,
 	}
 	return writeStdout(stdout, out)
 }
