@@ -55,6 +55,45 @@ func layer2FromTrace(active []coverage.Row, gaps map[string]bool) []report.Batch
 	}
 }
 
+// layer4FromTrace builds the bookkeeping a mutation run would have produced
+// for this trace: every layer-4-applicable row the fixture carries — its
+// high-risk rows that layer 1 did not leave as gaps — reports an
+// environmental outcome backed by its own attempt evidence, so this test
+// never invokes the mutator agent. The set is derived rather than named, so a
+// row that becomes bound (or stops being) moves the bookkeeping with it.
+func layer4FromTrace(t *testing.T, dir string, src *coverage.Source, tr *report.TraceEvidence, active []coverage.Row, gaps map[string]bool) []report.MutationInput {
+	t.Helper()
+	var rows []report.MutationInput
+	for _, row := range active {
+		if row.Risk != "high" || gaps[row.ID] {
+			continue
+		}
+		attemptPath := filepath.Join(dir, "mutation-attempt-"+row.ID+".json")
+		if err := evidence.WriteJSON(attemptPath, map[string]string{
+			"schemaVersion":   evidence.SchemaVersion,
+			"verifierVersion": evidence.VerifierVersion,
+			"runID":           e2eFinalizeRunID,
+			"repoCommit":      tr.RepoCommit,
+			"source":          src.Path,
+			"sourceSha256":    src.SHA256,
+			"rowID":           row.ID,
+			"refusal":         "runner-start-failed",
+		}); err != nil {
+			t.Fatalf("write attempt evidence for %s: %v", row.ID, err)
+		}
+		rows = append(rows, report.MutationInput{
+			RowID:               row.ID,
+			Outcome:             "environmental",
+			Reason:              "the mutation runner could not start in this environment",
+			AttemptEvidencePath: attemptPath,
+		})
+	}
+	if len(rows) == 0 {
+		t.Fatal("the fixture has no bound high-risk row; the layer-4 bookkeeping would prove nothing")
+	}
+	return rows
+}
+
 var finishedAtField = regexp.MustCompile(`(?m)^(\s*"finishedAt": ).*$`)
 
 // TestE2E_FinalizePipeline runs baseline, trace and finalize over
@@ -94,21 +133,10 @@ func TestE2E_FinalizePipeline(t *testing.T) {
 	active := report.ActiveRows(src)
 	gaps := report.Layer1Gaps(tr)
 
-	// SC-10 is the one high-risk bound row; its mutation run is reported as
-	// environmental so this test never runs a mutator.
-	attemptPath := filepath.Join(t.TempDir(), "mutation-attempt-SC-10.json")
-	if err := evidence.WriteJSON(attemptPath, map[string]string{
-		"schemaVersion":   evidence.SchemaVersion,
-		"verifierVersion": evidence.VerifierVersion,
-		"runID": e2eFinalizeRunID,
-		"repoCommit": tr.RepoCommit,
-		"source": src.Path,
-		"sourceSha256": src.SHA256,
-		"rowID":           "SC-10",
-		"refusal":         "runner-start-failed",
-	}); err != nil {
-		t.Fatalf("write attempt evidence: %v", err)
-	}
+	// SC-07 and SC-10 are the fixture's high-risk rows, both bound by layer 1
+	// under structural credit; each reports an environmental mutation run so
+	// this test never invokes a mutator.
+	layer4Rows := layer4FromTrace(t, t.TempDir(), src, tr, active, gaps)
 
 	requestBody, err := json.Marshal(finalizeRequestJSON{
 		SchemaVersion:  evidence.SchemaVersion,
@@ -120,12 +148,7 @@ func TestE2E_FinalizePipeline(t *testing.T) {
 			TraceEvidence: traceOut.EvidencePath,
 			Freshness:     report.Freshness{Result: "fresh"},
 			Layer2:        finalizeLayer2{Batches: layer2FromTrace(active, gaps)},
-			Layer4: finalizeLayer4{Rows: []report.MutationInput{{
-				RowID:               "SC-10",
-				Outcome:             "environmental",
-				Reason:              "the mutation runner could not start in this environment",
-				AttemptEvidencePath: attemptPath,
-			}}},
+			Layer4:        finalizeLayer4{Rows: layer4Rows},
 		},
 	})
 	if err != nil {
@@ -145,7 +168,10 @@ func TestE2E_FinalizePipeline(t *testing.T) {
 	for _, r := range out.Reasons {
 		codes[r.Code] = true
 	}
-	for _, kind := range []string{"gap", "red", "drift", "overclaim", "ambiguity"} {
+	// overclaim is gone from the vocabulary: citing several active IDs at one
+	// site is credit. drift still comes from SC-90 and SC-77, and ambiguity
+	// from the scanner-ambiguous site at orders/orders_test.go:45.
+	for _, kind := range []string{"gap", "red", "drift", "ambiguity"} {
 		if !codes[kind] {
 			t.Errorf("reasons carry no %q code; reasons=%+v", kind, out.Reasons)
 		}
@@ -155,12 +181,15 @@ func TestE2E_FinalizePipeline(t *testing.T) {
 	}
 
 	transcripts := "docs/superpowers/coverage/transcripts/" + e2eFinalizeRunID
-	for _, rel := range []string{
+	published := []string{
 		"docs/superpowers/coverage/2026-08-30-fixture-verification.json",
 		"docs/superpowers/coverage/2026-08-30-fixture-verification.md",
 		transcripts + "/trace-evidence.json",
-		transcripts + "/mutation-attempt-SC-10.json",
-	} {
+	}
+	for _, m := range layer4Rows {
+		published = append(published, transcripts+"/"+filepath.Base(m.AttemptEvidencePath))
+	}
+	for _, rel := range published {
 		if _, err := os.Stat(filepath.Join(repo, filepath.FromSlash(rel))); err != nil {
 			t.Errorf("stat published %s: %v", rel, err)
 		}
