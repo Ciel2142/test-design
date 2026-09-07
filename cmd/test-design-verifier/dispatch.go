@@ -14,21 +14,38 @@ import (
 
 const dispatchInputsFile = "dispatch-inputs.json"
 
+// dispatchContributor is one bound tag site handed to the critic, carrying
+// its own declaration range and the exact source read from that range.
+type dispatchContributor struct {
+	Scope            string `json:"scope"`
+	TestName         string `json:"testName"`
+	Status           string `json:"status"`
+	File             string `json:"file"`
+	Line             int    `json:"line"`
+	EndLine          int    `json:"endLine"`
+	TestSource       string `json:"testSource"`
+	TestSourceSHA256 string `json:"testSourceSha256"`
+}
+
+// dispatchRow is one active row handed to the critic. Its scalar identity and
+// source come from the row's primary contributor; Contributors lists every
+// bound site with its own source.
 type dispatchRow struct {
-	RowID                string `json:"rowId"`
-	Behavior             string `json:"behavior"`
-	Expected             string `json:"expected"`
-	Level                string `json:"level"`
-	Risk                 string `json:"risk"`
-	VerificationMutation string `json:"verificationMutation"`
-	Status               string `json:"status"`
-	Scope                string `json:"scope,omitempty"`
-	TestName             string `json:"testName,omitempty"`
-	File                 string `json:"file,omitempty"`
-	Line                 int    `json:"line,omitempty"`
-	EndLine              int    `json:"endLine,omitempty"`
-	TestSource           string `json:"testSource,omitempty"`
-	TestSourceSHA256     string `json:"testSourceSha256,omitempty"`
+	RowID                string                `json:"rowId"`
+	Behavior             string                `json:"behavior"`
+	Expected             string                `json:"expected"`
+	Level                string                `json:"level"`
+	Risk                 string                `json:"risk"`
+	VerificationMutation string                `json:"verificationMutation"`
+	Status               string                `json:"status"`
+	Scope                string                `json:"scope,omitempty"`
+	TestName             string                `json:"testName,omitempty"`
+	File                 string                `json:"file,omitempty"`
+	Line                 int                   `json:"line,omitempty"`
+	EndLine              int                   `json:"endLine,omitempty"`
+	TestSource           string                `json:"testSource,omitempty"`
+	TestSourceSHA256     string                `json:"testSourceSha256,omitempty"`
+	Contributors         []dispatchContributor `json:"contributors,omitempty"`
 }
 
 type dispatchInputs struct {
@@ -56,46 +73,39 @@ func writeDispatchInputs(src *coverage.Source, ev *traceEvidence, suiteDir, runD
 		SourceSHA256: ev.SourceSHA256, RepoCommit: ev.RepoCommit,
 		Rows: make([]dispatchRow, 0, len(src.Rows)),
 	}
-	files := make(map[string][]byte)
-	type sourceRange struct { file string; first, last int }
-	type sourceText struct { text, hash string }
-	ranges := make(map[sourceRange]sourceText)
+	read := newRangeReader(suiteDir)
 	for _, row := range src.Rows {
 		if slices.Contains(src.Retired, row.ID) {
 			continue
 		}
 		entry := dispatchRow{RowID: row.ID, Behavior: row.Behavior, Expected: row.Expected,
 			Level: row.Level, Risk: row.Risk, VerificationMutation: row.Mutation, Status: "gap"}
-		binding, bound := bindings[row.ID]
-		if gap, ok := gaps[row.ID]; ok {
-			entry.Status = gap
-		} else if bound && binding.File != "" {
+		if binding, bound := bindings[row.ID]; bound && binding.File != "" {
 			entry.Status, entry.Scope, entry.TestName = binding.Status, binding.Scope, binding.Name
 			entry.File, entry.Line, entry.EndLine = binding.File, binding.Line, binding.EndLine
-			key := sourceRange{binding.File, binding.Line, binding.EndLine}
-			text, cached := ranges[key]
-			if !cached {
-				data, cached := files[binding.File]
-				if !cached {
-					rel, cliErr := confinedRelPath("trace", "binding file", "source-outside-repo", binding.File)
-					if cliErr != nil {
-						return "", fmt.Errorf("dispatch source: %s", cliErr.Message)
-					}
-					var err error
-					data, err = os.ReadFile(filepath.Join(suiteDir, filepath.FromSlash(rel)))
-					if err != nil {
-						return "", fmt.Errorf("dispatch source %s: %w", rel, err)
-					}
-					files[binding.File] = data
-				}
-				snippet, err := sourceLineRange(data, binding.Line, binding.EndLine)
-				if err != nil {
-					return "", fmt.Errorf("dispatch source %s: %w", binding.File, err)
-				}
-				text = sourceText{string(snippet), fmt.Sprintf("%x", sha256.Sum256(snippet))}
-				ranges[key] = text
+			primary, err := read(binding.File, binding.Line, binding.EndLine)
+			if err != nil {
+				return "", err
 			}
-			entry.TestSource, entry.TestSourceSHA256 = text.text, text.hash
+			entry.TestSource, entry.TestSourceSHA256 = primary.text, primary.hash
+			for _, c := range binding.Contributors {
+				text, err := read(c.File, c.Line, c.EndLine)
+				if err != nil {
+					return "", err
+				}
+				entry.Contributors = append(entry.Contributors, dispatchContributor{
+					Scope: c.Scope, TestName: c.Name, Status: c.Status,
+					File: c.File, Line: c.Line, EndLine: c.EndLine,
+					TestSource: text.text, TestSourceSHA256: text.hash,
+				})
+			}
+		}
+		// A row-bound gap or ambiguity names the row's status. It never
+		// removes the source: a row that has a binding still hands the critic
+		// its primary contributor's declaration, and only a row with no bound
+		// site is sourceless.
+		if gap, ok := gaps[row.ID]; ok {
+			entry.Status = gap
 		}
 		payload.Rows = append(payload.Rows, entry)
 	}
@@ -104,6 +114,49 @@ func writeDispatchInputs(src *coverage.Source, ev *traceEvidence, suiteDir, runD
 		return "", err
 	}
 	return path, nil
+}
+
+// sourceText is one bound declaration exactly as the disposable worktree
+// holds it, with the SHA-256 of those bytes.
+type sourceText struct{ text, hash string }
+
+// newRangeReader returns a reader over declaration ranges under suiteDir. It
+// reads each file once and each distinct line range once, so the several
+// contributors of one row never re-read the same bytes.
+func newRangeReader(suiteDir string) func(file string, first, last int) (sourceText, error) {
+	type sourceRange struct {
+		file        string
+		first, last int
+	}
+	files := make(map[string][]byte)
+	ranges := make(map[sourceRange]sourceText)
+
+	return func(file string, first, last int) (sourceText, error) {
+		key := sourceRange{file, first, last}
+		if text, cached := ranges[key]; cached {
+			return text, nil
+		}
+		data, cached := files[file]
+		if !cached {
+			rel, cliErr := confinedRelPath("trace", "binding file", "source-outside-repo", file)
+			if cliErr != nil {
+				return sourceText{}, fmt.Errorf("dispatch source: %s", cliErr.Message)
+			}
+			var err error
+			data, err = os.ReadFile(filepath.Join(suiteDir, filepath.FromSlash(rel)))
+			if err != nil {
+				return sourceText{}, fmt.Errorf("dispatch source %s: %w", rel, err)
+			}
+			files[file] = data
+		}
+		snippet, err := sourceLineRange(data, first, last)
+		if err != nil {
+			return sourceText{}, fmt.Errorf("dispatch source %s: %w", file, err)
+		}
+		text := sourceText{string(snippet), fmt.Sprintf("%x", sha256.Sum256(snippet))}
+		ranges[key] = text
+		return text, nil
+	}
 }
 
 func sourceLineRange(data []byte, first, last int) ([]byte, error) {

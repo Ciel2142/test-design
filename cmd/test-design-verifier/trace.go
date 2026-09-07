@@ -21,14 +21,30 @@ import (
 
 const traceEvidenceFile = "trace-evidence.json"
 
+// traceContributor is one bound tag site crediting a row: the test that
+// cites the row, where it is declared, and how its family fared in the run.
+type traceContributor struct {
+	Scope    string `json:"scope"`
+	Name     string `json:"name"`
+	Status   string `json:"status"`
+	Executed bool   `json:"executed"`
+	File     string `json:"file"`
+	Line     int    `json:"line"`
+	EndLine  int    `json:"endLine"`
+}
+
+// traceRowResult credits one row. Its scalar fields name the primary
+// contributor — the first bound site by file then line — and Contributors
+// lists every bound site, executed or not.
 type traceRowResult struct {
-	RowID   string `json:"rowId"`
-	Scope   string `json:"scope"`
-	Name    string `json:"name"`
-	Status  string `json:"status"`
-	File    string `json:"file"`
-	Line    int    `json:"line"`
-	EndLine int    `json:"endLine"`
+	RowID        string             `json:"rowId"`
+	Scope        string             `json:"scope"`
+	Name         string             `json:"name"`
+	Status       string             `json:"status"`
+	File         string             `json:"file"`
+	Line         int                `json:"line"`
+	EndLine      int                `json:"endLine"`
+	Contributors []traceContributor `json:"contributors"`
 }
 
 type traceFinding struct {
@@ -287,7 +303,7 @@ func traceOp(req *verifyRequest, stdout io.Writer, between func()) *cliError {
 		FindingCounts:  ev.FindingCounts,
 		RowAccounting:  ev.RowAccounting,
 		EvidencePath:   evidencePath,
-		DispatchPath:  dispatchPath,
+		DispatchPath:   dispatchPath,
 		RunDir:         runDir,
 	}
 	return writeStdout(stdout, out)
@@ -381,13 +397,32 @@ func rowResults(results []trace.RowResult) []traceRowResult {
 	out := make([]traceRowResult, 0, len(results))
 	for _, r := range results {
 		out = append(out, traceRowResult{
-			RowID:   r.RowID,
-			Scope:   r.Scope,
-			Name:    r.Name,
-			Status:  string(r.Status),
-			File:    r.File,
-			Line:    r.Line,
-			EndLine: r.EndLine,
+			RowID:        r.RowID,
+			Scope:        r.Scope,
+			Name:         r.Name,
+			Status:       string(r.Status),
+			File:         r.File,
+			Line:         r.Line,
+			EndLine:      r.EndLine,
+			Contributors: rowContributors(r.Contributors),
+		})
+	}
+	return out
+}
+
+// rowContributors renders every bound site crediting a row, keeping the
+// order Join fixed (file, then line) so the first entry is the primary.
+func rowContributors(contributors []trace.Contributor) []traceContributor {
+	out := make([]traceContributor, 0, len(contributors))
+	for _, c := range contributors {
+		out = append(out, traceContributor{
+			Scope:    c.Scope,
+			Name:     c.Name,
+			Status:   string(c.Status),
+			Executed: c.Executed,
+			File:     c.File,
+			Line:     c.Line,
+			EndLine:  c.EndLine,
 		})
 	}
 	return out
