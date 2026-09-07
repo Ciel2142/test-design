@@ -21,6 +21,7 @@ Work record: `test-design-review-handoff-86t`. Target repository is this plugin 
 1. The user approved mandatory separate W-1 through W-3 evidence on 2026-09-07 (work-record comment 14). Meaningful agent review, consequence-based judgment, scope negotiation and automatic workflow behavior currently live in Markdown instructions, not executable guards. The installed code-mutation/Go-JVM binding schema cannot prove these through instruction-text assertions. A machine PASS alone must not be called full feature acceptance.
 2. The user authorized one real local harness as coverage setup. `.test-design/live-profiles/workflow-redesign-local.json` invokes `fixtures/workflow-redesign-live/recipe.py`; `service.go` supplies actual quote calculation over a private Unix socket. This replaces no verifier logic and requires no remote host, cluster, credential or production access. The existing scratch/echo fixture is intentionally unchanged.
 3. The user authorized coverage/setup-only commits and temporary clean linked-worktree baseline capture, without staging, resetting or stashing existing source edits. Coverage/setup source commit: `7575077`. The verifier captured the baseline in the isolated clean checkout at that commit and measured the merge-base above. No dirty-tree bypass or user-source checkpoint was used.
+4. 2026-09-07 format amendment (approved in the design-review brief grill, Q5): the `## Live decision` section gained the machine-readable form — `decision: required`, a `reason` bullet and journey `J-1` over `SC-10, SC-11, SC-13, SC-17` with the setup-proof expectations. The original prose stays below it. No scenario row, level, verification mutation or risk changed; this document's SHA256 changed and the brief/map references were refreshed.
 
 ## Verification
 
@@ -42,6 +43,13 @@ Captured through the installed verifier's `baseline` operation with run ID `base
 Skipped: `TestE2EMutation_GradleSingleSite` and `TestTraceJVM_GradlePipeline`, both in `test-design/cmd/test-design-verifier`. The evidence retains their identities. No green-baseline claim, rerun to hide the failure, or unrelated test/source repair was made.
 
 ## Live decision
+
+- decision: required
+- reason: SC-10 is the deployed-business obligation; the local disposable Go service over a private Unix socket is the approved configured target.
+
+| Journey | Scenarios | Expected |
+|---|---|---|
+| J-1 | SC-10, SC-11, SC-13, SC-17 | On the deployed selected revision, after readiness passes as a separate step, a three-item quote totals 375 cents and the artifact/revision identity is recorded; a stale (older) deployment is refused; authenticated shutdown then removes this run's root while a neighboring run root and an unrelated sentinel survive, and both run roots are proved absent at the end. |
 
 Required, not N/A. SC-10 is the deployed-business obligation; the deployed journey also observes relevant selection, handoff, ordering, failure and cleanup contracts in SC-07 through SC-19 without replacing their cheaper direct checks. W-2 separately observes actual agent preparation and permission behavior. Approved setup target: a local disposable Go service over `/tmp/test-design-workflow-{run-id}/service.sock`, inside a mode-0700 run-owned directory. The finite recipe builds exact committed source, stamps the selected revision, fingerprints the artifact, checks readiness separately, requires a three-item quote to total 375 cents, then requests authenticated shutdown and verifies resource removal. It refuses stale deployments and unexpected cleanup contents. No TCP port, remote endpoint or inherited service credential is used. The root profile is trusted project configuration, not a sandbox. Direct harness smoke proof does not claim that the still-unimplemented redesigned verifier successfully orchestrates this journey.
 
