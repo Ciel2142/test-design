@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "1",
+  "classification": "local",
+  "start": [["python3", "fixtures/workflow-redesign-live/recipe.py", "deploy", "{run-id}"]],
+  "health": [["python3", "fixtures/workflow-redesign-live/recipe.py", "ready", "{run-id}"]],
+  "walkthrough": [["python3", "fixtures/workflow-redesign-live/recipe.py", "check", "{run-id}"]],
+  "cleanup": [["python3", "fixtures/workflow-redesign-live/recipe.py", "cleanup", "{run-id}"]],
+  "cleanupEvidence": [
+    {"form": "exit-code", "value": "0"},
+    {"form": "matches", "stream": "stdout", "value": "\"result\": \"cleanup-pass\""},
+    {"form": "matches", "stream": "stdout", "value": "\"absent\": true"}
+  ],
+  "envAllowlist": ["PATH", "HOME", "GOCACHE"],
+  "resourcePrefixes": ["/tmp/test-design-workflow-{run-id}"],
+  "endpoints": [],
+  "timeoutSeconds": 120,
+  "cleanupTimeoutSeconds": 15,
+  "maxOutputBytes": 1048576
+}

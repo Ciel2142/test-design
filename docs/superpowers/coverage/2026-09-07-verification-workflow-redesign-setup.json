@@ -1,0 +1,134 @@
+{
+  "kind": "coverage-harness-setup-proof",
+  "scope": "Direct recipe/service smoke only; not SC final evidence, not a redesigned-verifier PASS, and not W-1/W-2/W-3 completion.",
+  "profileTemplateValidation": "PROFILE TEMPLATE VALID: local, owned resources, cleanup predicates",
+  "fixtureFiles": {
+    "fixtures/workflow-redesign-live/service.go": "0720f347aa018055231c3ba6610b6767abf95fde9d161d057973b0799865b2b7",
+    "fixtures/workflow-redesign-live/recipe.py": "ca3800825c34a60bd053b2c207725fd50d9a02303f43c5a5a03a63df01a5dfbb",
+    ".test-design/live-profiles/workflow-redesign-local.json": "a969f0a310e4b1a4151f9a797bdfcf7da42b077a6296ccce5d60095d25b7abfd"
+  },
+  "subject": {
+    "oldCommit": "f7f2f4245e64f840cb4b12a0c2abd7b6dc158aa8",
+    "newCommit": "473f3796f6bbbf0ddc9d4f11136892f78ec27d18",
+    "oldUnitPriceCents": 100,
+    "newUnitPriceCents": 125,
+    "change": "Change only const unitPriceCents = 100 to 125 in the temporary Git subject."
+  },
+  "deployments": [
+    {
+      "repoCommit": "f7f2f4245e64f840cb4b12a0c2abd7b6dc158aa8",
+      "artifactSha256": "4dacbcda3a0d333aed114754e3a75eadedfe2df1fdec5b9f966e8801da70ff6c",
+      "runID": "setup-doiclzht"
+    },
+    {
+      "repoCommit": "473f3796f6bbbf0ddc9d4f11136892f78ec27d18",
+      "artifactSha256": "edbd0a90c0fad7888091315ef3e33078d69c85be0379bd7a8230f478f601c7d0",
+      "runID": "setup-doiclzht"
+    },
+    {
+      "repoCommit": "473f3796f6bbbf0ddc9d4f11136892f78ec27d18",
+      "artifactSha256": "edbd0a90c0fad7888091315ef3e33078d69c85be0379bd7a8230f478f601c7d0",
+      "runID": "setup-doiclzht-neighbor"
+    }
+  ],
+  "observations": [
+    {
+      "command": "ready",
+      "runID": "setup-doiclzht",
+      "exitStatus": 0,
+      "stdout": "{\"result\": \"ready\"}",
+      "stderr": ""
+    },
+    {
+      "command": "check",
+      "runID": "setup-doiclzht",
+      "exitStatus": 1,
+      "stdout": "",
+      "stderr": "business assertion failed: {\"quantity\": 3, \"totalCents\": 300, \"revision\": \"f7f2f4245e64f840cb4b12a0c2abd7b6dc158aa8\"}"
+    },
+    {
+      "command": "ready",
+      "runID": "setup-doiclzht",
+      "exitStatus": 0,
+      "stdout": "{\"result\": \"ready\"}",
+      "stderr": ""
+    },
+    {
+      "command": "check",
+      "runID": "setup-doiclzht",
+      "exitStatus": 1,
+      "stdout": "",
+      "stderr": "stale deployment: selected revision/source differs"
+    },
+    {
+      "command": "cleanup",
+      "runID": "setup-doiclzht",
+      "exitStatus": 0,
+      "stdout": "{\"result\": \"cleanup-pass\", \"runID\": \"setup-doiclzht\", \"absent\": true}",
+      "stderr": ""
+    },
+    {
+      "command": "ready",
+      "runID": "setup-doiclzht",
+      "exitStatus": 0,
+      "stdout": "{\"result\": \"ready\"}",
+      "stderr": ""
+    },
+    {
+      "command": "check",
+      "runID": "setup-doiclzht",
+      "exitStatus": 0,
+      "stdout": "{\"result\": \"business-pass\", \"repoCommit\": \"473f3796f6bbbf0ddc9d4f11136892f78ec27d18\", \"sourceSha256\": \"0720f347aa018055231c3ba6610b6767abf95fde9d161d057973b0799865b2b7\", \"artifactSha256\": \"edbd0a90c0fad7888091315ef3e33078d69c85be0379bd7a8230f478f601c7d0\", \"target\": \"/tmp/test-design-workflow-setup-doiclzht/service.sock\", \"observed\": {\"quantity\": 3, \"totalCents\": 375, \"revision\": \"473f3796f6bbbf0ddc9d4f11136892f78ec27d18\"}}",
+      "stderr": ""
+    },
+    {
+      "command": "check",
+      "runID": "setup-doiclzht-neighbor",
+      "exitStatus": 0,
+      "stdout": "{\"result\": \"business-pass\", \"repoCommit\": \"473f3796f6bbbf0ddc9d4f11136892f78ec27d18\", \"sourceSha256\": \"0720f347aa018055231c3ba6610b6767abf95fde9d161d057973b0799865b2b7\", \"artifactSha256\": \"edbd0a90c0fad7888091315ef3e33078d69c85be0379bd7a8230f478f601c7d0\", \"target\": \"/tmp/test-design-workflow-setup-doiclzht-neighbor/service.sock\", \"observed\": {\"quantity\": 3, \"totalCents\": 375, \"revision\": \"473f3796f6bbbf0ddc9d4f11136892f78ec27d18\"}}",
+      "stderr": ""
+    },
+    {
+      "command": "cleanup",
+      "runID": "setup-doiclzht",
+      "exitStatus": 1,
+      "stdout": "",
+      "stderr": "unexpected files; refusing removal"
+    },
+    {
+      "command": "check",
+      "runID": "setup-doiclzht-neighbor",
+      "exitStatus": 0,
+      "stdout": "{\"result\": \"business-pass\", \"repoCommit\": \"473f3796f6bbbf0ddc9d4f11136892f78ec27d18\", \"sourceSha256\": \"0720f347aa018055231c3ba6610b6767abf95fde9d161d057973b0799865b2b7\", \"artifactSha256\": \"edbd0a90c0fad7888091315ef3e33078d69c85be0379bd7a8230f478f601c7d0\", \"target\": \"/tmp/test-design-workflow-setup-doiclzht-neighbor/service.sock\", \"observed\": {\"quantity\": 3, \"totalCents\": 375, \"revision\": \"473f3796f6bbbf0ddc9d4f11136892f78ec27d18\"}}",
+      "stderr": ""
+    },
+    {
+      "command": "cleanup",
+      "runID": "setup-doiclzht",
+      "exitStatus": 0,
+      "stdout": "{\"result\": \"cleanup-pass\", \"runID\": \"setup-doiclzht\", \"absent\": true}",
+      "stderr": ""
+    },
+    {
+      "command": "cleanup",
+      "runID": "setup-doiclzht",
+      "exitStatus": 0,
+      "stdout": "{\"result\": \"cleanup-pass\", \"runID\": \"setup-doiclzht\", \"absent\": true}",
+      "stderr": ""
+    },
+    {
+      "command": "cleanup",
+      "runID": "setup-doiclzht-neighbor",
+      "exitStatus": 0,
+      "stdout": "{\"result\": \"cleanup-pass\", \"runID\": \"setup-doiclzht-neighbor\", \"absent\": true}",
+      "stderr": ""
+    }
+  ],
+  "cleanup": {
+    "primaryRunAbsent": true,
+    "neighborRunAbsent": true,
+    "unexpectedFilePreservedOnRefusal": true,
+    "neighborBusinessCheckPassedAfterPrimaryCleanupRefusal": true
+  },
+  "reproduction": "Copy service.go, recipe.py and the profile into a temporary Go Git subject. Commit price 100, deploy and ready; check must reject 300 cents. Commit price 125 without redeploying; ready still succeeds but check must reject stale identity. Cleanup, deploy the selected revision and check 375 cents. Start a second run; an unexpected file in the first run must survive refused cleanup and the second run must remain usable. Remove only the probe file, clean both runs, and repeat cleanup to prove absence."
+}

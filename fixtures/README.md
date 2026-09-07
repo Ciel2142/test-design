@@ -87,3 +87,37 @@ parsers rather than by a running suite:
   identity normalizer against every naming and structural divergence the four real
   producers are known to emit — see `reports/jvm/README.md` for the full provenance and
   producer-divergence notes.
+
+## `workflow-redesign-live/`
+
+Coverage setup for the plugin's own verification-workflow redesign. Unlike the
+scratch/echo fixture, `service.go` is a real quote-calculation service: three items
+must total 375 cents. `recipe.py` supplies finite `deploy`, `ready`, `check`, and
+`cleanup` commands, selected by the root profile
+`.test-design/live-profiles/workflow-redesign-local.json`.
+
+Requires Python 3 and Go 1.26+. Run commands from the committed subject repository:
+
+```text
+python3 fixtures/workflow-redesign-live/recipe.py deploy <run-id>
+python3 fixtures/workflow-redesign-live/recipe.py ready <run-id>
+python3 fixtures/workflow-redesign-live/recipe.py check <run-id>
+python3 fixtures/workflow-redesign-live/recipe.py cleanup <run-id>
+```
+
+The private HTTP-over-Unix-socket service and artifacts live only under
+`/tmp/test-design-workflow-<run-id>`. Run IDs contain 1–40 ASCII letters, digits or
+hyphens, beginning with a letter or digit. Deployment builds exact committed service
+source and records the revision and binary fingerprint. Readiness is separate from
+the business assertion; `check` rejects a healthy older deployment. A private token
+authenticates shutdown, so cleanup never kills a PID taken from a stale file.
+Cleanup refuses unexpected files, preserves other runs, and observes absence.
+
+The recipe is trusted local project code, not a sandbox. No remote target, TCP
+listener or service credentials are needed. Always run cleanup after an attempt;
+an unproven shutdown is a cleanup failure, not permission to delete resources.
+
+Actual setup observations and the old/new-subject reproduction are recorded in
+`docs/superpowers/coverage/2026-09-07-verification-workflow-redesign-setup.json`.
+They prove the harness, not completion of the redesign's SC rows or mandatory
+real-agent walkthroughs.
