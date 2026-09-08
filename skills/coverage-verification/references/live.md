@@ -1,11 +1,13 @@
 ## Layer 3 — live
 
-Layer 3 covers active `smoke` and `e2e` rows. Read applicability from the trace dispatch
-payload **before** preparing or planning. With no applicable rows, omit `layer3`.
-If every applicable row is a layer-1 gap/ambiguity, also omit `layer3`: do not call
-prepare or dispatch a planner just to receive N/A. Finalize preserves the applicable
-count and derives `LIVE-N/A (layer 1 gap)` for each such row. With a mix, dispatch only
-bound rows plus the complete gap set; execution/finalize account for gaps themselves.
+Layer 3 covers the rows the coverage source's `## Live decision` makes applicable: with
+`decision: required`, every active row a journey names plus every active `smoke` or `e2e`
+row; with `decision: not-applicable`, none. A journeyed `unit`, `component` or
+`integration` row is as applicable as a `smoke` row and keeps the level it was written
+with. Read the live decision from the source, and the row facts from the trace dispatch
+payload, **before** preparing or planning. Omit `layer3` only when `prepare-live` refuses
+`no-applicable-rows`; every other applicable row is planned, run and judged, the layer-1
+gap/ambiguity rows among them.
 
 When reviewing a profile's schema or limits, **read [live profiles](../../../docs/live-profile.md)**.
 Optional `timeoutSeconds` defaults to 120, `cleanupTimeoutSeconds` to 30, and
@@ -21,9 +23,14 @@ go run -C "$CLAUDE_PLUGIN_ROOT" ./cmd/test-design-verifier prepare-live -request
 with the shared request body. On success it returns `runID`, `worktreePath`, `runDir`,
 `profilePath`, and `descriptor` — the live profile with `{run-id}` substituted throughout.
 
+`prepare-live` validates the source's `## Live decision` before it decides applicability: a
+missing or invalid section is `live-decision-incomplete`, and no worktree or run dir is
+created. That is a defect in the
+coverage source, not an outcome — amend the source and rerun.
+
 Two refusals are outcomes rather than errors:
 
-- `no-applicable-rows` — the source has no active `smoke` or `e2e` row. Omit `layer3` from
+- `no-applicable-rows` — the live decision is `not-applicable`. Omit `layer3` from
   the finalize request entirely; the report says layer 3 is `n/a`, not skipped and not
   partial.
 - `profile-unavailable` — the profile is missing, unreadable, or fails validation. The op has
@@ -33,8 +40,10 @@ Two refusals are outcomes rather than errors:
 
 ### 2. Dispatch [live-runner](../../../agents/live-runner.md)
 
-Give it the `worktreePath`, the `descriptor` and its `profilePath`, the applicable smoke and
-e2e row facts from `dispatchPath`, the run ID, and the layer-1 gap set read from the trace evidence's findings.
+Give it the `worktreePath`, the `descriptor` and its `profilePath`, the journeys the live
+decision names (id, scenarios, expected), the applicable row facts with their levels from
+`dispatchPath`, the run ID, and the layer-1 gap set read from the trace evidence's findings,
+marked "bind these too; they have no automated test".
 
 Its entire final message is a `live.Plan` JSON document — no prose, no fence. Write that
 message to `<runDir>/plan.json` byte-for-byte unchanged. Do not repair a plan by hand: the
@@ -43,9 +52,10 @@ designed.
 
 Two other replies are legitimate:
 
-- `N/A` — legitimate only if trace already proves no applicable bound row. That case
-  should have skipped this dispatch. If trace contains a bound applicable row, the reply
-  contradicts it: re-dispatch quoting those row facts, never omit their evidence.
+- `N/A` — legitimate only when the live decision is `not-applicable`, and that case never
+  reaches this dispatch: `prepare-live` refuses `no-applicable-rows` first. If you handed
+  the agent an applicable row, the reply contradicts it: re-dispatch quoting those row
+  facts, never omit their evidence.
 - A refusal naming the row whose recipe cannot be expressed through declared commands.
   This ends the **whole live layer**, not just that row: per-row continuation is not
   supported. Record the actual reply verbatim using the shared request plus `layer: 3`
@@ -73,17 +83,20 @@ transcripts, runs cleanup unconditionally, disposes the worktree, and writes
 `live-evidence.json`.
 
 Read `evidencePath` — it is `layer3.evidencePath` in the finalize request — plus
-`rowVerdicts`, `cleanupOK`, and `cleanupFailed` for the running summary. Row verdicts are
-`LIVE-PASS`, `LIVE-FAIL`, `LIVE-INCONCLUSIVE`, and `LIVE-N/A (layer 1 gap)`, which the op
-assigns to gap rows itself.
+`rowVerdicts`, `cleanupOK`, and `cleanupFailed` for the running summary. Every applicable row
+carries `LIVE-PASS`, `LIVE-FAIL`, or `LIVE-INCONCLUSIVE`; a gap row gets the journey's
+truthful outcome like any other, with `layer1Gap: true` recorded beside its verdict. The
+layer-1 gap still blocks the branch on layer 1's own account.
 
 **The reduced transcripts inside the evidence are the record; the agent's summary is not.**
 Nothing here needs re-checking by hand: the verdicts come from the op that ran the commands,
 not from the agent that proposed them.
 
-A plan that fails validation is refused by name — `empty`, `unsupported`,
-`shell-invocation-rejected`, `undeclared-command`, `undeclared-endpoint`,
-`inexpressible-predicate`, `missing-row-predicates`, `unknown-row`, `unbound-row`, `gap-row-bound`. Each is a defect in
-the agent's plan, not in the repository: re-dispatch `live-runner` quoting the refusal message
-so it designs to the rule it broke.
+A plan that fails validation is refused by name — `shell-invocation-rejected`,
+`undeclared-command`, `undeclared-endpoint`, `inexpressible-predicate`,
+`missing-row-predicates`, `unknown-row`, `unbound-row`. A plan `DecodePlan` cannot read at
+all — malformed JSON, a `schemaVersion` other than `"1"`, no steps, or a step missing its
+`expectation` or `command` — is `plan-decode-failed`, quoting the decoder's own message. Each
+is a defect in the agent's plan, not in the repository: re-dispatch `live-runner` quoting the
+refusal message so it designs to the rule it broke.
 

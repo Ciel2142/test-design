@@ -1,11 +1,11 @@
 # Live profiles
 
-Layer 3 of `coverage-verification` runs `smoke` and `e2e` rows against a real system. A Git
-worktree isolates source, not databases, ports, brokers, or credentials, so the layer runs
-only under a **live profile**: a committed JSON document that declares, ahead of time, every
-command the walkthrough may use and every resource it may touch. The `live-runner` agent
-composes its plan from those declared commands only; the `execute-live` op refuses anything
-the profile did not declare.
+Layer 3 of `coverage-verification` runs the journeys named by the coverage source's
+`## Live decision` against a real system. A Git worktree isolates source, not databases,
+ports, brokers, or credentials, so the layer runs only under a **live profile**: a committed
+JSON document that declares, ahead of time, every command the walkthrough may use and every
+resource it may touch. The `live-runner` agent composes its plan from those declared
+commands only; the `execute-live` op refuses anything the profile did not declare.
 
 A profile is project configuration. Review it like build configuration. An agent never
 writes or amends one during verification — a missing or invalid profile ends layer 3 as
@@ -24,8 +24,10 @@ The coverage source names it in its `## Verification` block:
 ```
 
 The value is the repo-relative path; the verifier refuses one that escapes the repository.
-The key is required whenever any active row is `smoke` or `e2e`, and absent otherwise. A
-source with no such row omits the key and layer 3 reports `n/a`.
+The key is required whenever the live decision is `required`, and absent otherwise — a
+`required` decision with no live-profile is refused as `live-decision-incomplete` before
+layer 3 prepares anything. A source whose decision is `not-applicable` omits the key and
+layer 3 reports `n/a`.
 
 ## Schema
 
@@ -41,7 +43,7 @@ source with no such row omits the key and layer 3 reports `n/a`.
 | `cleanup` | `[][]string` | Commands run unconditionally at the end, whether or not `start` succeeded. Required, non-empty. |
 | `cleanupEvidence` | `[]Predicate` | Predicates evaluated against the **last** `cleanup` command's result. They are the profile author's own proof that the run left nothing behind; `cleanupOK` in the evidence is exactly whether they held. Required, non-empty. |
 | `envAllowlist` | `[]string` | Names of environment variables the commands inherit from the verifier's process. Everything else is stripped. See "Environment and secrets". |
-| `resourcePrefixes` | `[]string` | Every name or prefix the run may create. Each entry **must** contain `{run-id}`; the verifier refuses `run-id-missing-from-resources` otherwise, so two concurrent runs can never collide on a fixture. |
+| `resourcePrefixes` | `[]string` | Every name or prefix the run may create. Each entry **must** contain `{run-id}` in the committed profile, and the run ID itself once `prepare-live` has substituted it; the verifier refuses `run-id-missing-from-resources` otherwise, so two concurrent runs can never collide on a fixture. |
 | `endpoints` | `[]string` | URLs or `host:port` pairs the plan may reference. Under `local`, each must resolve to loopback. Under `ephemeral`, list what the environment exposes. May be `[]`. |
 | `timeoutSeconds` | integer, optional | Per-command start/health/walkthrough timeout; default 120 seconds. |
 | `cleanupTimeoutSeconds` | integer, optional | Independent per-command cleanup timeout; default 30 seconds, so an interrupted walkthrough does not consume cleanup's deadline. |
@@ -73,6 +75,11 @@ does not establish a row's expected behavior, even if that command exits success
 container names, scratch files, database names, queue prefixes — so cleanup can target the
 run's own residue and nothing else.
 
+`execute-live` re-reads the stored descriptor before it starts anything and sweeps the same
+fields: a `{run-id}` that survived substitution is `unresolved-run-id <field>`, where
+`<field>` is the JSON key that still carries the token. Both that refusal and the descriptor's
+other invariants surface as `descriptor-invalid`.
+
 ## What the verifier enforces on the plan
 
 `live-runner` returns a plan; `execute-live` validates it against the profile before any
@@ -85,7 +92,7 @@ process starts. A refusal names the rule broken:
 | `undeclared-endpoint` | Any token shaped like a URL or `host:port` must equal a declared endpoint or extend one with `/`, `?`, or `#`. |
 | `missing-row-predicates` | A step with SC bindings must have at least one predicate; unchecked execution cannot prove a row. |
 | `inexpressible-predicate` | A predicate outside the three forms above, a non-integer `exit-code`, or a regex that does not compile. |
-| `unbound-row` / `unknown-row` / `gap-row-bound` | Every applicable row not already a layer-1 gap must be bound by at least one step; no step may bind a row outside the applicable set or a row layer 1 already reported as a gap. |
+| `unbound-row` / `unknown-row` | Every applicable row must be bound by at least one step, rows layer 1 reported as a gap included; no step may bind a row outside the applicable set. |
 
 These are defects in the plan, not in the profile. The skill re-dispatches `live-runner`
 quoting the refusal.
@@ -191,7 +198,7 @@ Checklist before committing a profile:
 - The profile is committed. Verification runs against a clean tree, and the report is only
   reproducible from configuration that is part of the repository.
 
-`prepare-live` validates the profile before dispatch. Its refusals name the failing rule:
-`unsupported-classification`, `undeclared-endpoint`, `run-id-missing-from-resources`,
-`missing-cleanup`. Each writes `live-attempt.json` so the run continues as `PARTIAL`; fix the
-profile and rerun verification.
+`prepare-live` validates the committed profile before dispatch. Its refusals name the failing
+rule, in this order: `invalid-limits`, `unsupported-classification`, `undeclared-endpoint`,
+`run-id-missing-from-resources`, `missing-cleanup`. Each writes `live-attempt.json` so the
+run continues as `PARTIAL`; fix the profile and rerun verification.

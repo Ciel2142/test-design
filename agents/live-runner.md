@@ -16,10 +16,11 @@ and tears the environment down.
 - the live profile JSON for this repository (`start`, `health`, `walkthrough`,
   `cleanup` command lists, `cleanupEvidence`, `envAllowlist`, `resourcePrefixes`,
   `endpoints`, `classification`)
-- the applicable smoke/e2e rows (plus any derived happy/non-happy walkthroughs the
-  coverage doc implies)
+- the applicable rows the live decision names, each with its level (plus any derived
+  happy/non-happy walkthroughs the coverage doc implies)
 - the run ID
-- the layer-1 gap set — rows layer 1 already found unbound; you must never bind these
+- the layer-1 gap set — applicable rows layer 1 found with no automated test behind
+  them; you bind these like any other applicable row
 
 ## Your entire final message is the plan
 
@@ -50,8 +51,8 @@ writes your message to `<runDir>/plan.json` unchanged and passes it straight to
 `execute-live` validates structurally before starting any process. Design to these rules
 rather than discovering them from a refusal:
 
-- **`empty`** — the plan needs at least one step, and every step needs a non-empty
-  `expectation` and a non-empty `command`.
+- **`plan-decode-failed`: empty steps** — the plan needs at least one step, and every
+  step needs a non-empty `expectation` and a non-empty `command`.
   Every SC-bound step needs at least one predicate (`missing-row-predicates`);
   an unchecked command is not evidence.
 - **Commands only from the declared surface.** Every step's `command[0]` (in `steps` and
@@ -74,11 +75,13 @@ rather than discovering them from a refusal:
 - **Every step names its `scBindings`.** A step exercising a row must list that row's ID
   so the row's verdict can be attributed. An ID that is not one of the applicable rows
   you were given is **`unknown-row`**.
-- **Gap rows are never bound.** A row present in the layer-1 gap set must not appear in
-  any step's `scBindings` — doing so is **`gap-row-bound`**. Every other applicable row
-  must be bound by at least one step, or the plan is **`unbound-row`**.
-- **`unsupported`** — the plan's `schemaVersion` must be `"1"`; anything else is refused
-  before any other check runs.
+- **Every applicable row is bound.** Each row of the applicable set you were given, the
+  layer-1 gap rows among them, must appear in some step's `scBindings`, or the plan is
+  **`unbound-row`**. The gap set itself is informational: it tells you which applicable
+  rows have no automated test behind them, so the journey you design carries the whole
+  weight of the row.
+- **`plan-decode-failed`: unsupported schemaVersion** — the plan's `schemaVersion` must be
+  `"1"`; anything else is refused before any other check runs.
 
 ## Concurrency walkthroughs
 
@@ -92,9 +95,10 @@ below.
 
 ## No applicable rows
 
-If you are dispatched with no applicable rows, or every applicable row is already a
-layer-1 gap and so cannot be bound to anything, reply with the single word `N/A` instead
-of a plan document. The main thread does not call `execute-live` for that reply.
+If you are dispatched with no applicable rows — the coverage source's live decision is
+`not-applicable` — reply with the single word `N/A` instead of a plan document. The main
+thread does not call `execute-live` for that reply. A layer-1 gap is not that case: a gap
+row is applicable, and you plan it like any other.
 
 ## When a row cannot be expressed as a plan step
 
