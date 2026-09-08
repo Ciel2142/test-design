@@ -454,8 +454,8 @@ func TestExecuteLive_MissingLiveDecisionRefused(t *testing.T) {
 	if got.Code != "live-decision-incomplete" {
 		t.Errorf("error code = %q, want live-decision-incomplete", got.Code)
 	}
-	if !strings.Contains(got.Message, "missing") {
-		t.Errorf("message = %q, want it to carry the live decision's own refusal code", got.Message)
+	if !strings.Contains(got.Message, "no ## Live decision section") {
+		t.Errorf("message = %q, want the missing code's own detail, not any refusal carrying \"missing\"", got.Message)
 	}
 	if _, err := os.Stat(filepath.Join(prep.RunDir, liveEvidenceFile)); !os.IsNotExist(err) {
 		t.Error("live-evidence.json exists, want no run behind an incomplete live decision")
