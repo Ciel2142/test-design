@@ -359,6 +359,9 @@ func TestValidateUnexpectedLiveEvidenceInapplicableRow(t *testing.T) {
 func journeyedSourceInputs() *Inputs {
 	in := baseInputs()
 	in.Source.Rows[0].Level = "integration"
+	// A required decision names its target, or it is not a decision finalize
+	// may size layer 3 from.
+	in.Source.LiveProfile = ".test-design/live-profiles/local.json"
 	in.Source.LiveDecision = &coverage.LiveDecision{
 		Decision: coverage.LiveRequired,
 		Reason:   "the walkthrough is only observable against the running system",
@@ -421,6 +424,31 @@ func TestValidateLiveDecisionContradictionRefused(t *testing.T) {
 	}
 	if !strings.Contains(re.Detail, "SC-02") {
 		t.Errorf("Detail = %q, want it to name the contradicting smoke row SC-02", re.Detail)
+	}
+}
+
+// TestValidateLiveDecisionUnjourneyedLiveRowRefused holds the other half of
+// the same gate: a required decision that no design-time validator accepted is
+// refused too. Its applicable set happens to be wide enough here, but finalize
+// does not measure a document against a decision the document never completed.
+func TestValidateLiveDecisionUnjourneyedLiveRowRefused(t *testing.T) {
+	in := baseInputs()
+	in.Source.LiveProfile = ".test-design/live-profiles/local.json"
+	in.Source.LiveDecision = &coverage.LiveDecision{
+		Decision: coverage.LiveRequired,
+		Reason:   "the walkthrough is only observable against the running system",
+		Journeys: []coverage.Journey{{
+			ID:        "J-1",
+			Scenarios: []string{"SC-02"},
+			Expected:  "the walkthrough reaches the ready marker",
+		}},
+	}
+	re := wantRefusal(t, Validate(in), CodeLiveDecisionIncomplete)
+	if !strings.Contains(re.Detail, "live-row-unjourneyed") {
+		t.Errorf("Detail = %q, want it to carry the live decision's own code", re.Detail)
+	}
+	if !strings.Contains(re.Detail, "SC-03") {
+		t.Errorf("Detail = %q, want it to name the unjourneyed e2e row SC-03", re.Detail)
 	}
 }
 

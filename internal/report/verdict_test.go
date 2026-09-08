@@ -641,12 +641,16 @@ func TestComputeLayer3NotApplicableIsNA(t *testing.T) {
 func TestComputeLayer3JourneyedIntegrationRowCarriesItsLiveVerdict(t *testing.T) {
 	in := greenInputs()
 	in.Source.Rows[0].Level = "integration"
+	// The decision has to be one ValidateLiveDecision accepts, or finalize
+	// refuses it before rendering: it names its live-profile target and its
+	// journey walks the active smoke and e2e rows as well as SC-01.
+	in.Source.LiveProfile = ".test-design/live-profiles/local.json"
 	in.Source.LiveDecision = &coverage.LiveDecision{
 		Decision: coverage.LiveRequired,
 		Reason:   "the walkthrough is only observable against the running system",
 		Journeys: []coverage.Journey{{
 			ID:        "J-1",
-			Scenarios: []string{"SC-01"},
+			Scenarios: []string{"SC-01", "SC-02", "SC-03"},
 			Expected:  "the walkthrough reaches the ready marker",
 		}},
 	}
