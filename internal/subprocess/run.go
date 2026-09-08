@@ -14,13 +14,13 @@ import (
 )
 
 const (
-	SuiteTimeout = 30 * time.Minute
+	SuiteTimeout   = 30 * time.Minute
 	UtilityTimeout = 30 * time.Second
-	pipeWait = 250 * time.Millisecond
+	pipeWait       = 250 * time.Millisecond
 )
 
 var (
-	ErrTimeout = errors.New("subprocess timeout")
+	ErrTimeout     = errors.New("subprocess timeout")
 	ErrInterrupted = errors.New("subprocess interrupted")
 )
 

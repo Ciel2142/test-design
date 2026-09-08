@@ -24,7 +24,9 @@ func writeTestCapture(t *testing.T, data string) string {
 func readTestCapture(t *testing.T, path string) string {
 	t.Helper()
 	data, err := os.ReadFile(path)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	return string(data)
 }
 
@@ -385,8 +387,8 @@ func TestExecuteStepTimeoutPreservesRawAndCannotPass(t *testing.T) {
 
 func TestExecuteStepOutputLimitCountsBothStreamsOnce(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		output string
+		name      string
+		output    string
 		wantError bool
 	}{
 		{"exact combined budget", "printf 1234; printf 5678 >&2", false},
@@ -403,11 +405,17 @@ func TestExecuteStepOutputLimitCountsBothStreamsOnce(t *testing.T) {
 				t.Fatalf("error = %v, want output limit", err)
 			}
 			stdout, err := os.ReadFile(res.StdoutPath)
-			if err != nil { t.Fatal(err) }
+			if err != nil {
+				t.Fatal(err)
+			}
 			stderr, err := os.ReadFile(res.StderrPath)
-			if err != nil { t.Fatal(err) }
+			if err != nil {
+				t.Fatal(err)
+			}
 			combined, err := os.ReadFile(res.CombinedPath)
-			if err != nil { t.Fatal(err) }
+			if err != nil {
+				t.Fatal(err)
+			}
 			if len(stdout)+len(stderr) != 8 || len(combined) != 8 {
 				t.Fatalf("capture byte counts = %d+%d, combined %d", len(stdout), len(stderr), len(combined))
 			}

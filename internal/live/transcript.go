@@ -127,6 +127,14 @@ func boundedTailString(s string, limit int) string {
 	return s[len(s)-limit:]
 }
 
+// RedactionBarrierHit reports whether text carries the value of any parent env
+// var outside the allowlist. Evidence that copies text the transcript never
+// passed through — a planner's expectation, say — asks here before keeping it,
+// so one barrier governs everything a run publishes.
+func RedactionBarrierHit(text string, parentEnv []string, allowlist []string) bool {
+	return redactionBarrier(text, parentEnv, allowlist) != nil
+}
+
 // redactionBarrier fails closed when decisive contains the value of any
 // parent env var not on the allowlist. Values shorter than 6 characters are
 // skipped: a value that short (e.g. a port number) collides with ordinary

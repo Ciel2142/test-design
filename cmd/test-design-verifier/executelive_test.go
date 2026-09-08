@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -995,4 +996,358 @@ func TestExecuteLiveDisposesWorktreeAfterEvidenceWriteFailure(t *testing.T) {
 	if _, err := os.Stat(prep.WorktreePath); !os.IsNotExist(err) {
 		t.Fatalf("worktree survived post-attach error: %v", err)
 	}
+}
+
+// TestExecuteLive_SanitizedEnvOmitsUnapprovedCredential observes the child
+// environment through liveRun rather than through SanitizedEnv alone, so both
+// the projection and the call site that feeds it are covered: an unapproved
+// credential exported by the parent never reaches a live command, and an empty
+// allowlist means no variables at all rather than the parent's own set.
+// covers: SC-14
+func TestExecuteLive_SanitizedEnvOmitsUnapprovedCredential(t *testing.T) {
+	t.Setenv(liveCanaryName, liveCanaryValue)
+
+	run := newLiveRun(t.TempDir(), t.TempDir(), &live.Profile{EnvAllowlist: []string{"PATH"}})
+	run.execute(&live.Plan{Steps: []live.Step{{
+		Expectation: "the walkthrough process cannot read a non-allowlisted secret",
+		Command:     []string{"/usr/bin/printenv", liveCanaryName},
+		Predicates:  []live.Predicate{{Form: "exit-code", Value: "1"}},
+		SCBindings:  []string{"SC-1"},
+	}}})
+
+	if len(run.env) != 1 || !strings.HasPrefix(run.env[0], "PATH=") {
+		t.Errorf("run env = %v, want exactly the allowlisted PATH entry", run.env)
+	}
+	if run.verdicts["SC-1"] != verdictPass {
+		t.Errorf("verdict for SC-1 = %q, want %q: printenv must fail to find the canary",
+			run.verdicts["SC-1"], verdictPass)
+	}
+	if len(run.steps) != 1 || run.steps[0].ExitStatus != 1 {
+		t.Errorf("steps = %+v, want printenv to exit 1 for the withheld variable", run.steps)
+	}
+	assertNoCanaryUnder(t, run.runDir)
+
+	empty := newLiveRun(t.TempDir(), t.TempDir(), &live.Profile{})
+	if len(empty.env) != 0 {
+		t.Errorf("run env under an empty allowlist = %v, want no variables at all", empty.env)
+	}
+}
+
+// TestExecuteLive_MergeVerdictKeepsEarlierFailure locks the merge order a row
+// bound to several steps depends on: the worst outcome survives whichever way
+// round the steps ran, so a later success never erases an earlier failure.
+// covers: SC-16
+func TestExecuteLive_MergeVerdictKeepsEarlierFailure(t *testing.T) {
+	passing := live.Step{
+		Expectation: "the bound step meets its expectation",
+		Command:     []string{"/bin/echo", "live-run-ready"},
+		Predicates:  []live.Predicate{{Form: "exit-code", Value: "0"}},
+		SCBindings:  []string{"SC-1"},
+	}
+	failing := live.Step{
+		Expectation: "the bound step has an unmet expectation",
+		Command:     []string{"/bin/echo", "live-run-ready"},
+		Predicates:  []live.Predicate{{Form: "exit-code", Value: "7"}},
+		SCBindings:  []string{"SC-1"},
+	}
+	inconclusive := live.Step{
+		Expectation: "the bound step cannot run at all",
+		Command:     []string{"/nonexistent/live-run-step"},
+		Predicates:  []live.Predicate{{Form: "exit-code", Value: "0"}},
+		SCBindings:  []string{"SC-1"},
+	}
+
+	for _, tc := range []struct {
+		name  string
+		steps []live.Step
+		want  string
+	}{
+		{"failure then success", []live.Step{failing, passing}, verdictFail},
+		{"success then failure", []live.Step{passing, failing}, verdictFail},
+		{"failure then inconclusive", []live.Step{failing, inconclusive}, verdictFail},
+		{"inconclusive then success", []live.Step{inconclusive, passing}, verdictInconclusive},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			run := newLiveRun(t.TempDir(), t.TempDir(), &live.Profile{})
+			run.execute(&live.Plan{Steps: tc.steps})
+			if got := run.verdicts["SC-1"]; got != tc.want {
+				t.Errorf("verdict for SC-1 = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// unboundPhases renders each recorded unbound failure as the phase[index]
+// label finalize names, so a case can assert the whole list at once.
+func unboundPhases(failures []liveStepFailure) string {
+	labels := make([]string, 0, len(failures))
+	for _, f := range failures {
+		labels = append(labels, fmt.Sprintf("%s[%d]", f.Phase, f.Index))
+	}
+	return strings.Join(labels, ", ")
+}
+
+// TestLiveRunRecordsUnboundStepFailures locks the destination rule for a
+// completed failure no row verdict can carry: a plan step or plan-cleanup step
+// with no scBindings, and a bound plan-cleanup step whose verdicts were
+// suppressed because the walkthrough never ran.
+func TestLiveRunRecordsUnboundStepFailures(t *testing.T) {
+	passing := live.Step{
+		Expectation: "the bound step meets its expectation",
+		Command:     []string{"/bin/echo", "live-run-ready"},
+		Predicates:  []live.Predicate{{Form: "exit-code", Value: "0"}},
+		SCBindings:  []string{"SC-1"},
+	}
+	failingUnbound := live.Step{
+		Expectation: "the unbound assertion holds",
+		Command:     []string{"/bin/echo", "live-run-ready"},
+		Predicates:  []live.Predicate{{Form: "exit-code", Value: "7"}},
+	}
+
+	t.Run("unbound plan step", func(t *testing.T) {
+		run := newLiveRun(t.TempDir(), t.TempDir(), &live.Profile{})
+		run.execute(&live.Plan{Steps: []live.Step{passing, failingUnbound}})
+
+		if got := unboundPhases(run.unboundFailures); got != "step[2]" {
+			t.Fatalf("unbound failures = %q, want step[2]", got)
+		}
+		if got := run.unboundFailures[0].Expectation; got != failingUnbound.Expectation {
+			t.Errorf("unbound expectation = %q, want %q", got, failingUnbound.Expectation)
+		}
+		if run.verdicts["SC-1"] != verdictPass {
+			t.Errorf("verdict for SC-1 = %q, want %q beside the unbound failure",
+				run.verdicts["SC-1"], verdictPass)
+		}
+	})
+
+	t.Run("unbound plan-cleanup step", func(t *testing.T) {
+		run := newLiveRun(t.TempDir(), t.TempDir(), &live.Profile{})
+		run.execute(&live.Plan{Steps: []live.Step{passing}, Cleanup: []live.Step{failingUnbound}})
+
+		if got := unboundPhases(run.unboundFailures); got != "plan-cleanup[1]" {
+			t.Fatalf("unbound failures = %q, want plan-cleanup[1]", got)
+		}
+		if got := run.unboundFailures[0].Expectation; got != failingUnbound.Expectation {
+			t.Errorf("unbound expectation = %q, want %q", got, failingUnbound.Expectation)
+		}
+		if run.verdicts["SC-1"] != verdictPass {
+			t.Errorf("verdict for SC-1 = %q, want %q beside the unbound failure",
+				run.verdicts["SC-1"], verdictPass)
+		}
+	})
+
+	t.Run("bound plan-cleanup step after a failed start", func(t *testing.T) {
+		boundCleanup := live.Step{
+			Expectation: "the bound cleanup step removes the marker",
+			Command:     []string{"/bin/echo", "live-run-ready"},
+			Predicates:  []live.Predicate{{Form: "exit-code", Value: "7"}},
+			SCBindings:  []string{"SC-1"},
+		}
+		profile := &live.Profile{Start: [][]string{{"/bin/sh", "-c", "exit 1"}}}
+		run := newLiveRun(t.TempDir(), t.TempDir(), profile)
+		run.execute(&live.Plan{Steps: []live.Step{passing}, Cleanup: []live.Step{boundCleanup}})
+
+		if got := unboundPhases(run.unboundFailures); got != "start[1], plan-cleanup[1]" {
+			t.Fatalf("unbound failures = %q, want start[1], plan-cleanup[1]", got)
+		}
+		if len(run.steps) != 0 {
+			t.Errorf("walkthrough steps = %+v, want none after a start failure", run.steps)
+		}
+		if got, ok := run.verdicts["SC-1"]; ok {
+			t.Errorf("verdict for SC-1 = %q, want none: a cleanup step of a walkthrough that never ran proves nothing", got)
+		}
+	})
+}
+
+// TestLiveRunAccountsForFailedPhaseCommands locks the two distinct records a
+// failed start or health phase leaves: a command that completed with a nonzero
+// exit is a reduced step with result fail plus an unbound failure, while a
+// command that never completed is an execution error with neither.
+func TestLiveRunAccountsForFailedPhaseCommands(t *testing.T) {
+	bound := live.Step{
+		Expectation: "the bound step meets its expectation",
+		Command:     []string{"/bin/echo", "live-run-ready"},
+		Predicates:  []live.Predicate{{Form: "exit-code", Value: "0"}},
+		SCBindings:  []string{"SC-1"},
+	}
+
+	t.Run("start command exits nonzero", func(t *testing.T) {
+		profile := &live.Profile{Start: [][]string{{"/bin/sh", "-c", "exit 1"}}}
+		run := newLiveRun(t.TempDir(), t.TempDir(), profile)
+		run.execute(&live.Plan{Steps: []live.Step{bound}})
+
+		if len(run.startSteps) != 1 || run.startSteps[0].Result != "fail" {
+			t.Fatalf("start steps = %+v, want one recorded step with result fail", run.startSteps)
+		}
+		if got := unboundPhases(run.unboundFailures); got != "start[1]" {
+			t.Fatalf("unbound failures = %q, want start[1]", got)
+		}
+		if got := run.unboundFailures[0].Expectation; got != "profile start command 1" {
+			t.Errorf("unbound expectation = %q, want %q", got, "profile start command 1")
+		}
+		if len(run.executionErrors) != 0 {
+			t.Errorf("executionErrors = %v, want a completed failure recorded as a step, not an execution error",
+				run.executionErrors)
+		}
+	})
+
+	t.Run("start command held past the deadline", func(t *testing.T) {
+		profile := &live.Profile{TimeoutSeconds: 1, Start: [][]string{{"/bin/sh", "-c", "sleep 20"}}}
+		run := newLiveRun(t.TempDir(), t.TempDir(), profile)
+		run.execute(&live.Plan{Steps: []live.Step{bound}})
+
+		if len(run.startSteps) != 0 {
+			t.Errorf("start steps = %+v, want none for a command that never completed", run.startSteps)
+		}
+		if len(run.executionErrors) != 1 || !strings.HasPrefix(run.executionErrors[0], "start[1]: ") {
+			t.Fatalf("executionErrors = %v, want exactly one entry naming start[1]", run.executionErrors)
+		}
+		if !strings.Contains(run.executionErrors[0], "subprocess timeout") {
+			t.Errorf("executionErrors = %v, want the deadline named as the cause", run.executionErrors)
+		}
+		if got := unboundPhases(run.unboundFailures); got != "" {
+			t.Errorf("unbound failures = %q, want none: a command that never completed is not an assertion failure", got)
+		}
+	})
+}
+
+// TestLiveRunCleanupAccountingKeepsEveryFailure locks the cleanup tri-state and
+// its precedence: a known failure of any cleanup command wins, a command that
+// never completed leaves neither boolean set, and cleanupOK needs every command
+// to have completed with exit 0 and the cleanup evidence to have held.
+func TestLiveRunCleanupAccountingKeepsEveryFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		cleanup        [][]string
+		wantOK         bool
+		wantFailed     bool
+		wantIncomplete bool
+	}{
+		{
+			name:       "earlier command fails before a passing checker",
+			cleanup:    [][]string{{"/bin/sh", "-c", "exit 1"}, {"/bin/echo", "cleanup-done"}},
+			wantFailed: true,
+		},
+		{
+			name:           "earlier command never completes",
+			cleanup:        [][]string{{"/bin/sh", "-c", "sleep 20"}, {"/bin/echo", "cleanup-done"}},
+			wantIncomplete: true,
+		},
+		{
+			name:           "failure before a non-completion",
+			cleanup:        [][]string{{"/bin/sh", "-c", "exit 1"}, {"/bin/sh", "-c", "sleep 20"}, {"/bin/echo", "cleanup-done"}},
+			wantFailed:     true,
+			wantIncomplete: true,
+		},
+		{
+			name:           "non-completion before a failure",
+			cleanup:        [][]string{{"/bin/sh", "-c", "sleep 20"}, {"/bin/sh", "-c", "exit 1"}},
+			wantFailed:     true,
+			wantIncomplete: true,
+		},
+		{
+			name:    "every command completes with exit 0",
+			cleanup: [][]string{{"/bin/echo", "cleanup-done"}, {"/bin/echo", "cleanup-done"}},
+			wantOK:  true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			profile := &live.Profile{
+				CleanupTimeoutSeconds: 1,
+				Cleanup:               tc.cleanup,
+				CleanupEvidence:       []live.Predicate{{Form: "exit-code", Value: "0"}},
+			}
+			run := newLiveRun(t.TempDir(), t.TempDir(), profile)
+			run.execute(&live.Plan{Steps: []live.Step{{
+				Expectation: "the bound step meets its expectation",
+				Command:     []string{"/bin/echo", "live-run-ready"},
+				Predicates:  []live.Predicate{{Form: "exit-code", Value: "0"}},
+				SCBindings:  []string{"SC-1"},
+			}}})
+
+			if run.cleanupOK != tc.wantOK || run.cleanupFailed != tc.wantFailed {
+				t.Errorf("cleanupOK = %v, cleanupFailed = %v, want %v/%v",
+					run.cleanupOK, run.cleanupFailed, tc.wantOK, tc.wantFailed)
+			}
+			if tc.wantIncomplete && len(run.executionErrors) == 0 {
+				t.Errorf("executionErrors = none, want the cleanup command that never completed recorded")
+			}
+			if !tc.wantIncomplete && len(run.executionErrors) != 0 {
+				t.Errorf("executionErrors = %v, want none when every cleanup command completed", run.executionErrors)
+			}
+			if run.verdicts["SC-1"] != verdictPass {
+				t.Errorf("verdict for SC-1 = %q, want the walkthrough verdict kept beside the cleanup outcome",
+					run.verdicts["SC-1"])
+			}
+		})
+	}
+}
+
+// TestLiveRunWithholdsUnboundExpectationBehindRedactionBarrier locks the
+// expectation barrier: the new evidence field copies planner text, so it passes
+// the same scan the transcript does and a non-allowlisted value never reaches
+// the run's artifacts through it.
+func TestLiveRunWithholdsUnboundExpectationBehindRedactionBarrier(t *testing.T) {
+	t.Setenv(liveCanaryName, liveCanaryValue)
+
+	run := newLiveRun(t.TempDir(), t.TempDir(), &live.Profile{EnvAllowlist: []string{"PATH"}})
+	run.execute(&live.Plan{Steps: []live.Step{{
+		Expectation: "the unbound expectation quotes " + liveCanaryValue,
+		Command:     []string{"/bin/echo", "live-run-ready"},
+		Predicates:  []live.Predicate{{Form: "exit-code", Value: "7"}},
+	}}})
+
+	if got := unboundPhases(run.unboundFailures); got != "step[1]" {
+		t.Fatalf("unbound failures = %q, want step[1]: the failure is a fact independent of its text", got)
+	}
+	if got := run.unboundFailures[0].Expectation; got != "[withheld by redaction barrier]" {
+		t.Errorf("unbound expectation = %q, want it withheld", got)
+	}
+	assertNoCanaryUnder(t, run.runDir)
+}
+
+// requireEmptyArrayField fails when field is absent from the JSON document,
+// which is the shape a consumer would read as "nothing to report" only by
+// accident, or when it is present and not an empty array.
+func requireEmptyArrayField(t *testing.T, label string, data []byte, field string) {
+	t.Helper()
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("%s did not decode: %v\ndata=%s", label, err, data)
+	}
+	raw, ok := doc[field]
+	if !ok {
+		t.Fatalf("%s has no %s field, want an empty array rather than an absent one", label, field)
+	}
+	if got := strings.Join(strings.Fields(string(raw)), ""); got != "[]" {
+		t.Errorf("%s %s = %s, want []", label, field, raw)
+	}
+}
+
+// TestExecuteLive_UnboundFailuresAlwaysPresent locks the shape finalize
+// decodes: a run with nothing unbound to report still publishes the field as an
+// empty array in the evidence file and on stdout, so an absent field can never
+// stand in for a run that recorded no unbound failure.
+func TestExecuteLive_UnboundFailuresAlwaysPresent(t *testing.T) {
+	repo := liveFixtureRepo(t)
+	prep := preparedLive(t, repo, "live-unbound-empty")
+	tracePath := writeGapTraceEvidence(t, "SC-13")
+	planPath := filepath.Join(repo, filepath.FromSlash(liveFixturePlanPath))
+
+	code, stdout, stderr := runVerifyOp(t, "execute-live",
+		executeLiveRequestJSON(t, repo, prep.RunDir, planPath, tracePath))
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+	requireEmptyArrayField(t, "stdout", []byte(stdout), "unboundFailures")
+
+	var out executeLiveOutput
+	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
+		t.Fatalf("stdout did not decode: %v\nstdout=%s", err, stdout)
+	}
+	data, err := os.ReadFile(out.EvidencePath)
+	if err != nil {
+		t.Fatalf("read evidence: %v", err)
+	}
+	requireEmptyArrayField(t, "live-evidence.json", data, "unboundFailures")
 }

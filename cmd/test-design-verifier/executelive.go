@@ -40,6 +40,18 @@ type liveRowVerdict struct {
 	Layer1Gap bool `json:"layer1Gap,omitempty"`
 }
 
+// liveStepFailure names one command that completed, failed its predicates and
+// whose outcome reached no row verdict: a start or health command, a plan step
+// with no scBindings, or a plan-cleanup step with no scBindings or whose
+// verdict application was suppressed because the walkthrough never ran. Profile
+// cleanup commands are never listed here; cleanupOK and cleanupFailed carry
+// them. Expectation passes the same redaction barrier as a transcript.
+type liveStepFailure struct {
+	Phase       string `json:"phase"`
+	Index       int    `json:"index"`
+	Expectation string `json:"expectation"`
+}
+
 type liveRawArtifact struct {
 	Path   string `json:"path"`
 	SHA256 string `json:"sha256"`
@@ -60,6 +72,7 @@ type liveEvidence struct {
 	CleanupOK       bool               `json:"cleanupOK"`
 	CleanupFailed   bool               `json:"cleanupFailed"`
 	ExecutionErrors []string           `json:"executionErrors"`
+	UnboundFailures []liveStepFailure  `json:"unboundFailures"`
 	RawArtifacts    []liveRawArtifact  `json:"rawArtifacts"`
 	StartedAt       string             `json:"startedAt"`
 	FinishedAt      string             `json:"finishedAt"`
@@ -70,11 +83,12 @@ type liveEvidence struct {
 
 type executeLiveOutput struct {
 	evidence.Envelope
-	RunID         string           `json:"runID"`
-	EvidencePath  string           `json:"evidencePath"`
-	RowVerdicts   []liveRowVerdict `json:"rowVerdicts"`
-	CleanupOK     bool             `json:"cleanupOK"`
-	CleanupFailed bool             `json:"cleanupFailed"`
+	RunID           string            `json:"runID"`
+	EvidencePath    string            `json:"evidencePath"`
+	RowVerdicts     []liveRowVerdict  `json:"rowVerdicts"`
+	CleanupOK       bool              `json:"cleanupOK"`
+	CleanupFailed   bool              `json:"cleanupFailed"`
+	UnboundFailures []liveStepFailure `json:"unboundFailures"`
 }
 
 func decodeExecuteLiveRequest(op string, requestBody []byte) (*executeLiveRequest, *cliError) {
@@ -213,8 +227,9 @@ func executeLiveOp(req *executeLiveRequest, stdout io.Writer, between func()) (o
 		Steps:           run.steps,
 		CleanupSteps:    run.cleanupSteps,
 		CleanupOK:       run.cleanupOK,
-		CleanupFailed:   !run.cleanupOK,
+		CleanupFailed:   run.cleanupFailed,
 		ExecutionErrors: run.executionErrors,
+		UnboundFailures: run.unboundFailures,
 		RawArtifacts:    run.rawArtifacts,
 		StartedAt:       run.startedAt,
 		FinishedAt:      run.finishedAt,
@@ -255,12 +270,13 @@ func executeLiveOp(req *executeLiveRequest, stdout io.Writer, between func()) (o
 	}
 
 	out := executeLiveOutput{
-		Envelope:      ev.Envelope,
-		RunID:         ev.RunID,
-		EvidencePath:  evidencePath,
-		RowVerdicts:   ev.RowVerdicts,
-		CleanupOK:     ev.CleanupOK,
-		CleanupFailed: ev.CleanupFailed,
+		Envelope:        ev.Envelope,
+		RunID:           ev.RunID,
+		EvidencePath:    evidencePath,
+		RowVerdicts:     ev.RowVerdicts,
+		CleanupOK:       ev.CleanupOK,
+		CleanupFailed:   ev.CleanupFailed,
+		UnboundFailures: ev.UnboundFailures,
 	}
 	return writeStdout(stdout, out)
 }
@@ -327,14 +343,17 @@ type liveRun struct {
 	rawArtifacts    []liveRawArtifact
 	executionErrors []string
 
+	unboundFailures []liveStepFailure
+
 	verdicts map[string]string
 	barriers map[string]bool
 
-	startFailed  bool
-	healthFailed bool
-	cleanupOK    bool
-	startedAt    string
-	finishedAt   string
+	startFailed   bool
+	healthFailed  bool
+	cleanupOK     bool
+	cleanupFailed bool
+	startedAt     string
+	finishedAt    string
 }
 
 func newLiveRun(runDir, workDir string, descriptor *live.Profile) *liveRun {
@@ -349,6 +368,7 @@ func newLiveRun(runDir, workDir string, descriptor *live.Profile) *liveRun {
 		healthSteps:     []live.ReducedStep{},
 		steps:           []live.ReducedStep{},
 		cleanupSteps:    []live.ReducedStep{},
+		unboundFailures: []liveStepFailure{},
 		rawArtifacts:    []liveRawArtifact{},
 		executionErrors: []string{},
 		verdicts:        map[string]string{},
@@ -361,10 +381,14 @@ func (r *liveRun) execute(pl *live.Plan) {
 	defer func() { r.finishedAt = time.Now().UTC().Format(time.RFC3339Nano) }()
 
 	for i, argv := range r.descriptor.Start {
-		step := live.Step{Expectation: fmt.Sprintf("profile start command %d", i+1), Command: argv}
-		res, reduced, _ := r.exec("start", i+1, step)
+		step := live.Step{
+			Expectation: fmt.Sprintf("profile start command %d", i+1),
+			Command:     argv,
+			Predicates:  exitZeroPredicates(),
+		}
+		reduced, ok := r.runPhaseCommand("start", i+1, step)
 		r.startSteps = appendReduced(r.startSteps, reduced)
-		if res == nil || res.ExitStatus != 0 {
+		if !ok {
 			r.startFailed = true
 			break
 		}
@@ -372,10 +396,14 @@ func (r *liveRun) execute(pl *live.Plan) {
 
 	if !r.startFailed {
 		for i, argv := range r.descriptor.Health {
-			step := live.Step{Expectation: fmt.Sprintf("profile health command %d", i+1), Command: argv}
-			res, reduced, _ := r.exec("health", i+1, step)
+			step := live.Step{
+				Expectation: fmt.Sprintf("profile health command %d", i+1),
+				Command:     argv,
+				Predicates:  exitZeroPredicates(),
+			}
+			reduced, ok := r.runPhaseCommand("health", i+1, step)
 			r.healthSteps = appendReduced(r.healthSteps, reduced)
-			if res == nil || res.ExitStatus != 0 {
+			if !ok {
 				r.healthFailed = true
 				break
 			}
@@ -397,12 +425,43 @@ func (r *liveRun) execute(pl *live.Plan) {
 	r.runProfileCleanup()
 }
 
+// exitZeroPredicates is the expectation every profile-declared command carries
+// implicitly. A start, health or cleanup command has no plan predicates of its
+// own, and its nonzero exit is a failure rather than the pass a predicate-free
+// reduction would record.
+func exitZeroPredicates() []live.Predicate {
+	return []live.Predicate{{Form: "exit-code", Value: "0"}}
+}
+
+// runPhaseCommand executes one start or health command and reports whether the
+// phase may continue. Readiness never yields a row verdict, so a command that
+// completed and failed its expectation is recorded as an unbound failure; one
+// that never completed leaves its execution error and nothing else.
+func (r *liveRun) runPhaseCommand(phase string, index int, step live.Step) (*live.ReducedStep, bool) {
+	res, reduced, _ := r.exec(phase, index, step)
+	if res == nil {
+		return reduced, false
+	}
+	if pass, _ := live.EvaluatePredicates(step.Predicates, res); !pass {
+		r.recordUnboundFailure(phase, index, step.Expectation)
+		return reduced, false
+	}
+	return reduced, true
+}
+
 // runPlanStep executes one plan step, merging its outcome into every row it
 // binds only when applyVerdicts: a cleanup step of a walkthrough that never
-// ran proves nothing about its rows.
+// ran proves nothing about its rows. A step no row verdict can carry — no
+// bindings, or bindings whose application is suppressed — keeps its failure
+// visible through unboundFailures instead.
 func (r *liveRun) runPlanStep(phase string, index int, step live.Step, applyVerdicts bool) *live.ReducedStep {
 	res, reduced, barrier := r.exec(phase, index, step)
-	if !applyVerdicts {
+	if !applyVerdicts || len(step.SCBindings) == 0 {
+		if res != nil {
+			if pass, _ := live.EvaluatePredicates(step.Predicates, res); !pass {
+				r.recordUnboundFailure(phase, index, step.Expectation)
+			}
+		}
 		return reduced
 	}
 
@@ -423,22 +482,57 @@ func (r *liveRun) runPlanStep(phase string, index int, step live.Step, applyVerd
 	return reduced
 }
 
-// runProfileCleanup runs the descriptor's cleanup commands and evaluates
-// cleanupEvidence against the last one, so cleanupOK is the profile author's
-// own proof that the run left nothing behind.
+// runProfileCleanup runs every cleanup command the descriptor declares, each
+// under the implicit exit-code 0 and the configured last one under
+// cleanupEvidence as well, so cleanupOK is the profile author's own proof that
+// the run left nothing behind. The two booleans are a tri-state: a known
+// failure of any command outranks a command that never completed, which in turn
+// keeps cleanupOK from claiming a clean run. Neither set means the removal is
+// simply unproven, and the cause is in executionErrors.
 func (r *liveRun) runProfileCleanup() {
 	last := len(r.descriptor.Cleanup) - 1
+	completed := true
 	for i, argv := range r.descriptor.Cleanup {
-		step := live.Step{Expectation: fmt.Sprintf("profile cleanup command %d", i+1), Command: argv}
+		step := live.Step{
+			Expectation: fmt.Sprintf("profile cleanup command %d", i+1),
+			Command:     argv,
+			Predicates:  exitZeroPredicates(),
+		}
 		if i == last {
-			step.Predicates = r.descriptor.CleanupEvidence
+			// cleanupEvidence leads, so the decisive output stays the removal
+			// proof the profile author chose rather than the implicit exit.
+			step.Predicates = append(append([]live.Predicate{}, r.descriptor.CleanupEvidence...), step.Predicates...)
 		}
 		res, reduced, _ := r.exec("cleanup", i+1, step)
 		r.cleanupSteps = appendReduced(r.cleanupSteps, reduced)
-		if i == last && res != nil {
-			r.cleanupOK, _ = live.EvaluatePredicates(r.descriptor.CleanupEvidence, res)
+		if res == nil {
+			completed = false
+			continue
+		}
+		if pass, _ := live.EvaluatePredicates(step.Predicates, res); !pass {
+			r.cleanupFailed = true
 		}
 	}
+	// A profile that declares no cleanup at all proves no removal either.
+	r.cleanupOK = !r.cleanupFailed && completed && len(r.descriptor.Cleanup) > 0
+}
+
+// withheldExpectation stands in for planner text the redaction barrier refuses.
+const withheldExpectation = "[withheld by redaction barrier]"
+
+// recordUnboundFailure lists a completed failure that reached no row verdict.
+// The expectation is planner text copied into the evidence, so it passes the
+// same barrier a transcript does; the failure itself is a fact independent of
+// the text and is listed either way.
+func (r *liveRun) recordUnboundFailure(phase string, index int, expectation string) {
+	if live.RedactionBarrierHit(expectation, r.parentEnv, r.descriptor.EnvAllowlist) {
+		expectation = withheldExpectation
+	}
+	r.unboundFailures = append(r.unboundFailures, liveStepFailure{
+		Phase:       phase,
+		Index:       index,
+		Expectation: expectation,
+	})
 }
 
 // exec runs one command in the worktree with the sanitized environment. res is

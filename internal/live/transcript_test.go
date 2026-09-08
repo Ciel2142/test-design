@@ -15,8 +15,8 @@ func TestReduceTranscriptPassResult(t *testing.T) {
 		},
 	}
 	res := &StepResult{
-		ExitStatus: 0,
-		StdoutPath: writeTestCapture(t, "status: ready\n"),
+		ExitStatus:   0,
+		StdoutPath:   writeTestCapture(t, "status: ready\n"),
 		CombinedPath: writeTestCapture(t, "status: ready\n"),
 	}
 
@@ -47,8 +47,8 @@ func TestReduceTranscriptFailResult(t *testing.T) {
 		},
 	}
 	res := &StepResult{
-		ExitStatus: 0,
-		StdoutPath: writeTestCapture(t, "status: down\n"),
+		ExitStatus:   0,
+		StdoutPath:   writeTestCapture(t, "status: down\n"),
 		CombinedPath: writeTestCapture(t, "status: down\n"),
 	}
 
@@ -111,7 +111,7 @@ func TestReduceTranscriptDecisiveOutputForExitCodeIsTail(t *testing.T) {
 		Predicates:  []Predicate{{Form: "exit-code", Value: "0"}},
 	}
 	res := &StepResult{
-		ExitStatus: 0,
+		ExitStatus:   0,
 		CombinedPath: writeTestCapture(t, longOutput),
 	}
 
@@ -137,8 +137,8 @@ func TestReduceTranscriptRedactionBarrierBlocksNonAllowlistedEnvValue(t *testing
 		Predicates:  []Predicate{{Form: "exit-code", Value: "0"}},
 	}
 	res := &StepResult{
-		ExitStatus: 0,
-		CombinedPath: writeTestCapture(t, "connecting with password " + secretValue),
+		ExitStatus:   0,
+		CombinedPath: writeTestCapture(t, "connecting with password "+secretValue),
 	}
 	parentEnv := []string{secretName + "=" + secretValue, "PATH=/usr/bin"}
 	allowlist := []string{"PATH"}
@@ -165,7 +165,7 @@ func TestReduceTranscriptRedactionBarrierAllowsAllowlistedEnvValue(t *testing.T)
 		Predicates:  []Predicate{{Form: "exit-code", Value: "0"}},
 	}
 	res := &StepResult{
-		ExitStatus: 0,
+		ExitStatus:   0,
 		CombinedPath: writeTestCapture(t, "base url is http://allowed-value-here"),
 	}
 	parentEnv := []string{"BASE_URL=http://allowed-value-here"}
@@ -187,7 +187,7 @@ func TestReduceTranscriptRedactionBarrierSkipsShortValues(t *testing.T) {
 		Predicates:  []Predicate{{Form: "exit-code", Value: "0"}},
 	}
 	res := &StepResult{
-		ExitStatus: 0,
+		ExitStatus:   0,
 		CombinedPath: writeTestCapture(t, "port is 8080"),
 	}
 	parentEnv := []string{"PORT=8080", "PATH=/usr/bin"} // "8080" is 4 chars, below the 6-char floor
@@ -238,8 +238,8 @@ func TestReduceTranscriptNeverContainsCanaryValue(t *testing.T) {
 		Predicates:  []Predicate{{Form: "exit-code", Value: "0"}},
 	}
 	res := &StepResult{
-		ExitStatus: 0,
-		CombinedPath: writeTestCapture(t, "output includes " + canaryValue + " inline"),
+		ExitStatus:   0,
+		CombinedPath: writeTestCapture(t, "output includes "+canaryValue+" inline"),
 	}
 	parentEnv := []string{"CANARY_VAR=" + canaryValue}
 	allowlist := []string{}
