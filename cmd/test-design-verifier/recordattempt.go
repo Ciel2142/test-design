@@ -71,8 +71,17 @@ func recordAttemptHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer
 		if cliErr := requireLiveDecision(op, src); cliErr != nil {
 			return cliErr
 		}
-		if attempt.RowID != "" || len(live.ApplicableRows(src)) == 0 {
+		// Two different faults, two different repairs: a row-scoped attempt is
+		// the caller scoping evidence too narrowly, an empty applicable set is
+		// the document saying there is no live layer to attest to at all.
+		if attempt.RowID != "" {
 			return &cliError{Code: "no-applicable-rows", Message: op + ": live attempts apply to the whole applicable live layer, not an individual row"}
+		}
+		if len(live.ApplicableRows(src)) == 0 {
+			return &cliError{
+				Code:    "no-applicable-rows",
+				Message: fmt.Sprintf("%s: the live decision in %s is not-applicable: no row to verify live", op, src.Path),
+			}
 		}
 	} else {
 		index := slices.IndexFunc(src.Rows, func(row coverage.Row) bool { return row.ID == attempt.RowID })
