@@ -552,6 +552,34 @@ func TestComputeLiveExecutionErrorsArePartial(t *testing.T) {
 	}
 }
 
+func TestComputeLiveUnboundAssertionFailureIsBlocked(t *testing.T) {
+	in := greenInputs()
+	in.Live.UnboundFailures = []LiveStepFailure{
+		{Phase: "step", Index: 2, Expectation: "exit-code 0"},
+	}
+
+	r := mustCompute(t, in)
+
+	wantVerdict(t, r, "BLOCKED")
+	rn := wantReason(t, r, "3", "", "live-unbound-assertion-failed")
+	if !strings.Contains(rn.Detail, "step[2]") || !strings.Contains(rn.Detail, "exit-code 0") {
+		t.Errorf("reason detail = %q, want it to name step[2] and its expectation", rn.Detail)
+	}
+	if got := rowOf(t, r, "SC-02").Layer3; got != "LIVE-PASS" {
+		t.Errorf("SC-02 Layer3 = %q, want LIVE-PASS to survive an unrelated unbound failure", got)
+	}
+}
+
+func TestComputeLiveEvidenceWithoutUnboundFailuresHasNoUnboundReason(t *testing.T) {
+	in := greenInputs()
+	// in.Live.UnboundFailures stays nil, as historical evidence decodes it.
+
+	r := mustCompute(t, in)
+
+	wantVerdict(t, r, "PASS")
+	wantNoReasonCode(t, r, "live-unbound-assertion-failed")
+}
+
 func TestComputeRedactionBarrierIsPartial(t *testing.T) {
 	in := greenInputs()
 	in.Live.RowVerdicts[1].RedactionBarrier = true

@@ -328,6 +328,16 @@ func deriveLayer3(rs *reasonSet, in *Inputs, active []coverage.Row) (map[string]
 	if !in.Live.SnapshotEqual {
 		rs.add(sevBlocked, layer3, "", "snapshot-changed", "the repository changed during the live run")
 	}
+	// CleanupOK and CleanupFailed are a tri-state, not a strict inverse:
+	// CleanupFailed is true only when some profile cleanup command completed
+	// with a known failure (a nonzero exit, or the configured last command's
+	// cleanupEvidence not holding); a known failure is never cleared by a
+	// later success or masked by another command's non-completion.
+	// CleanupOK is true only when every command completed and held. When
+	// neither is true, no completed command failed, but at least one
+	// command never completed (a deadline, a cancellation, the output cap
+	// or a capture error) and its cause lives in ExecutionErrors: cleanup
+	// is unproven, not vindicated.
 	switch {
 	case in.Live.CleanupFailed:
 		rs.add(sevPartial, layer3, "", "live-cleanup-failed", "the live profile cleanup step failed")
@@ -336,6 +346,13 @@ func deriveLayer3(rs *reasonSet, in *Inputs, active []coverage.Row) (map[string]
 	}
 	if len(in.Live.ExecutionErrors) > 0 {
 		rs.add(sevPartial, layer3, "", "live-execution-errors", "%s", strings.Join(in.Live.ExecutionErrors, "; "))
+	}
+	if len(in.Live.UnboundFailures) > 0 {
+		details := make([]string, len(in.Live.UnboundFailures))
+		for i, f := range in.Live.UnboundFailures {
+			details[i] = fmt.Sprintf("%s[%d] %s", f.Phase, f.Index, f.Expectation)
+		}
+		rs.add(sevBlocked, layer3, "", "live-unbound-assertion-failed", "%s", strings.Join(details, "; "))
 	}
 
 	byRow := make(map[string]LiveRowVerdict, len(in.Live.RowVerdicts))

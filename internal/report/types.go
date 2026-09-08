@@ -61,39 +61,54 @@ type LiveRowVerdict struct {
 	RedactionBarrier bool   `json:"redactionBarrier,omitempty"`
 }
 
+// LiveStepFailure names one command that completed, failed its predicates
+// (the implicit exit-code 0 predicate on start and health), and whose
+// outcome reached no row verdict: a start or health command, a plan step
+// with no scBindings, or a plan-cleanup step with no scBindings or whose
+// verdict application was suppressed because the walkthrough never ran.
+// Profile cleanup commands are never listed here; CleanupOK/CleanupFailed
+// carry those. Expectation has already passed the redaction barrier at the
+// producer, so it is safe to surface verbatim in a finalize reason.
+type LiveStepFailure struct {
+	Phase       string `json:"phase"`
+	Index       int    `json:"index"`
+	Expectation string `json:"expectation"`
+}
+
 type LiveEvidence struct {
 	evidence.Envelope
-	RunID           string           `json:"runId"`
-	RepoCommit      string           `json:"repoCommit"`
-	Source          string           `json:"source"`
-	SourceSHA256    string           `json:"sourceSha256"`
-	RowVerdicts     []LiveRowVerdict `json:"rowVerdicts"`
-	CleanupOK       bool             `json:"cleanupOK"`
-	CleanupFailed   bool             `json:"cleanupFailed"`
-	ExecutionErrors []string         `json:"executionErrors"`
-	SnapshotEqual   bool             `json:"snapshotEqual"`
+	RunID           string            `json:"runId"`
+	RepoCommit      string            `json:"repoCommit"`
+	Source          string            `json:"source"`
+	SourceSHA256    string            `json:"sourceSha256"`
+	RowVerdicts     []LiveRowVerdict  `json:"rowVerdicts"`
+	CleanupOK       bool              `json:"cleanupOK"`
+	CleanupFailed   bool              `json:"cleanupFailed"`
+	ExecutionErrors []string          `json:"executionErrors"`
+	SnapshotEqual   bool              `json:"snapshotEqual"`
+	UnboundFailures []LiveStepFailure `json:"unboundFailures"`
 }
 
 type LiveAttempt struct {
 	evidence.Envelope
-	RunID   string `json:"runID"`
-	RepoCommit string `json:"repoCommit"`
-	Source string `json:"source"`
+	RunID        string `json:"runID"`
+	RepoCommit   string `json:"repoCommit"`
+	Source       string `json:"source"`
 	SourceSHA256 string `json:"sourceSha256"`
-	Profile string `json:"profile"`
-	Refusal string `json:"refusal"`
+	Profile      string `json:"profile"`
+	Refusal      string `json:"refusal"`
 }
 
 // Attempt is the envelope-carrying shape shared by the attempt documents a
 // refused layer-4 run leaves behind; finalize checks it before publishing one.
 type Attempt struct {
 	evidence.Envelope
-	RunID string `json:"runID"`
-	RowID string `json:"rowID"`
-	RepoCommit string `json:"repoCommit"`
-	Source string `json:"source"`
+	RunID        string `json:"runID"`
+	RowID        string `json:"rowID"`
+	RepoCommit   string `json:"repoCommit"`
+	Source       string `json:"source"`
 	SourceSHA256 string `json:"sourceSha256"`
-	Refusal string `json:"refusal"`
+	Refusal      string `json:"refusal"`
 }
 
 type MutationSiteOutcome struct {
@@ -111,9 +126,9 @@ type MutationEvidence struct {
 	evidence.Envelope
 	RunID         string                `json:"runId"`
 	RowID         string                `json:"rowID"`
-	RepoCommit string `json:"repoCommit"`
-	Source string `json:"source"`
-	SourceSHA256 string `json:"sourceSha256"`
+	RepoCommit    string                `json:"repoCommit"`
+	Source        string                `json:"source"`
+	SourceSHA256  string                `json:"sourceSha256"`
 	Sites         []MutationSiteOutcome `json:"sites"`
 	SnapshotEqual bool                  `json:"snapshotEqual"`
 }
@@ -142,15 +157,15 @@ type CriticVerdict struct {
 }
 
 type Batch struct {
-	BatchID      string          `json:"batchId"`
-	DispatchID   string          `json:"dispatchId"`
-	RunID        string          `json:"runId"`
-	Rows         []string        `json:"rows"`
-	Canary       *Canary         `json:"canary,omitempty"`
-	InheritsFrom string          `json:"inheritsFrom,omitempty"`
-	CanaryUnavailableReason string `json:"canaryUnavailableReason,omitempty"`
-	Voided       bool            `json:"voided,omitempty"`
-	Verdicts     []CriticVerdict `json:"verdicts"`
+	BatchID                 string          `json:"batchId"`
+	DispatchID              string          `json:"dispatchId"`
+	RunID                   string          `json:"runId"`
+	Rows                    []string        `json:"rows"`
+	Canary                  *Canary         `json:"canary,omitempty"`
+	InheritsFrom            string          `json:"inheritsFrom,omitempty"`
+	CanaryUnavailableReason string          `json:"canaryUnavailableReason,omitempty"`
+	Voided                  bool            `json:"voided,omitempty"`
+	Verdicts                []CriticVerdict `json:"verdicts"`
 }
 
 type MutationInput struct {
@@ -211,15 +226,15 @@ type RowReport struct {
 }
 
 type BatchReport struct {
-	BatchID      string          `json:"batchId"`
-	DispatchID   string          `json:"dispatchId"`
-	RunID        string          `json:"runId"`
-	Rows         []string        `json:"rows"`
-	Canary       *Canary         `json:"canary,omitempty"`
-	InheritsFrom string          `json:"inheritsFrom,omitempty"`
-	CanaryUnavailableReason string `json:"canaryUnavailableReason,omitempty"`
-	Voided       bool            `json:"voided"`
-	Verdicts     []CriticVerdict `json:"verdicts"`
+	BatchID                 string          `json:"batchId"`
+	DispatchID              string          `json:"dispatchId"`
+	RunID                   string          `json:"runId"`
+	Rows                    []string        `json:"rows"`
+	Canary                  *Canary         `json:"canary,omitempty"`
+	InheritsFrom            string          `json:"inheritsFrom,omitempty"`
+	CanaryUnavailableReason string          `json:"canaryUnavailableReason,omitempty"`
+	Voided                  bool            `json:"voided"`
+	Verdicts                []CriticVerdict `json:"verdicts"`
 }
 
 type TranscriptRef struct {
