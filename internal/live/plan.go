@@ -70,10 +70,10 @@ var (
 
 // Validate checks the fail-closed invariants a live plan must satisfy
 // against the profile it will run under and the coverage rows it claims to
-// exercise. applicable is already filtered by the caller to active
-// smoke/e2e rows; layer1Gaps marks rows that must not be bound because they
-// already report LIVE-N/A (layer 1 gap).
-func (pl *Plan) Validate(p *Profile, applicable []coverage.Row, layer1Gaps map[string]bool) error {
+// exercise. applicable is the caller's obligation set, normally from
+// ApplicableRows; every row in it must be bound by some step, gap rows
+// included, and no step may bind a row outside it.
+func (pl *Plan) Validate(p *Profile, applicable []coverage.Row) error {
 	declared := declaredCommands(p)
 	applicableIDs := make(map[string]bool, len(applicable))
 	for _, row := range applicable {
@@ -113,17 +113,11 @@ func (pl *Plan) Validate(p *Profile, applicable []coverage.Row, layer1Gaps map[s
 			if !applicableIDs[id] {
 				return fmt.Errorf("live plan: unknown-row %s", id)
 			}
-			if layer1Gaps[id] {
-				return fmt.Errorf("live plan: gap-row-bound %s (LIVE-N/A layer 1 gap)", id)
-			}
 			bound[id] = true
 		}
 	}
 
 	for _, row := range applicable {
-		if layer1Gaps[row.ID] {
-			continue
-		}
 		if !bound[row.ID] {
 			return fmt.Errorf("live plan: unbound-row %s", row.ID)
 		}

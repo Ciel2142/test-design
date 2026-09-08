@@ -211,7 +211,7 @@ func TestValidateRefusesBoundStepWithoutPredicates(t *testing.T) {
 		} else {
 			pl.Steps = append(pl.Steps, bound)
 		}
-		err := pl.Validate(profile, []coverage.Row{{ID: "SC-1"}}, nil)
+		err := pl.Validate(profile, []coverage.Row{{ID: "SC-1"}})
 		if err == nil || !strings.Contains(err.Error(), "missing-row-predicates") {
 			t.Fatalf("cleanup=%v: Validate() = %v, want missing-row-predicates", cleanup, err)
 		}
@@ -225,7 +225,7 @@ func TestValidateAllowsUnboundPredicateFreeSetupAndExplicitNonzero(t *testing.T)
 		{Expectation: "expected refusal", Command: []string{"/usr/bin/false"}, SCBindings: []string{"SC-1"},
 			Predicates: []Predicate{{Form: "exit-code", Value: "1"}}},
 	}}
-	if err := pl.Validate(profile, []coverage.Row{{ID: "SC-1"}}, nil); err != nil {
+	if err := pl.Validate(profile, []coverage.Row{{ID: "SC-1"}}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -236,10 +236,11 @@ func TestValidateAcceptsWellFormedPlan(t *testing.T) {
 		Steps: []Step{
 			rowStep([]string{"./scripts/walk.sh"}, []string{"SC-1"}),
 			rowStep([]string{"./scripts/start.sh"}, []string{"SC-2"}),
+			rowStep([]string{"./scripts/health.sh"}, []string{"SC-3"}),
 		},
 	}
 
-	if err := pl.Validate(planProfile(), applicableRows(), map[string]bool{"SC-3": true}); err != nil {
+	if err := pl.Validate(planProfile(), applicableRows()); err != nil {
 		t.Errorf("Validate() = %v, want nil", err)
 	}
 }
@@ -248,14 +249,14 @@ func TestValidateAcceptsBindingViaCleanupStep(t *testing.T) {
 	pl := &Plan{
 		SchemaVersion: evidence.SchemaVersion,
 		Steps: []Step{
-			rowStep([]string{"./scripts/walk.sh"}, []string{"SC-1"}),
+			rowStep([]string{"./scripts/walk.sh"}, []string{"SC-1", "SC-3"}),
 		},
 		Cleanup: []Step{
 			rowStep([]string{"./scripts/cleanup.sh"}, []string{"SC-2"}),
 		},
 	}
 
-	if err := pl.Validate(planProfile(), applicableRows(), map[string]bool{"SC-3": true}); err != nil {
+	if err := pl.Validate(planProfile(), applicableRows()); err != nil {
 		t.Errorf("Validate() = %v, want nil (cleanup step binds SC-2)", err)
 	}
 }
@@ -271,10 +272,10 @@ func TestValidateAcceptsCommandDeclaredViaAnyProfileArray(t *testing.T) {
 			pl := &Plan{
 				SchemaVersion: evidence.SchemaVersion,
 				Steps: []Step{
-					rowStep(cmd, []string{"SC-1", "SC-2"}),
+					rowStep(cmd, []string{"SC-1", "SC-2", "SC-3"}),
 				},
 			}
-			if err := pl.Validate(planProfile(), applicableRows(), map[string]bool{"SC-3": true}); err != nil {
+			if err := pl.Validate(planProfile(), applicableRows()); err != nil {
 				t.Errorf("Validate() = %v, want nil for declared command %v", err, cmd)
 			}
 		})
@@ -296,7 +297,7 @@ func TestValidateInexpressiblePredicateBadForm(t *testing.T) {
 		},
 	}
 
-	err := pl.Validate(planProfile(), applicableRows(), map[string]bool{"SC-3": true})
+	err := pl.Validate(planProfile(), applicableRows())
 	if err == nil {
 		t.Fatal("Validate() returned nil error, want inexpressible-predicate")
 	}
@@ -323,7 +324,7 @@ func TestValidateInexpressiblePredicateBadStream(t *testing.T) {
 		},
 	}
 
-	err := pl.Validate(planProfile(), applicableRows(), map[string]bool{"SC-3": true})
+	err := pl.Validate(planProfile(), applicableRows())
 	if err == nil {
 		t.Fatal("Validate() returned nil error, want inexpressible-predicate")
 	}
@@ -350,7 +351,7 @@ func TestValidateInexpressiblePredicateNonIntegerExitCode(t *testing.T) {
 		},
 	}
 
-	err := pl.Validate(planProfile(), applicableRows(), map[string]bool{"SC-3": true})
+	err := pl.Validate(planProfile(), applicableRows())
 	if err == nil {
 		t.Fatal("Validate() returned nil error, want inexpressible-predicate")
 	}
@@ -377,7 +378,7 @@ func TestValidateInexpressiblePredicateExitCodeWithStream(t *testing.T) {
 		},
 	}
 
-	err := pl.Validate(planProfile(), applicableRows(), map[string]bool{"SC-3": true})
+	err := pl.Validate(planProfile(), applicableRows())
 	if err == nil {
 		t.Fatal("Validate() returned nil error, want inexpressible-predicate (exit-code takes no stream)")
 	}
@@ -404,7 +405,7 @@ func TestValidateInexpressiblePredicateBadRegex(t *testing.T) {
 		},
 	}
 
-	err := pl.Validate(planProfile(), applicableRows(), map[string]bool{"SC-3": true})
+	err := pl.Validate(planProfile(), applicableRows())
 	if err == nil {
 		t.Fatal("Validate() returned nil error, want inexpressible-predicate")
 	}
@@ -420,11 +421,11 @@ func TestValidateUndeclaredCommand(t *testing.T) {
 	pl := &Plan{
 		SchemaVersion: evidence.SchemaVersion,
 		Steps: []Step{
-			rowStep([]string{"./scripts/unknown.sh"}, []string{"SC-1", "SC-2"}),
+			rowStep([]string{"./scripts/unknown.sh"}, []string{"SC-1", "SC-2", "SC-3"}),
 		},
 	}
 
-	err := pl.Validate(planProfile(), applicableRows(), map[string]bool{"SC-3": true})
+	err := pl.Validate(planProfile(), applicableRows())
 	if err == nil {
 		t.Fatal("Validate() returned nil error, want undeclared-command")
 	}
@@ -440,11 +441,11 @@ func TestValidateUndeclaredEndpointURL(t *testing.T) {
 	pl := &Plan{
 		SchemaVersion: evidence.SchemaVersion,
 		Steps: []Step{
-			rowStep([]string{"./scripts/walk.sh", "http://198.51.100.7:9000/check"}, []string{"SC-1", "SC-2"}),
+			rowStep([]string{"./scripts/walk.sh", "http://198.51.100.7:9000/check"}, []string{"SC-1", "SC-2", "SC-3"}),
 		},
 	}
 
-	err := pl.Validate(planProfile(), applicableRows(), map[string]bool{"SC-3": true})
+	err := pl.Validate(planProfile(), applicableRows())
 	if err == nil {
 		t.Fatal("Validate() returned nil error, want undeclared-endpoint")
 	}
@@ -460,11 +461,11 @@ func TestValidateUndeclaredEndpointBareHostPort(t *testing.T) {
 	pl := &Plan{
 		SchemaVersion: evidence.SchemaVersion,
 		Steps: []Step{
-			rowStep([]string{"./scripts/walk.sh", "198.51.100.7:9000"}, []string{"SC-1", "SC-2"}),
+			rowStep([]string{"./scripts/walk.sh", "198.51.100.7:9000"}, []string{"SC-1", "SC-2", "SC-3"}),
 		},
 	}
 
-	err := pl.Validate(planProfile(), applicableRows(), map[string]bool{"SC-3": true})
+	err := pl.Validate(planProfile(), applicableRows())
 	if err == nil {
 		t.Fatal("Validate() returned nil error, want undeclared-endpoint")
 	}
@@ -480,11 +481,11 @@ func TestValidateLoopbackEndpointStillMustBeDeclared(t *testing.T) {
 	pl := &Plan{
 		SchemaVersion: evidence.SchemaVersion,
 		Steps: []Step{
-			rowStep([]string{"./scripts/walk.sh", "http://127.0.0.1:9999"}, []string{"SC-1", "SC-2"}),
+			rowStep([]string{"./scripts/walk.sh", "http://127.0.0.1:9999"}, []string{"SC-1", "SC-2", "SC-3"}),
 		},
 	}
 
-	err := pl.Validate(planProfile(), applicableRows(), map[string]bool{"SC-3": true})
+	err := pl.Validate(planProfile(), applicableRows())
 	if err == nil {
 		t.Fatal("Validate() returned nil error, want undeclared-endpoint even for loopback token")
 	}
@@ -500,11 +501,11 @@ func TestValidateAcceptsDeclaredEndpointWithPathSuffix(t *testing.T) {
 	pl := &Plan{
 		SchemaVersion: evidence.SchemaVersion,
 		Steps: []Step{
-			rowStep([]string{"./scripts/walk.sh", "http://127.0.0.1:8099/health"}, []string{"SC-1", "SC-2"}),
+			rowStep([]string{"./scripts/walk.sh", "http://127.0.0.1:8099/health"}, []string{"SC-1", "SC-2", "SC-3"}),
 		},
 	}
 
-	if err := pl.Validate(planProfile(), applicableRows(), map[string]bool{"SC-3": true}); err != nil {
+	if err := pl.Validate(planProfile(), applicableRows()); err != nil {
 		t.Errorf("Validate() = %v, want nil for declared endpoint with path suffix", err)
 	}
 }
@@ -513,11 +514,11 @@ func TestValidateUndeclaredEndpointRejectsNumericallyAdjacentPort(t *testing.T) 
 	pl := &Plan{
 		SchemaVersion: evidence.SchemaVersion,
 		Steps: []Step{
-			rowStep([]string{"./scripts/walk.sh", "http://127.0.0.1:80990/foo"}, []string{"SC-1", "SC-2"}),
+			rowStep([]string{"./scripts/walk.sh", "http://127.0.0.1:80990/foo"}, []string{"SC-1", "SC-2", "SC-3"}),
 		},
 	}
 
-	err := pl.Validate(planProfile(), applicableRows(), map[string]bool{"SC-3": true})
+	err := pl.Validate(planProfile(), applicableRows())
 	if err == nil {
 		t.Fatal("Validate() returned nil error, want undeclared-endpoint (8099 is a string-prefix of 80990, not a boundary match)")
 	}
@@ -533,11 +534,11 @@ func TestValidateShellInvocationRejectedBareShellWithDashC(t *testing.T) {
 	pl := &Plan{
 		SchemaVersion: evidence.SchemaVersion,
 		Steps: []Step{
-			rowStep([]string{"bash", "-c", "echo hi"}, []string{"SC-1", "SC-2"}),
+			rowStep([]string{"bash", "-c", "echo hi"}, []string{"SC-1", "SC-2", "SC-3"}),
 		},
 	}
 
-	err := pl.Validate(planProfile(), applicableRows(), map[string]bool{"SC-3": true})
+	err := pl.Validate(planProfile(), applicableRows())
 	if err == nil {
 		t.Fatal("Validate() returned nil error, want shell rejection")
 	}
@@ -550,11 +551,11 @@ func TestValidateShellInvocationRejectedShellByPathWithDashC(t *testing.T) {
 	pl := &Plan{
 		SchemaVersion: evidence.SchemaVersion,
 		Steps: []Step{
-			rowStep([]string{"/bin/sh", "-c", "echo hi"}, []string{"SC-1", "SC-2"}),
+			rowStep([]string{"/bin/sh", "-c", "echo hi"}, []string{"SC-1", "SC-2", "SC-3"}),
 		},
 	}
 
-	err := pl.Validate(planProfile(), applicableRows(), map[string]bool{"SC-3": true})
+	err := pl.Validate(planProfile(), applicableRows())
 	if err == nil {
 		t.Fatal("Validate() returned nil error, want shell rejection")
 	}
@@ -567,11 +568,11 @@ func TestValidateShellInvocationRejectedSingleElementWithWhitespace(t *testing.T
 	pl := &Plan{
 		SchemaVersion: evidence.SchemaVersion,
 		Steps: []Step{
-			rowStep([]string{"./scripts/walk.sh arg1"}, []string{"SC-1", "SC-2"}),
+			rowStep([]string{"./scripts/walk.sh arg1"}, []string{"SC-1", "SC-2", "SC-3"}),
 		},
 	}
 
-	err := pl.Validate(planProfile(), applicableRows(), map[string]bool{"SC-3": true})
+	err := pl.Validate(planProfile(), applicableRows())
 	if err == nil {
 		t.Fatal("Validate() returned nil error, want shell rejection")
 	}
@@ -588,7 +589,7 @@ func TestValidateUnknownRowBinding(t *testing.T) {
 		},
 	}
 
-	err := pl.Validate(planProfile(), applicableRows(), map[string]bool{"SC-3": true})
+	err := pl.Validate(planProfile(), applicableRows())
 	if err == nil {
 		t.Fatal("Validate() returned nil error, want unknown-row")
 	}
@@ -600,23 +601,21 @@ func TestValidateUnknownRowBinding(t *testing.T) {
 	}
 }
 
-func TestValidateGapRowBindingRejected(t *testing.T) {
+// A row layer 1 reported as a gap is an ordinary applicable row here: the plan
+// is expected to bind it and run it, and its real verdict is what layer 3
+// reports. The gap keeps blocking the branch through layer 1, not through a
+// refusal to plan the row.
+func TestValidateAcceptsGapRowBinding(t *testing.T) {
 	pl := &Plan{
 		SchemaVersion: evidence.SchemaVersion,
 		Steps: []Step{
-			rowStep([]string{"./scripts/walk.sh"}, []string{"SC-3"}),
+			rowStep([]string{"./scripts/walk.sh"}, []string{"SC-1", "SC-2"}),
+			rowStep([]string{"./scripts/start.sh"}, []string{"SC-3"}),
 		},
 	}
 
-	err := pl.Validate(planProfile(), applicableRows(), map[string]bool{"SC-3": true})
-	if err == nil {
-		t.Fatal("Validate() returned nil error, want gap row binding rejected")
-	}
-	if !strings.Contains(err.Error(), "SC-3") {
-		t.Errorf("error = %q, want it to name the offending row", err.Error())
-	}
-	if !strings.Contains(err.Error(), "layer 1 gap") {
-		t.Errorf("error = %q, want it to mention the layer 1 gap", err.Error())
+	if err := pl.Validate(planProfile(), applicableRows()); err != nil {
+		t.Errorf("Validate() = %v, want nil (a layer-1 gap row binds like any other)", err)
 	}
 }
 
@@ -628,7 +627,7 @@ func TestValidateUnboundApplicableRow(t *testing.T) {
 		},
 	}
 
-	err := pl.Validate(planProfile(), applicableRows(), map[string]bool{"SC-3": true})
+	err := pl.Validate(planProfile(), applicableRows())
 	if err == nil {
 		t.Fatal("Validate() returned nil error, want unbound-row")
 	}
@@ -640,7 +639,9 @@ func TestValidateUnboundApplicableRow(t *testing.T) {
 	}
 }
 
-func TestValidateSkipsUnboundGapRow(t *testing.T) {
+// SC-3 stands for the row layer 1 reported as a gap. It used to be exempt from
+// the unbound sweep; leaving it unbound is now a refusal like any other.
+func TestValidateUnboundGapRow(t *testing.T) {
 	pl := &Plan{
 		SchemaVersion: evidence.SchemaVersion,
 		Steps: []Step{
@@ -649,7 +650,14 @@ func TestValidateSkipsUnboundGapRow(t *testing.T) {
 		},
 	}
 
-	if err := pl.Validate(planProfile(), applicableRows(), map[string]bool{"SC-3": true}); err != nil {
-		t.Errorf("Validate() = %v, want nil (SC-3 is a layer-1 gap, exempt from unbound-row)", err)
+	err := pl.Validate(planProfile(), applicableRows())
+	if err == nil {
+		t.Fatal("Validate() returned nil error, want unbound-row for the gap row SC-3")
+	}
+	if !strings.Contains(err.Error(), "unbound-row") {
+		t.Errorf("error = %q, want it to contain unbound-row", err.Error())
+	}
+	if !strings.Contains(err.Error(), "SC-3") {
+		t.Errorf("error = %q, want it to name the offending row", err.Error())
 	}
 }
