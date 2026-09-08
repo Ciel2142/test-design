@@ -401,10 +401,75 @@ Baseline: a1b2c3d · 1 passed, 0 failed, 0 skipped
 	}
 }
 
+// TestPreflightHandler_JourneyedIntegrationRowCountsInLayer3 locks the
+// approval gate to the same layer-3 obligation the live ops carry: the count
+// is the applicable set the live decision declares, so an integration row a
+// required journey names is part of it even though no level filter would
+// select it.
+func TestPreflightHandler_JourneyedIntegrationRowCountsInLayer3(t *testing.T) {
+	dir := t.TempDir()
+	coverageDir := filepath.Join(dir, "docs", "superpowers", "coverage")
+	if err := os.MkdirAll(coverageDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	source := filepath.Join(coverageDir, "2026-08-26-journeyed-integration-coverage.md")
+	content := `# Coverage: journeyed-integration
+
+Spec: docs/superpowers/specs/2026-08-26-journeyed-integration-design.md
+Baseline: a1b2c3d · 2 passed, 0 failed, 0 skipped
+
+## Verification
+
+- runner-kind: go-test-json
+- runner-root: .
+- runner-command: ["go", "test"]
+- report-globs: []
+- baseline-evidence: docs/superpowers/coverage/2026-08-26-journeyed-integration-baseline.json
+- baseline-sha256: abc123
+- live-profile: .test-design/live-profiles/local.json
+- final-command: ["/verify"]
+
+## Live decision
+
+- decision: required
+- reason: the checkout walkthrough is only observable on a deployed revision
+
+| Journey | Scenarios | Expected |
+|---|---|---|
+| J-1 | SC-01, SC-02 | the order appears in the deployed ledger |
+
+## Scenarios
+
+| ID | Behavior | Expected | Level | Verification mutation | Risk |
+|----|----------|----------|-------|------------------------|------|
+| SC-01 | the ledger records the accepted order | one ledger row per order | integration | write skipped | med |
+| SC-02 | the deployed revision answers the health probe | 200 returned | smoke | probe route dropped | med |
+`
+	if err := os.WriteFile(source, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"preflight", "--repo", dir, "--source", source}, nil, &stdout, &stderr)
+
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d; stderr=%s", code, exitOK, stderr.String())
+	}
+	got := decodePreflight(t, &stdout)
+
+	if got.Layers.Layer3 != 2 {
+		t.Errorf("Layers.Layer3 = %d, want 2 (journeyed SC-01 integration plus SC-02 smoke)", got.Layers.Layer3)
+	}
+	if got.Layers.Layer1 != 2 || got.Layers.Layer2 != 2 {
+		t.Errorf("Layers = %+v, want layer1 2 and layer2 2 unchanged by the live decision", got.Layers)
+	}
+}
+
 // TestPreflightHandler_RequiredDecisionEmitsJourneysAndRequiresProfile locks
-// that LiveProfileRequired is derived from the decision, not from layer 3:
-// this document has no smoke or e2e row at all (layer3 == 0) yet its decision
-// is required (its journey cites a unit row), so LiveProfileRequired is true.
+// that LiveProfileRequired is derived from the decision, not from a row's
+// level: this document has no smoke or e2e row at all, yet its decision is
+// required (its journey cites a unit row), so LiveProfileRequired is true and
+// that journeyed unit row is the whole of layer 3.
 func TestPreflightHandler_RequiredDecisionEmitsJourneysAndRequiresProfile(t *testing.T) {
 	dir := t.TempDir()
 	coverageDir := filepath.Join(dir, "docs", "superpowers", "coverage")
@@ -455,8 +520,8 @@ Baseline: a1b2c3d · 1 passed, 0 failed, 0 skipped
 	}
 	got := decodePreflight(t, &stdout)
 
-	if got.Layers.Layer3 != 0 {
-		t.Errorf("Layers.Layer3 = %d, want 0 (no smoke or e2e row in this document)", got.Layers.Layer3)
+	if got.Layers.Layer3 != 1 {
+		t.Errorf("Layers.Layer3 = %d, want 1 (the journeyed unit row SC-01, no smoke or e2e row in this document)", got.Layers.Layer3)
 	}
 	if !got.LiveProfileRequired {
 		t.Errorf("LiveProfileRequired = false, want true (decision required, even with no smoke/e2e row)")

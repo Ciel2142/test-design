@@ -9,6 +9,7 @@ import (
 
 	"test-design/internal/coverage"
 	"test-design/internal/evidence"
+	"test-design/internal/live"
 )
 
 type runnerOutput struct {
@@ -80,7 +81,7 @@ func preflightHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer) *c
 		return &cliError{Code: "live-decision-incomplete", Message: fmt.Sprintf("preflight: %v", err)}
 	}
 
-	layers, highRisk := computeLayers(src.Rows, src.Retired)
+	layers, highRisk := computeLayers(src)
 
 	journeys := make([]liveJourneyOutput, 0, len(src.LiveDecision.Journeys))
 	for _, j := range src.LiveDecision.Journeys {
@@ -146,27 +147,29 @@ func repoRelative(repoRoot, sourcePath string) (string, *cliError) {
 	return filepath.ToSlash(rel), nil
 }
 
-func computeLayers(rows []coverage.Row, retired []string) (layerCounts, int) {
-	retiredSet := make(map[string]bool, len(retired))
-	for _, id := range retired {
+// computeLayers sizes the four layers the approval gate quotes. Layers 1, 2
+// and 4 follow the active rows; layer 3 is live.ApplicableRows, the same set
+// the live ops obligate, so a row a required journey names is counted whatever
+// its level says.
+func computeLayers(src *coverage.Source) (layerCounts, int) {
+	retiredSet := make(map[string]bool, len(src.Retired))
+	for _, id := range src.Retired {
 		retiredSet[id] = true
 	}
 
 	var lc layerCounts
 	highRisk := 0
-	for _, r := range rows {
+	for _, r := range src.Rows {
 		if retiredSet[r.ID] {
 			continue
 		}
 		lc.Layer1++
 		lc.Layer2++
-		if r.Level == "smoke" || r.Level == "e2e" {
-			lc.Layer3++
-		}
 		if r.Risk == "high" {
 			lc.Layer4++
 			highRisk++
 		}
 	}
+	lc.Layer3 = len(live.ApplicableRows(src))
 	return lc, highRisk
 }
