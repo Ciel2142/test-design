@@ -63,8 +63,15 @@ func writeDispatchInputs(src *coverage.Source, ev *traceEvidence, suiteDir, runD
 		bindings[result.RowID] = result
 	}
 	gaps := make(map[string]string)
+	reds := make(map[string]bool)
 	for _, finding := range ev.Findings {
-		if finding.RowID != "" && (finding.Kind == "gap" || finding.Kind == "ambiguity") {
+		if finding.RowID == "" {
+			continue
+		}
+		switch finding.Kind {
+		case "red":
+			reds[finding.RowID] = true
+		case "gap", "ambiguity":
 			gaps[finding.RowID] = finding.Kind
 		}
 	}
@@ -100,11 +107,13 @@ func writeDispatchInputs(src *coverage.Source, ev *traceEvidence, suiteDir, runD
 				})
 			}
 		}
-		// A row-bound gap or ambiguity names the row's status. It never
-		// removes the source: a row that has a binding still hands the critic
-		// its primary contributor's declaration, and only a row with no bound
-		// site is sourceless.
-		if gap, ok := gaps[row.ID]; ok {
+		// A row-bound gap or ambiguity names the row's status, unless a red
+		// finding names the same row: the report ranks a row's findings red
+		// over gap over ambiguity, and one row must not be red there and gap
+		// here. It never removes the source: a row that has a binding still
+		// hands the critic its primary contributor's declaration, and only a
+		// row with no bound site is sourceless.
+		if gap, ok := gaps[row.ID]; ok && !reds[row.ID] {
 			entry.Status = gap
 		}
 		payload.Rows = append(payload.Rows, entry)

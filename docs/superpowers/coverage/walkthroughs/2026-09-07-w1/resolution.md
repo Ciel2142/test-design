@@ -133,7 +133,7 @@ SC-05's rationale line was not questioned, as the key expects.
 Fourteen previous findings answered, each exactly once. `RESOLVED`: DROP SC-09, DROP SC-10, DROP
 SC-13, REWRITE SC-14, REWRITE SC-15, the three `ReserveBatch` ADDs (now SC-16, SC-17, SC-18) and
 the LIVE clause — every seed hit and every applied unseeded finding was confirmed against the
-amended rows with evidence (`file:line` for the rewrites and ADDs; the Retired section for the DROPs). `OPEN`: REWRITE SC-07 (the author's rejection is not
+amended rows with evidence (`file:line` for the ADDs; the Retired section for the DROPs). `OPEN`: REWRITE SC-07 (the author's rejection is not
 visible to the recheck, as the design intends, so it goes to the human with its consequence: a
 USD or GBP dropped from the switch survives the row) and the four escalations, each restated
 against the amended draft; the `covers:` escalation grew sharper (retired SC-09/SC-10 still bound

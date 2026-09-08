@@ -492,3 +492,86 @@ func TestTraceWithholdsCreditForSkippedContributor(t *testing.T) {
 		}
 	}
 }
+
+// redOverGapSource binds one row to two contributors that each withhold
+// credit differently: the first fails, the second skips. The row collapses to
+// failed while both a red and a gap finding name it.
+const redOverGapSource = `package precedenceproof
+
+import "testing"
+
+// covers: SC-01
+func TestFailingArm(t *testing.T) {
+	t.Fatal("seeded failure: SC-01's failing contributor")
+}
+
+// covers: SC-01
+func TestSkippedArm(t *testing.T) {
+	t.Skip("SC-01's other contributor never reaches its assertion")
+}
+`
+
+const redOverGapRows = `| SC-01 | a failed contributor outranks a skipped one | the row is named red everywhere | unit | the failing arm's assertion removed | low |
+`
+
+func TestTraceDispatchKeepsFailedRowsRedBesideAGap(t *testing.T) {
+	repo, coverageSource := buildTraceCreditRepo(t, "precedenceproof", redOverGapSource,
+		`["go", "test", "-count=1", "-json", "./..."]`, redOverGapRows)
+	out, ev, payload := runTraceCredit(t, repo, coverageSource, "red-over-gap")
+
+	result := mustRowResult(t, ev, "SC-01")
+	if result.Status != "failed" {
+		t.Errorf("SC-01: status = %q, want failed: a failing contributor dominates a skipped one", result.Status)
+	}
+	if got := contributorNames(result.Contributors); len(got) != 2 ||
+		got[0] != "TestFailingArm" || got[1] != "TestSkippedArm" {
+		t.Fatalf("SC-01: contributors = %v, want both citing tests in file order", got)
+	}
+	wantFinding(t, ev, "red", "SC-01", "TestFailingArm")
+	wantFinding(t, ev, "gap", "SC-01", "TestSkippedArm")
+
+	// The row carries both findings, and the red one settles its status: the
+	// gap must not talk the dispatch inputs down from failed.
+	row := mustDispatchRow(t, payload, "SC-01")
+	if row.Status != "failed" {
+		t.Errorf("SC-01: dispatch status = %q, want failed: red outranks the gap beside it", row.Status)
+	}
+
+	// The report reads the same findings and must name the same state.
+	src, cliErr := loadVerifiedSource("trace", repo, coverageSource)
+	if cliErr != nil {
+		t.Fatalf("load coverage source: %s", cliErr.Message)
+	}
+	head, cliErr := headCommit("trace", repo)
+	if cliErr != nil {
+		t.Fatalf("head commit: %s", cliErr.Message)
+	}
+	tr, err := report.LoadTrace(out.EvidencePath)
+	if err != nil {
+		t.Fatalf("load trace evidence: %v", err)
+	}
+	computed, err := report.Compute(&report.Inputs{
+		Source:     src,
+		RunID:      ev.RunID,
+		HeadCommit: head,
+		Trace:      tr,
+		Freshness:  report.Freshness{Result: "fresh"},
+		Batches: []report.Batch{{
+			BatchID: "batch-1", DispatchID: "dispatch-1", RunID: ev.RunID,
+			Rows:                    []string{"SC-01"},
+			CanaryUnavailableReason: "no critic runs in this layer-1 proof",
+			Verdicts: []report.CriticVerdict{
+				{RowID: "SC-01", Verdict: "MISSING", Reason: "layer-1 red"},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("compute report: %v", err)
+	}
+	if len(computed.Rows) != 1 {
+		t.Fatalf("report rows = %+v, want the single active row", computed.Rows)
+	}
+	if got := computed.Rows[0].Layer1.Status; got != "red" {
+		t.Errorf("SC-01: layer-1 status = %q, want red", got)
+	}
+}

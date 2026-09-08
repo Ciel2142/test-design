@@ -140,11 +140,18 @@ func parseLiveDecisionSection(path string, lines []string, blocks []tableBlock) 
 
 	var journeys []Journey
 	if journeyBlock != nil {
+		seenJourney := make(map[string]bool, len(journeyBlock.rows))
 		for _, r := range journeyBlock.rows {
 			journey, err := parseJourneyRow(path, r)
 			if err != nil {
 				return nil, err
 			}
+			// Journeys are the single live selection source, keyed by id
+			// downstream: a repeated id would silently drop a walkthrough.
+			if seenJourney[journey.ID] {
+				return nil, fmt.Errorf("parse source %s: journey row at line %d: duplicate id %q", path, r.line, journey.ID)
+			}
+			seenJourney[journey.ID] = true
 			journeys = append(journeys, journey)
 		}
 	}
@@ -184,7 +191,8 @@ func parseJourneyRow(path string, r tableRow) (Journey, error) {
 // contradiction, journeys-missing, journey-unknown-row, live-row-unjourneyed,
 // target-missing — and nil for a justified not-applicable decision or a
 // complete required one. An absent or incomplete decision is never defaulted
-// to not-applicable.
+// to not-applicable, and a Decision value outside {required, not-applicable}
+// is reported as missing.
 func ValidateLiveDecision(src *Source) error {
 	var path string
 	if src != nil {
@@ -250,6 +258,13 @@ func ValidateLiveDecision(src *Source) error {
 		if strings.TrimSpace(src.LiveProfile) == "" {
 			return &LiveDecisionError{Path: path, Code: "target-missing", Detail: "decision required while the ## Verification key \"live-profile\" is absent or empty"}
 		}
+	}
+
+	// The parser rejects any other decision value, so only a hand-built
+	// Source reaches here with one. It is as incomplete as an absent section
+	// and never passes as a decision.
+	if decision.Decision != LiveRequired && decision.Decision != LiveNotApplicable {
+		return &LiveDecisionError{Path: path, Code: "missing", Detail: fmt.Sprintf("decision %q is neither %s nor %s", decision.Decision, LiveRequired, LiveNotApplicable)}
 	}
 
 	return nil

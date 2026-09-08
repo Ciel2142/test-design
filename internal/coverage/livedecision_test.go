@@ -204,6 +204,11 @@ func TestParseSourceLiveDecisionMalformedFormsFailClosed(t *testing.T) {
 			offending: "| J-1 | SC-01 |",
 		},
 		{
+			name:      "journey id repeats",
+			section:   "- decision: required\n\n| Journey | Scenarios | Expected |\n|---|---|---|\n| J-1 | SC-01 | first |\n| J-1 | SC-01 | second |",
+			offending: "| J-1 | SC-01 | second |",
+		},
+		{
 			name:      "second journeys table",
 			section:   "- decision: required\n\n| Journey | Scenarios | Expected |\n|---|---|---|\n| J-1 | SC-01 | first |\n\n| Journey | Scenarios | Expected |\n|---|---|---|\n| J-2 | SC-01 | second |",
 			offending: "| J-2 | SC-01 | second |",
@@ -353,6 +358,15 @@ func TestValidateLiveDecisionReturnsTheFirstCodeInOrder(t *testing.T) {
 			src: &Source{
 				Path: "doc.md",
 				Rows: []Row{{ID: "SC-02", Level: "e2e"}},
+			},
+			wantCode: "missing",
+		},
+		{
+			name: "a decision value outside the two known forms is missing",
+			src: &Source{
+				Path:         "doc.md",
+				Rows:         []Row{{ID: "SC-02", Level: "e2e"}},
+				LiveDecision: &LiveDecision{Decision: "maybe", Reason: "the author typed a third word"},
 			},
 			wantCode: "missing",
 		},
