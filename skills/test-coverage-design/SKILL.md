@@ -82,8 +82,9 @@ no persistence. Appending the coverage source to the spec instead."
    [references/sweep-axes.md](references/sweep-axes.md). Emit candidates.
 4. **Prune.** Each survivor names one distinct code-level mutation. Cannot name one →
    delete. Same mutation twice → merge, retire the loser's ID.
-5. **Derive risk** per [references/risk-derivation.md](references/risk-derivation.md).
-   Never judge it; argue down only with recorded user approval.
+5. **Derive risk** per [references/risk-derivation.md](references/risk-derivation.md), from
+   the consequence of the failure and never from the subject matter; argue down only with
+   recorded user approval.
 6. **Assign level** per [references/level-assignment.md](references/level-assignment.md).
    Cheapest level that catches the mutation; axis 5 rows are `integration`+, axis 11 rows
    are `component`+.
@@ -91,34 +92,39 @@ no persistence. Appending the coverage source to the spec instead."
 8. **Record ruled-out axes** per behavior, each citing a spec fact or a code fact.
 9. **Extract invariants** — properties holding across all scenarios, `INV-n`.
 10. **List out-of-scope** items, each with a reason.
-11. **Write the `## Verification` block** (see [below](#verification-block)) naming the
-    runner, its command, report globs, the baseline evidence path, and — when any row is
-    `smoke` or `e2e` — the live profile.
-12. **Capture the baseline**, in two commits (see [below](#baseline-capture)).
-13. Present to the user, get approval, write and commit.
+11. **Author the live decision** (see [below](#live-decision)). `not-applicable` states the
+    reason layer 3 does not apply; `required` carries a journeys table whose rows name active
+    IDs and a result observable on the deployed revision. Every active `smoke` or `e2e` row
+    is a live obligation and appears in at least one journey.
+12. **Get an independent scenario review** (see [below](#independent-scenario-review)):
+    dispatch `scenario-reviewer` in `review` mode, resolve every finding it returns, then
+    recheck exactly once. Nothing reaches the user before this.
+13. **Write the `## Verification` block** (see [below](#verification-block)) naming the
+    runner, its command, report globs, the baseline evidence path, and — when the live
+    decision is `required` — the live profile.
+14. **Capture the baseline**, in two commits (see [below](#baseline-capture)).
+15. Present to the user: the cost summary line, then every finding still `OPEN` or
+    `NEW GAP` with its consequence. Get approval, write and commit.
 
-## The existing suite is not an input
+## Existing tests are candidates, not proof
 
-Rows come from the spec sweep. **Do not survey the tests that already exist** — no
-inspection of the test tree for a behavior before sweeping it, no row pruned or downgraded
-because something that looks like it appears to be covered already. Step 12 runs the
-baseline suite, but only to record which tests were already failing; that baseline is a
-failure list, not a coverage survey, and it never feeds the pruning rule in step 4.
+Read the implementation, the tests, the fixtures and the test infrastructure while you draft.
+Knowing what a test asserts and what a harness can already reach makes rows sharper and
+harness hints real, and the scenario reviewer grounds its own findings in that same tree.
 
-An existing test proves something is exercised. It does not prove this row's `Verification
-mutation` would be caught, and at design time nobody can tell the difference by reading it —
-that is the exact judgment layers 2 and 4 exist to make, by verdicting the test against the
-named mutation and by applying that mutation to the source. Deleting a row on inspection
-buys the answer without the measurement, and the cost is asymmetric: the row is gone, its ID
-was never issued, and no later layer can report on a row that does not exist. A redundant
-row, the other way around, is one merge in step 4 or one `## Retired` line at amendment.
+What the reading may not do is decide the table. Rows come from the approved requirements: a
+behavior the requirements owe gets a row whether or not something that looks like it already
+exists. No row is pruned, merged away, or downgraded on the grounds that a test exists — at
+design time nobody can tell by reading whether that test would catch this row's
+`Verification mutation`, and the cost of guessing wrong is asymmetric: the row is gone, its
+ID was never issued, and no later layer can report on a row that does not exist. A redundant
+row, the other way around, is one merge during pruning or one `## Retired` line at amendment.
 
-Reconciliation is post-factum by design. `coverage-verification` layer 1 binds each `covers:
-SC-nn` tag to its declaration through Go's parser and AST, or the JVM token scanner, never
-by searching for the literal tag text — so an already-written test that does cover a row is
-credited by tagging it, no new test needed, and layers 2 and 4 then verdict it like any
-other. That happens with the code in front of it and a mutation to apply, which is when the
-question is actually answerable.
+An existing test earns credit exactly as a new one does, and only that way: it carries a
+`covers:` tag, it executes in the verification run, and layer 2's critic verdicts it against
+the row it claims. Tagging an already-written test is the whole cost of crediting it — no new
+test is needed — and the judgment then happens with the code in front of the critic and a
+mutation to apply, which is when the question is actually answerable.
 
 ## Row schema
 
@@ -172,8 +178,10 @@ verifier. Required keys:
 | `final-command` | The exact explicit final-verification command, as a JSON array: `["/test-design:coverage-verification", "<repo-relative path to this document>"]` |
 
 Optional key `live-profile` names a committed profile at
-`.test-design/live-profiles/<name>.json`, repo-relative. It is required whenever any row is
-`smoke` or `e2e` — those levels are what makes layer 3 applicable — and absent otherwise.
+`.test-design/live-profiles/<name>.json`, repo-relative. It is required whenever the
+[live decision](#live-decision) is `required` — that decision is what makes layer 3
+applicable, and layer 3 needs an approved profile to dispatch against — and absent when the
+decision is `not-applicable`. Without it, `preflight` refuses `target-missing`.
 
 Runner rules:
 
@@ -205,6 +213,97 @@ Changing runner kind, root, command, or report globs after approval is a coverag
 amendment requiring user approval; when the change alters which tests run or how their
 identities are emitted, baseline evidence must be regenerated at the same baseline commit
 before final verification.
+
+## Live decision
+
+One section states whether layer 3 applies to this feature and what it runs. The verifier
+parses it, and `preflight` refuses `live-decision-incomplete` when it is absent or
+incomplete, so this is a schema, not prose:
+
+```text
+## Live decision
+
+- decision: required            (or: not-applicable)
+- reason: <text>                (mandatory for not-applicable; optional otherwise)
+
+| Journey | Scenarios | Expected |
+|---|---|---|
+| J-1 | SC-10, SC-11 | <observable result on the deployed selected revision> |
+```
+
+- `decision` takes exactly `required` or `not-applicable`.
+- `reason` is mandatory for `not-applicable` — say what about this feature puts nothing on a
+  deployed surface — and optional for `required`.
+- The journeys table belongs to a `required` decision and must be absent from a
+  `not-applicable` one.
+- `Journey` is `J-n`. `Scenarios` is a comma-separated list of active IDs from this document.
+  `Expected` names a result observable on the deployed selected revision — a response, a
+  stored record, a delivered message — never internal state nobody can see from outside.
+- Non-bullet, non-table prose inside the section is ignored by the parser. The table header
+  must read exactly `Journey | Scenarios | Expected`; any other header is ignored, and a
+  table carrying only a header row counts as no table at all. Both read as `journeys-missing`
+  rather than as a pointer at the malformed table.
+
+`preflight` names exactly one code for the first fault it finds:
+
+| Code | Cause |
+|---|---|
+| `missing` | no `## Live decision` section |
+| `reason-missing` | `not-applicable` without a reason |
+| `contradiction` | `not-applicable` while an active row is `smoke` or `e2e`, or `not-applicable` with a journeys table |
+| `journeys-missing` | `required` with no usable journeys table |
+| `journey-unknown-row` | a journey cites an ID that is not an active row of this document |
+| `live-row-unjourneyed` | an active `smoke` or `e2e` row appears in no journey |
+| `target-missing` | `required` while `## Verification` carries no `live-profile` |
+
+A `smoke` or `e2e` row is a live obligation for as long as it is active: no journey may leave
+one out, and a decision of `not-applicable` cannot stand next to one. Journeys may also name
+`unit` or `integration` rows they happen to exercise on the way through — that costs the row
+nothing and does not relabel it.
+
+## Independent scenario review
+
+The author of a table is its worst judge. Before the user sees the draft, hand it to
+[`scenario-reviewer`](../../agents/scenario-reviewer.md), which reads the repository but
+holds no edit tool: it returns findings and never touches the table. A reviewer that can
+repair a row will repair it and then pass it, which destroys the signal.
+
+Dispatch it with four things — the approved requirements, the draft coverage source, the
+repository root, and `mode: review`. It answers with one block per finding — `MERGE`, `DROP`,
+`REWRITE`, `ADD`, `RISK <id> <from>→<to>`, `LIVE`, `ESCALATE` — and one closing line,
+measured on the draft as handed over, before any finding is applied:
+
+```text
+COUNTS scenarios=<n> high=<n> journeys=<n>
+```
+
+Resolve every finding yourself. Each one ends in exactly one of three states: **applied**,
+**rejected** with the reason it does not hold, or **escalated** to the user with the concrete
+consequence of settling it the other way. Only a factual or product-scope disagreement is
+escalated; ordinary cleanup is applied or rejected.
+
+Then dispatch it once more with the amended draft and its own previous findings, and
+`mode: recheck`. It answers each previous finding `RESOLVED`, `OPEN`, or `NEW GAP`, and
+reviews the amended rows. **There is exactly one recheck.** Anything still `OPEN` or
+`NEW GAP` after it goes to the user at approval, each with its concrete consequence; the
+user decides, and there is no further round.
+
+Record the round in a `## Review record` section of the coverage source:
+
+- the reviewer instruction revision — the commit SHA of `agents/scenario-reviewer.md` and its
+  `git hash-object agents/scenario-reviewer.md` digest — so a later reader knows which
+  instructions produced these findings;
+- the findings as returned;
+- the resolution of each: applied, rejected with the reason, or escalated.
+
+Nothing else. No scenario-signature table: the record says what was reviewed and what came of
+it, not a digest of every row.
+
+At approval, show the user what the table commits them to, mirroring the reviewer's counts:
+
+```text
+Cost: <n> surviving scenarios, <n> high-risk obligations, <n> live journeys
+```
 
 ## Baseline capture
 
@@ -259,9 +358,13 @@ artifact. Use it for structure, never as the scope of a new feature.
 
 ## Size discipline
 
-Smallest set naming distinct mutations. Typical feature: 8–25 rows **after pruning**. If
-more than roughly forty survive, the spec covers too much — return to the decomposition
-check in `superpowers:brainstorming` rather than writing a plan nobody finishes.
+The smallest set of rows naming distinct mutations. A typical feature lands at 8–25 rows
+**after pruning**.
+
+More than forty surviving rows triggers a focused redundancy and scope review: look hardest
+at near-duplicate rows, and at rows tracing to no approved requirement. Forty is neither a
+cap nor a target — a feature that genuinely owes fifty distinct behaviors gets fifty rows —
+and splitting the table across two documents reduces no cost, it only hides it.
 
 ## Amendment
 
@@ -288,11 +391,19 @@ does not need migration context.
 - [ ] Every behavior group has a `Ruled out:` line citing spec or code facts
 - [ ] Axis 5 rule-outs name the absent shared resource
 - [ ] Every `Verification mutation` is a mutation, not a negated `Expected`
-- [ ] Risk derived by rule; every argue-down carries a recorded approval line
+- [ ] Risk derived from consequence; every `high` outside the four always-`high`
+      consequences carries its `Risk rationale:` line; every argue-down carries a recorded
+      approval line
 - [ ] Axis 5 rows `integration`+; axis 11 rows `component`+
 - [ ] Harness hints on `integration`, `component`, `smoke`, `e2e` rows
 - [ ] Invariants and out-of-scope both present
-- [ ] `## Verification` block present, `live-profile` set when any row is `smoke`/`e2e`
+- [ ] `## Live decision` complete: `not-applicable` carries its reason; `required` carries
+      journeys naming active IDs, observable results, and every active `smoke`/`e2e` row
+- [ ] `scenario-reviewer` dispatched in `review` mode and rechecked exactly once
+- [ ] `## Review record` present: instruction revision, findings, one resolution each
+- [ ] Cost summary line shown to the user, with any finding still `OPEN` or `NEW GAP`
+- [ ] `## Verification` block present, `live-profile` set when the live decision is
+      `required`
 - [ ] Baseline captured through the two-commit protocol; `Baseline:` line and
       `baseline-sha256` carry the printed sha and counts, not `pending`
 - [ ] Artifact committed to the target repo, not the plugin repo
@@ -350,14 +461,15 @@ a token scanner for Java and Kotlin — never by searching for the tag's literal
 placement rule above is exact, not advisory: a tag separated from its declaration by
 executable syntax, or above an unsupported declaration form, does not bind.
 
-A test may cite at most two active IDs without an `overclaim` finding. More than 2 IDs on
-one test is an `overclaim` finding at verification: the test must then carry a distinct,
-separately-nameable assertion per cited row, and layer 2 verdicts each row against its own.
-Two is where that stops being routine — a row and its boundary case legitimately share one
-test; a third row usually means the rows should have been merged in the source, or the test
-split. `overclaim` blocks the branch while **unresolved**, and it is resolved either by
-layer 2 verdicting every cited row against a named assertion, or by merging or splitting so
-the tag drops to two. Do not read it as advisory.
+A test may cite any number of active IDs; the count alone is never a finding. What each cited
+row needs is its own identifiable assertion inside that test — layer 2's critic verdicts
+every cited row separately, against the assertion that claims it, so a row resting on nothing
+nameable fails there rather than at the tag.
+
+Credit runs the other way too: several tests may contribute to one row, and every tagged site
+that binds to it is one of its contributors. Each contributor carries its own execution
+evidence. A contributor that was skipped, or whose test never ran, is that row's `gap`; a
+contributor that failed is that row's `red` — whatever the row's other contributors did.
 
 Citing SC-IDs in the plan alone is not enough: `coverage-verification` layer 1 binds tags in
 test source, not the plan, so an untagged test reads as a `gap` even when the plan cited the

@@ -36,7 +36,11 @@ After the feature spec is approved, invoke:
 That invocation opts the feature into both stages:
 
 1. `test-coverage-design` creates approved SC rows. Its floor rule keeps a small feature's
-   coverage source inline in the spec; larger features use a dedicated coverage doc.
+   coverage source inline in the spec; larger features use a dedicated coverage doc. Before
+   the user approves the draft, it goes to the read-only `scenario-reviewer` agent for one
+   review and exactly one recheck, and the source records a `## Live decision`: `required`,
+   naming the journeys layer 3 will run over the deployed system, or `not-applicable` with
+   the reason it does not apply.
 2. `writing-plans` cites those SC IDs and requires matching `covers: SC-nn` tags on tests.
    Its lifecycle contract: the initial test run against untouched production code is
    either **TDD RED** (fails, as expected) or **ALREADY-GREEN** (passes, and returns to

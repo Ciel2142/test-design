@@ -1,11 +1,27 @@
 # Risk derivation
 
-`Risk` is **derived by rule, never judged**. It takes exactly `low`, `med`, or `high`.
+`Risk` follows the **consequence of the failure, never the subject matter of the code**. It
+takes exactly `low`, `med`, or `high`.
 
 ## The rule
 
-- Rows on axes **3 (failure paths), 4 (idempotency/retry), 5 (concurrency), 6 (auth)** are `high`.
-- Any row whose mutation names **data loss, data corruption, or exposure** is `high`.
+- Always `high`: a **security-boundary violation**, **data loss or corruption**, an
+  **irreversible external side effect**, a **harmful shared-state failure**. A row whose
+  failure does one of these is `high` whichever axis produced it.
+- Any other `high` carries an impact rationale of its own, on a line under the behavior
+  group's table, naming what the failure does to someone:
+
+  ```
+  Risk rationale: SC-nn high — <impact>
+  ```
+
+  The scenario reviewer checks that the line exists and that it names a consequence rather
+  than a topic. A `high` without one comes back as a `RISK` finding.
+- Membership in an axis, a module, or a subsystem never sets `high` by itself. Axes 3, 4, 5
+  and 6 are where the four consequences usually live, which makes them a place to look, not
+  a verdict.
+- Risk whose consequence is unknown is not downgraded to save the verification it would cost.
+  Put the doubt to the user rather than resolving it downward.
 - Everything else is `med`, or `low` where the failure is purely cosmetic.
 
 ## Why it is not a judgment call
@@ -17,7 +33,8 @@ fires. A human reviewing a twenty-row table audits scenarios, not risk labels, s
 notices. Under context pressure this is not even deliberate; it is the path of least
 friction.
 
-Deriving from the axis removes the discretion that makes that possible.
+Deriving from the consequence, and writing that consequence down where a reviewer reads it,
+removes the discretion that makes this possible.
 
 ## Argue-down protocol
 
@@ -36,10 +53,15 @@ low-stakes") is not a shared reason. One explicit user approval covers the whole
    When the batch spans behavior groups, record the same line under each group it covers:
 
 ```
-Risk argued down: SC-07, SC-09 high→med — axis 4 rows, but both endpoints are pure reads
-with no write path, so a duplicate call has no side effect to be idempotent about. Approved
-by user.
+Risk argued down: SC-07, SC-09 high→med — both endpoints are pure reads with no write path,
+so a duplicate call corrupts nothing, loses nothing, and crosses no boundary. Approved by
+user.
 ```
 
 An argue-down with no recorded approval line is invalid; verification treats the row as
 `high` — including a row omitted from a batch's approval line.
+
+Once the user has approved the source, a downgrade is an **amendment**: state the row, the
+consequence rule it was `high` under, and why that consequence does not occur; get the user's
+approval again; record it. The agent that later verifies the row may never lower its
+obligations — it measures them.

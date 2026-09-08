@@ -15,7 +15,20 @@ truthful than the unit test.
 | `e2e` | a full path across services | slowest, most fragile |
 
 Rows at `integration`, `component`, `smoke`, or `e2e` need a harness hint: environment,
-fixtures, what is touched. Layer 3 executes the `smoke` and `e2e` rows.
+fixtures, what is touched.
+
+## Levels and the live decision
+
+Layer 3 does not execute rows one at a time. It executes the journeys of the coverage
+source's `## Live decision`, and a journey observes whichever rows it names.
+
+A `smoke` or `e2e` row is a live obligation for as long as it is active: every one of them
+appears in at least one journey, and a `not-applicable` decision cannot stand while one
+exists.
+
+A journey may also exercise `unit` or `integration` rows on its way through, and naming them
+in its `Scenarios` cell records that it does. It does not relabel them — each keeps the
+cheapest level that catches its mutation, and keeps being covered by its own test.
 
 ## Concurrency exception
 
