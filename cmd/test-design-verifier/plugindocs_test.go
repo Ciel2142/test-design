@@ -185,4 +185,7 @@ func TestPluginDocs_ExampleCoverageDocParses(t *testing.T) {
 	if len(src.Rows) == 0 {
 		t.Errorf("ParseSource(%s) returned zero active rows, want at least one", path)
 	}
+	if err := coverage.ValidateLiveDecision(src); err != nil {
+		t.Errorf("ValidateLiveDecision(%s) = %v, want no error", path, err)
+	}
 }
