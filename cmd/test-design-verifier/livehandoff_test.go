@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"test-design/internal/coverage"
 	"test-design/internal/evidence"
 	"test-design/internal/live"
 	"test-design/internal/report"
@@ -20,7 +19,6 @@ import (
 const (
 	handoffCoverageSource = "docs/superpowers/coverage/2026-09-07-live-handoff-coverage.md"
 	handoffProfilePath    = ".test-design/live-profiles/handoff-local.json"
-	handoffBaselineRunID  = "handoff-baseline"
 
 	// SC-01 is the subject row its own tagged test cites; SC-02 is the row no
 	// test cites, so layer 1 reports it as a gap while a journey still names it.
@@ -118,115 +116,25 @@ const handoffProfile = `{
 }
 `
 
-// handoffSubject is the temporary repository the proofs run against, at the
-// clean commit every op in the pipeline must agree on.
-type handoffSubject struct {
-	repo string
-	head string
+// newHandoffSubject names the file set this file's proofs run against and hands
+// it to the shared builder, which commits it, runs the real baseline op and
+// freezes HEAD.
+func newHandoffSubject(t *testing.T) *liveSubject {
+	t.Helper()
+	return newLiveSubject(t, handoffCoverageSource, handoffProfilePath, []map[string]string{{
+		"go.mod":                  handoffGoMod,
+		"handoff/handoff.go":      handoffSource,
+		"handoff/handoff_test.go": handoffTestSource,
+		handoffCoverageSource:     handoffCoverageDoc,
+		handoffProfilePath:        handoffProfile,
+	}}, nil)
 }
 
-func writeSubjectFile(t *testing.T, repo, relPath, content string) {
-	t.Helper()
-	path := filepath.Join(repo, filepath.FromSlash(relPath))
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatalf("mkdir for %s: %v", relPath, err)
-	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatalf("write %s: %v", relPath, err)
-	}
-}
-
-func rewriteHandoffDoc(t *testing.T, repo string, replace func(string) string) {
-	t.Helper()
-	path := filepath.Join(repo, filepath.FromSlash(handoffCoverageSource))
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read subject coverage doc: %v", err)
-	}
-	if err := os.WriteFile(path, []byte(replace(string(data))), 0o644); err != nil {
-		t.Fatalf("write subject coverage doc: %v", err)
-	}
-}
-
-// newHandoffSubject builds the subject repository and runs the real baseline
-// op against it, so the trace that follows compares against a verified
-// baseline and reports baselineStatus ok rather than a PARTIAL condition.
-func newHandoffSubject(t *testing.T) *handoffSubject {
-	t.Helper()
-	isolateEnv(t)
-	repo := t.TempDir()
-
-	writeSubjectFile(t, repo, "go.mod", handoffGoMod)
-	writeSubjectFile(t, repo, "handoff/handoff.go", handoffSource)
-	writeSubjectFile(t, repo, "handoff/handoff_test.go", handoffTestSource)
-	writeSubjectFile(t, repo, handoffCoverageSource, handoffCoverageDoc)
-	writeSubjectFile(t, repo, handoffProfilePath, handoffProfile)
-
-	mustGit(t, repo, "init", "-q")
-	mustGit(t, repo, "add", "-A")
-	mustGit(t, repo, "commit", "-q", "-m", "live handoff subject")
-	baselineCommit := strings.TrimSpace(mustGit(t, repo, "rev-parse", "HEAD"))
-	rewriteHandoffDoc(t, repo, func(s string) string {
-		return strings.ReplaceAll(s, "BASELINE_COMMIT", baselineCommit)
-	})
-	mustGit(t, repo, "add", "-A")
-	mustGit(t, repo, "commit", "-q", "-m", "pin baseline commit")
-
-	code, stdout, stderr := runVerifyOp(t, "baseline", handoffRequestJSON(t, repo, handoffBaselineRunID))
-	if code != exitOK {
-		t.Fatalf("baseline exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
-	}
-	var baseOut baselineOutput
-	if err := json.Unmarshal([]byte(stdout), &baseOut); err != nil {
-		t.Fatalf("baseline stdout did not decode: %v\nstdout=%s", err, stdout)
-	}
-	// The baseline op leaves its published evidence untracked; committing it
-	// together with the pinned digest returns the subject to a clean HEAD.
-	rewriteHandoffDoc(t, repo, func(s string) string {
-		return strings.ReplaceAll(s, "BASELINE_SHA256", baseOut.EvidenceSHA256)
-	})
-	mustGit(t, repo, "add", "-A")
-	mustGit(t, repo, "commit", "-q", "-m", "pin baseline evidence")
-
-	return &handoffSubject{repo: repo, head: strings.TrimSpace(mustGit(t, repo, "rev-parse", "HEAD"))}
-}
-
-func handoffRequestJSON(t *testing.T, repo, runID string) string {
-	t.Helper()
-	body, err := json.Marshal(map[string]string{
-		"schemaVersion":  evidence.SchemaVersion,
-		"repoRoot":       repo,
-		"coverageSource": handoffCoverageSource,
-		"runID":          runID,
-	})
-	if err != nil {
-		t.Fatalf("marshal request: %v", err)
-	}
-	return string(body)
-}
-
-func handoffExecuteRequestJSON(t *testing.T, repo, runDir, planPath, tracePath string) string {
-	t.Helper()
-	body, err := json.Marshal(map[string]string{
-		"schemaVersion":  evidence.SchemaVersion,
-		"repoRoot":       repo,
-		"coverageSource": handoffCoverageSource,
-		"runDir":         runDir,
-		"plan":           planPath,
-		"traceEvidence":  tracePath,
-	})
-	if err != nil {
-		t.Fatalf("marshal request: %v", err)
-	}
-	return string(body)
-}
-
-// handoffPlanPath writes the plan the live-runner would hand to execute-live:
-// one step per journey row, each command drawn from the profile's declared set
-// and each row carrying a predicate that settles it.
-func handoffPlanPath(t *testing.T, runID string) string {
-	t.Helper()
-	return writePlanFile(t, map[string]any{
+// handoffPlan is the plan the live-runner would hand to execute-live: one step
+// per journey row, each command drawn from the profile's declared set and each
+// row carrying a predicate that settles it.
+func handoffPlan(runID string) map[string]any {
+	return map[string]any{
 		"schemaVersion": evidence.SchemaVersion,
 		"steps": []map[string]any{
 			{
@@ -245,145 +153,14 @@ func handoffPlanPath(t *testing.T, runID string) string {
 				"scBindings":  []string{handoffGapRow},
 			},
 		},
-	})
-}
-
-// runHandoffLive drives trace, prepare-live and execute-live over the subject
-// under one run ID, the way the workflow does, and fails on any refusal so a
-// regression surfaces with the op's own error code.
-func runHandoffLive(t *testing.T, s *handoffSubject, runID string) (traceOutput, prepareLiveOutput, executeLiveOutput) {
-	t.Helper()
-
-	code, stdout, stderr := runVerifyOp(t, "trace", handoffRequestJSON(t, s.repo, runID))
-	if code != exitOK {
-		t.Fatalf("trace exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
 	}
-	tr := decodeTraceOutput(t, stdout)
-	if tr.BaselineStatus != "ok" {
-		t.Fatalf("trace baselineStatus = %q, want ok", tr.BaselineStatus)
-	}
-
-	code, stdout, stderr = runVerifyOp(t, "prepare-live", handoffRequestJSON(t, s.repo, runID))
-	if code != exitOK {
-		t.Fatalf("prepare-live exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
-	}
-	var prep prepareLiveOutput
-	if err := json.Unmarshal([]byte(stdout), &prep); err != nil {
-		t.Fatalf("prepare-live stdout did not decode: %v\nstdout=%s", err, stdout)
-	}
-
-	code, stdout, stderr = runVerifyOp(t, "execute-live",
-		handoffExecuteRequestJSON(t, s.repo, prep.RunDir, handoffPlanPath(t, runID), tr.EvidencePath))
-	if code != exitOK {
-		t.Fatalf("execute-live exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
-	}
-	var exec executeLiveOutput
-	if err := json.Unmarshal([]byte(stdout), &exec); err != nil {
-		t.Fatalf("execute-live stdout did not decode: %v\nstdout=%s", err, stdout)
-	}
-	return tr, prep, exec
-}
-
-// layer2ForSubject reuses the bookkeeping shape the e2e finalize proof builds —
-// one caught synthesized canary, its row re-dispatched alone against the real
-// source, the rest inheriting the catch, gap rows MISSING — and stamps this
-// run's own id, which staleness validation ties every batch to.
-func layer2ForSubject(runID string, active []coverage.Row, gaps map[string]bool) []report.Batch {
-	batches := layer2FromTrace(active, gaps)
-	for i := range batches {
-		batches[i].RunID = runID
-	}
-	return batches
-}
-
-// handoffFinalizeRequestJSON assembles the finalize request around the evidence
-// the pipeline actually produced: the trace file, the layer-2 verdicts it
-// implies, and the live evidence path execute-live wrote.
-func handoffFinalizeRequestJSON(t *testing.T, s *handoffSubject, runID, tracePath, livePath string) string {
-	t.Helper()
-	src, cliErr := loadVerifiedSource("finalize", s.repo, handoffCoverageSource)
-	if cliErr != nil {
-		t.Fatalf("loadVerifiedSource: %v", cliErr)
-	}
-	tr, err := report.LoadTrace(tracePath)
-	if err != nil {
-		t.Fatalf("LoadTrace: %v", err)
-	}
-	active := report.ActiveRows(src)
-	gaps := report.Layer1Gaps(tr)
-	if !gaps[handoffGapRow] {
-		t.Fatalf("trace gaps = %v, want the untested row %s reported as a layer-1 gap", gaps, handoffGapRow)
-	}
-
-	body, err := json.Marshal(finalizeRequestJSON{
-		SchemaVersion:  evidence.SchemaVersion,
-		RepoRoot:       s.repo,
-		CoverageSource: handoffCoverageSource,
-		RunID:          runID,
-		finalizeRequestBody: finalizeRequestBody{
-			Approval:      finalizeApproval,
-			TraceEvidence: tracePath,
-			Freshness:     report.Freshness{Result: "fresh"},
-			Layer2:        finalizeLayer2{Batches: layer2ForSubject(runID, active, gaps)},
-			Layer3:        &finalizeLayer3{EvidencePath: livePath},
-		},
-	})
-	if err != nil {
-		t.Fatalf("marshal finalize request: %v", err)
-	}
-	return string(body)
-}
-
-func readPublishedReport(t *testing.T, repo, jsonPath string) *report.Report {
-	t.Helper()
-	data, err := os.ReadFile(filepath.Join(repo, filepath.FromSlash(jsonPath)))
-	if err != nil {
-		t.Fatalf("read published report: %v", err)
-	}
-	var rep report.Report
-	if err := json.Unmarshal(data, &rep); err != nil {
-		t.Fatalf("decode published report: %v", err)
-	}
-	return &rep
-}
-
-func publishedRow(t *testing.T, rep *report.Report, rowID string) report.RowReport {
-	t.Helper()
-	for _, row := range rep.Rows {
-		if row.RowID == rowID {
-			return row
-		}
-	}
-	t.Fatalf("report rows = %+v, want an entry for %s", rep.Rows, rowID)
-	return report.RowReport{}
-}
-
-func publishedTranscript(t *testing.T, rep *report.Report, path string) report.TranscriptRef {
-	t.Helper()
-	for _, ref := range rep.Transcripts {
-		if ref.Path == path {
-			return ref
-		}
-	}
-	t.Fatalf("report transcripts = %+v, want an entry for %s", rep.Transcripts, path)
-	return report.TranscriptRef{}
-}
-
-func requireReason(t *testing.T, reasons []report.Reason, layer, rowID, code string) {
-	t.Helper()
-	for _, r := range reasons {
-		if r.Layer == layer && r.RowID == rowID && r.Code == code {
-			return
-		}
-	}
-	t.Errorf("reasons = %+v, want a layer-%s %q reason for %s", reasons, layer, code, rowID)
 }
 
 // covers: SC-08
 func TestLiveHandoff_GapRowExecutesAndStaysTraceGap(t *testing.T) {
 	const runID = "handoff-gap"
 	subject := newHandoffSubject(t)
-	tr, _, exec := runHandoffLive(t, subject, runID)
+	tr, _, exec := runLivePipeline(t, subject, runID, handoffPlan(runID), nil)
 
 	// The plan binds the row layer 1 reported as a gap, and execute-live runs
 	// it rather than refusing the binding or standing a placeholder in for it.
@@ -405,7 +182,7 @@ func TestLiveHandoff_GapRowExecutesAndStaysTraceGap(t *testing.T) {
 	}
 
 	code, stdout, stderr := runVerifyOp(t, "finalize",
-		handoffFinalizeRequestJSON(t, subject, runID, tr.EvidencePath, exec.EvidencePath))
+		liveFinalizeRequestJSON(t, subject, runID, tr.EvidencePath, exec.EvidencePath))
 	if code != exitOK {
 		t.Fatalf("finalize exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
 	}
@@ -436,7 +213,7 @@ func TestLiveHandoff_ResolvedProfileAcceptedAndResourceRemoved(t *testing.T) {
 	// execute-live validates the stored descriptor with ValidateResolved before
 	// it starts anything: a rejected run-ID-bearing prefix would surface here as
 	// a descriptor-invalid refusal rather than the exit-0 run below.
-	_, prep, exec := runHandoffLive(t, subject, runID)
+	_, prep, exec := runLivePipeline(t, subject, runID, handoffPlan(runID), nil)
 
 	wantPrefix := "scratch-" + runID
 	if got := descriptorPrefixes(t, prep.Descriptor); len(got) != 1 || got[0] != wantPrefix {
@@ -507,7 +284,7 @@ func descriptorPrefixes(t *testing.T, descriptor json.RawMessage) []string {
 func TestLiveHandoff_FinalizeAcceptsRealLiveEvidence(t *testing.T) {
 	const runID = "handoff-evidence"
 	subject := newHandoffSubject(t)
-	tr, _, exec := runHandoffLive(t, subject, runID)
+	tr, _, exec := runLivePipeline(t, subject, runID, handoffPlan(runID), nil)
 
 	// Hashed before finalize reads it: the report's transcript reference has to
 	// describe these exact bytes, not a re-serialization of them.
@@ -517,7 +294,7 @@ func TestLiveHandoff_FinalizeAcceptsRealLiveEvidence(t *testing.T) {
 	}
 
 	code, stdout, stderr := runVerifyOp(t, "finalize",
-		handoffFinalizeRequestJSON(t, subject, runID, tr.EvidencePath, exec.EvidencePath))
+		liveFinalizeRequestJSON(t, subject, runID, tr.EvidencePath, exec.EvidencePath))
 	if code != exitOK {
 		t.Fatalf("finalize refused real live evidence: exit code = %d, stderr=%s", code, stderr)
 	}
