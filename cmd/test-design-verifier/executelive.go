@@ -22,7 +22,6 @@ const (
 	verdictPass         = "LIVE-PASS"
 	verdictFail         = "LIVE-FAIL"
 	verdictInconclusive = "LIVE-INCONCLUSIVE"
-	verdictLayer1Gap    = "LIVE-N/A (layer 1 gap)"
 )
 
 type executeLiveRequest struct {
@@ -36,6 +35,9 @@ type liveRowVerdict struct {
 	RowID            string `json:"rowId"`
 	Verdict          string `json:"verdict"`
 	RedactionBarrier bool   `json:"redactionBarrier,omitempty"`
+	// the trace evidence reported this row as a gap or an ambiguity; the row
+	// still carries its own live verdict beside the annotation
+	Layer1Gap bool `json:"layer1Gap,omitempty"`
 }
 
 type liveRawArtifact struct {
@@ -46,6 +48,7 @@ type liveRawArtifact struct {
 type liveEvidence struct {
 	evidence.Envelope
 	RunID           string             `json:"runId"`
+	RepoCommit      string             `json:"repoCommit"`
 	Source          string             `json:"source"`
 	SourceSHA256    string             `json:"sourceSha256"`
 	ProfilePath     string             `json:"profilePath"`
@@ -139,6 +142,9 @@ func executeLiveOp(req *executeLiveRequest, stdout io.Writer, between func()) (o
 	if cliErr != nil {
 		return cliErr
 	}
+	if cliErr := requireLiveDecision("execute-live", src); cliErr != nil {
+		return cliErr
+	}
 
 	st, err := live.LoadState(req.RunDir)
 	if err != nil {
@@ -148,7 +154,7 @@ func executeLiveOp(req *executeLiveRequest, stdout io.Writer, between func()) (o
 	if err := json.Unmarshal(st.Descriptor, &descriptor); err != nil {
 		return &cliError{Code: "descriptor-invalid", Message: fmt.Sprintf("execute-live: decode descriptor: %v", err)}
 	}
-	if err := descriptor.Validate(st.RunID); err != nil {
+	if err := descriptor.ValidateResolved(st.RunID); err != nil {
 		return &cliError{Code: "descriptor-invalid", Message: fmt.Sprintf("execute-live: %v", err)}
 	}
 
@@ -156,7 +162,7 @@ func executeLiveOp(req *executeLiveRequest, stdout io.Writer, between func()) (o
 	if cliErr != nil {
 		return cliErr
 	}
-	applicable := applicableLiveRows(src)
+	applicable := live.ApplicableRows(src)
 
 	planData, err := os.ReadFile(req.PlanPath)
 	if err != nil {
@@ -166,7 +172,7 @@ func executeLiveOp(req *executeLiveRequest, stdout io.Writer, between func()) (o
 	if err != nil {
 		return &cliError{Code: "plan-decode-failed", Message: fmt.Sprintf("execute-live: %v", err)}
 	}
-	if err := pl.Validate(&descriptor, applicable, gaps); err != nil {
+	if err := pl.Validate(&descriptor, applicable); err != nil {
 		return &cliError{Code: planRefusalCode(err), Message: fmt.Sprintf("execute-live: %v", err)}
 	}
 
@@ -197,6 +203,7 @@ func executeLiveOp(req *executeLiveRequest, stdout io.Writer, between func()) (o
 	ev := liveEvidence{
 		Envelope:        evidence.Envelope{SchemaVersion: evidence.SchemaVersion, VerifierVersion: evidence.VerifierVersion},
 		RunID:           st.RunID,
+		RepoCommit:      st.RepoCommit,
 		Source:          src.Path,
 		SourceSHA256:    src.SHA256,
 		ProfilePath:     st.ProfilePath,
@@ -273,8 +280,9 @@ func planRefusalCode(err error) string {
 }
 
 // layer1GapRows reads the trace run's evidence: a row named by a gap or
-// ambiguity finding has no honest layer-1 result, so layer 3 reports it as
-// LIVE-N/A rather than running anything for it.
+// ambiguity finding has no honest layer-1 result. Layer 3 still plans, runs and
+// judges that row; the finding is recorded beside its verdict as layer1Gap, and
+// blocking the branch stays layer 1's own business.
 func layer1GapRows(path string) (map[string]bool, *cliError) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -300,23 +308,6 @@ func layer1GapRows(path string) (map[string]bool, *cliError) {
 		}
 	}
 	return gaps, nil
-}
-
-func applicableLiveRows(src *coverage.Source) []coverage.Row {
-	retired := make(map[string]bool, len(src.Retired))
-	for _, id := range src.Retired {
-		retired[id] = true
-	}
-	rows := make([]coverage.Row, 0, len(src.Rows))
-	for _, row := range src.Rows {
-		if retired[row.ID] {
-			continue
-		}
-		if row.Level == "smoke" || row.Level == "e2e" {
-			rows = append(rows, row)
-		}
-	}
-	return rows
 }
 
 // liveRun executes one walkthrough under a prepared descriptor. No process
@@ -503,19 +494,22 @@ func (r *liveRun) mergeVerdict(rowID, verdict string) {
 }
 
 // rowVerdicts yields exactly one entry per applicable row, in coverage-source
-// order. A row no step ever reached is LIVE-INCONCLUSIVE, never absent.
+// order. A row no step ever reached is LIVE-INCONCLUSIVE, never absent, and a
+// row layer 1 reported as a gap earns the same real verdict as any other: the
+// gap is annotation, not a substitute for what the run observed.
 func (r *liveRun) rowVerdicts(applicable []coverage.Row, gaps map[string]bool) []liveRowVerdict {
 	out := make([]liveRowVerdict, 0, len(applicable))
 	for _, row := range applicable {
-		if gaps[row.ID] {
-			out = append(out, liveRowVerdict{RowID: row.ID, Verdict: verdictLayer1Gap})
-			continue
-		}
 		verdict, ok := r.verdicts[row.ID]
 		if !ok {
 			verdict = verdictInconclusive
 		}
-		out = append(out, liveRowVerdict{RowID: row.ID, Verdict: verdict, RedactionBarrier: r.barriers[row.ID]})
+		out = append(out, liveRowVerdict{
+			RowID:            row.ID,
+			Verdict:          verdict,
+			RedactionBarrier: r.barriers[row.ID],
+			Layer1Gap:        gaps[row.ID],
+		})
 	}
 	return out
 }

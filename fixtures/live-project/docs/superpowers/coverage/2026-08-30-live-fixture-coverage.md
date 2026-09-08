@@ -14,6 +14,15 @@ Baseline: BASELINE_COMMIT · 0 passed, 0 failed, 0 skipped
 - live-profile: .test-design/live-profiles/fixture-local.json
 - final-command: ["/test-design:coverage-verification", "docs/superpowers/coverage/2026-08-30-live-fixture-coverage.md"]
 
+## Live decision
+
+- decision: required
+- reason: the walkthrough and the refusal path are only observable against the running fixture app
+
+| Journey | Scenarios | Expected |
+|---|---|---|
+| J-1 | SC-11, SC-12, SC-13 | Against the running fixture app the walkthrough step prints live-fixture-ready, the refusal path prints live-fixture-refused instead of accepting, and the depth endpoint answers with the current depth |
+
 ## Retired
 
 - SC-90 superseded by SC-11 (same walkthrough, kept as a drift-detection fixture)

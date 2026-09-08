@@ -45,7 +45,28 @@ func addLiveProfileHeader(t *testing.T, repo, profileRelPath string) {
 	mustGit(t, repo, "commit", "-q", "-m", "point coverage doc at a live profile")
 }
 
-// addSmokeRow appends a smoke-level scenario row (SC-20) to the coverage doc.
+// addLiveDecision inserts a ## Live decision section carrying body into the
+// coverage doc, ahead of ## Retired, and commits it.
+func addLiveDecision(t *testing.T, repo, body string) {
+	t.Helper()
+	rewriteFixtureDoc(t, repo, func(s string) string {
+		return strings.Replace(s, "## Retired", "## Live decision\n\n"+body+"\n## Retired", 1)
+	})
+	mustGit(t, repo, "add", "-A")
+	mustGit(t, repo, "commit", "-q", "-m", "record the coverage doc's live decision")
+}
+
+// addNotApplicableLiveDecision records the decision a document of unit-level
+// rows only is entitled to.
+func addNotApplicableLiveDecision(t *testing.T, repo string) {
+	t.Helper()
+	addLiveDecision(t, repo, "- decision: not-applicable\n"+
+		"- reason: every active row of this document is checkable without a running system\n")
+}
+
+// addSmokeRow appends a smoke-level scenario row (SC-20) to the coverage doc
+// together with the ## Live decision that row obliges the document to carry: an
+// active smoke row in no journey is an incomplete live decision.
 func addSmokeRow(t *testing.T, repo string) {
 	t.Helper()
 	rewriteFixtureDoc(t, repo, func(s string) string {
@@ -54,6 +75,11 @@ func addSmokeRow(t *testing.T, repo string) {
 	})
 	mustGit(t, repo, "add", "-A")
 	mustGit(t, repo, "commit", "-q", "-m", "add a smoke-level scenario row")
+	addLiveDecision(t, repo, "- decision: required\n"+
+		"- reason: SC-20 is only observable against the running app\n\n"+
+		"| Journey | Scenarios | Expected |\n"+
+		"|---|---|---|\n"+
+		"| J-1 | SC-20 | the smoke walkthrough completes against the running app |\n")
 }
 
 // writeLiveProfileFixture writes and commits repo/.test-design/live-profiles/<name>.json.
@@ -116,8 +142,35 @@ func TestPrepareLive_DirtyRepositoryRefused(t *testing.T) {
 	}
 }
 
+// TestPrepareLive_MissingLiveDecisionRefused locks the layer-3 gate: a coverage
+// source with no ## Live decision is incomplete design, and prepare-live says so
+// rather than reading the absence as "nothing to verify live".
+func TestPrepareLive_MissingLiveDecisionRefused(t *testing.T) {
+	repo := fixtureRepo(t)
+
+	code, stdout, stderr := runVerifyOp(t, "prepare-live", prepareLiveRequestJSON(t, repo, "live-no-decision"))
+
+	if code != exitError {
+		t.Fatalf("exit code = %d, want %d; stdout=%s", code, exitError, stdout)
+	}
+	got := decodeCLIError(t, stderr)
+	if got.Code != "live-decision-incomplete" {
+		t.Errorf("error code = %q, want live-decision-incomplete", got.Code)
+	}
+	if !strings.Contains(got.Message, "missing") {
+		t.Errorf("message = %q, want it to carry the live decision's own refusal code", got.Message)
+	}
+	if left := verifierWorktrees(t); len(left) != 0 {
+		t.Errorf("worktrees registered = %v, want no worktree created before the refusal", left)
+	}
+}
+
+// TestPrepareLive_NoApplicableRowsRefused: no-applicable-rows now means the
+// document decided live verification does not apply, not that no row happens to
+// be smoke or e2e.
 func TestPrepareLive_NoApplicableRowsRefused(t *testing.T) {
 	repo := fixtureRepo(t)
+	addNotApplicableLiveDecision(t, repo)
 
 	code, stdout, stderr := runVerifyOp(t, "prepare-live", prepareLiveRequestJSON(t, repo, "live-no-rows"))
 
@@ -133,6 +186,9 @@ func TestPrepareLive_NoApplicableRowsRefused(t *testing.T) {
 	}
 }
 
+// TestPrepareLive_NoLiveProfileHeaderRefused: a required decision with no
+// live-profile header names no target, so the gate refuses it before a run dir
+// exists to write an attempt document into.
 func TestPrepareLive_NoLiveProfileHeaderRefused(t *testing.T) {
 	repo := fixtureRepo(t)
 	addSmokeRow(t, repo)
@@ -143,16 +199,14 @@ func TestPrepareLive_NoLiveProfileHeaderRefused(t *testing.T) {
 		t.Fatalf("exit code = %d, want %d; stdout=%s", code, exitError, stdout)
 	}
 	got := decodeCLIError(t, stderr)
-	if got.Code != "profile-unavailable" {
-		t.Errorf("error code = %q, want profile-unavailable", got.Code)
+	if got.Code != "live-decision-incomplete" {
+		t.Errorf("error code = %q, want live-decision-incomplete", got.Code)
 	}
-	attemptPath := filepath.Join(verifierRunsDir(t), "live-no-header", "live-attempt.json")
-	if !strings.Contains(stderr, attemptPath) {
-		t.Errorf("stderr = %q, want it to name the attempt-evidence path %s", stderr, attemptPath)
+	if !strings.Contains(got.Message, "target-missing") {
+		t.Errorf("message = %q, want it to name the missing live-profile target", got.Message)
 	}
-	assertAttemptEvidence(t, attemptPath, "live-no-header", "", "no live-profile configured")
 	if left := verifierWorktrees(t); len(left) != 0 {
-		t.Errorf("worktrees registered = %v, want the failure path to have disposed of it", left)
+		t.Errorf("worktrees registered = %v, want no worktree created before the refusal", left)
 	}
 }
 

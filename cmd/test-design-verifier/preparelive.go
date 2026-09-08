@@ -20,9 +20,9 @@ const liveAttemptEvidenceFile = "live-attempt.json"
 type prepareLiveOutput struct {
 	evidence.Envelope
 	RunID        string          `json:"runID"`
-	RepoCommit string `json:"repoCommit"`
-	Source string `json:"source"`
-	SourceSHA256 string `json:"sourceSha256"`
+	RepoCommit   string          `json:"repoCommit"`
+	Source       string          `json:"source"`
+	SourceSHA256 string          `json:"sourceSha256"`
 	WorktreePath string          `json:"worktreePath"`
 	RunDir       string          `json:"runDir"`
 	ProfilePath  string          `json:"profilePath"`
@@ -31,12 +31,12 @@ type prepareLiveOutput struct {
 
 type liveAttemptOutput struct {
 	evidence.Envelope
-	RunID   string `json:"runID"`
-	RepoCommit string `json:"repoCommit"`
-	Source string `json:"source"`
+	RunID        string `json:"runID"`
+	RepoCommit   string `json:"repoCommit"`
+	Source       string `json:"source"`
 	SourceSHA256 string `json:"sourceSha256"`
-	Profile string `json:"profile"`
-	Refusal string `json:"refusal"`
+	Profile      string `json:"profile"`
+	Refusal      string `json:"refusal"`
 }
 
 func prepareLiveHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer) *cliError {
@@ -65,10 +65,13 @@ func prepareLiveHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer) 
 		}
 	}
 
-	if !hasApplicableLiveRows(src) {
+	if cliErr := requireLiveDecision("prepare-live", src); cliErr != nil {
+		return cliErr
+	}
+	if len(live.ApplicableRows(src)) == 0 {
 		return &cliError{
 			Code:    "no-applicable-rows",
-			Message: fmt.Sprintf("prepare-live: no active row at level smoke or e2e in %s", src.Path),
+			Message: fmt.Sprintf("prepare-live: the live decision in %s is not-applicable: no row to verify live", src.Path),
 		}
 	}
 
@@ -98,6 +101,8 @@ func prepareLiveHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer) 
 	}
 	defer func() { _ = dispose() }()
 
+	// Unreachable behind the decision gate, which refuses a required decision
+	// without a live-profile as target-missing; kept as this op's own guard.
 	if src.LiveProfile == "" {
 		return failProfileUnavailable(runDir, req.RunID, repoCommit, src, "", errors.New("no live-profile configured for coverage source "+src.Path))
 	}
@@ -111,7 +116,7 @@ func prepareLiveHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer) 
 	if err != nil {
 		return failProfileUnavailable(runDir, req.RunID, repoCommit, src, src.LiveProfile, err)
 	}
-	if err := profile.Validate(req.RunID); err != nil {
+	if err := profile.ValidateTemplate(); err != nil {
 		return failProfileUnavailable(runDir, req.RunID, repoCommit, src, src.LiveProfile, err)
 	}
 
@@ -127,8 +132,8 @@ func prepareLiveHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer) 
 
 	st := &live.State{
 		RunID:        req.RunID,
-		RepoCommit: repoCommit,
-		Source: src.Path,
+		RepoCommit:   repoCommit,
+		Source:       src.Path,
 		SourceSHA256: src.SHA256,
 		WorktreePath: wt.Path,
 		Snapshot:     snapshotJSON,
@@ -146,8 +151,8 @@ func prepareLiveHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer) 
 	out := prepareLiveOutput{
 		Envelope:     evidence.Envelope{SchemaVersion: evidence.SchemaVersion, VerifierVersion: evidence.VerifierVersion},
 		RunID:        req.RunID,
-		RepoCommit: st.RepoCommit,
-		Source: st.Source,
+		RepoCommit:   st.RepoCommit,
+		Source:       st.Source,
 		SourceSHA256: st.SourceSHA256,
 		WorktreePath: wt.Path,
 		RunDir:       runDir,
@@ -157,8 +162,15 @@ func prepareLiveHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer) 
 	return writeStdout(stdout, out)
 }
 
-func hasApplicableLiveRows(src *coverage.Source) bool {
-	return len(applicableLiveRows(src)) > 0
+// requireLiveDecision is the layer-3 gate prepare-live, execute-live and a
+// layer-3 record-attempt each pass before deciding what is applicable: an
+// absent or incomplete ## Live decision is incomplete design, never an implicit
+// "nothing to verify live".
+func requireLiveDecision(op string, src *coverage.Source) *cliError {
+	if err := coverage.ValidateLiveDecision(src); err != nil {
+		return &cliError{Code: "live-decision-incomplete", Message: fmt.Sprintf("%s: %v", op, err)}
+	}
+	return nil
 }
 
 // failProfileUnavailable writes attempt evidence first: a run that never
@@ -166,13 +178,13 @@ func hasApplicableLiveRows(src *coverage.Source) bool {
 func failProfileUnavailable(runDir, runID, repoCommit string, src *coverage.Source, profileName string, cause error) *cliError {
 	attemptPath := filepath.Join(runDir, liveAttemptEvidenceFile)
 	doc := liveAttemptOutput{
-		Envelope: evidence.Envelope{SchemaVersion: evidence.SchemaVersion, VerifierVersion: evidence.VerifierVersion},
-		RunID:    runID,
-		RepoCommit: repoCommit,
-		Source: src.Path,
+		Envelope:     evidence.Envelope{SchemaVersion: evidence.SchemaVersion, VerifierVersion: evidence.VerifierVersion},
+		RunID:        runID,
+		RepoCommit:   repoCommit,
+		Source:       src.Path,
 		SourceSHA256: src.SHA256,
-		Profile:  profileName,
-		Refusal:  cause.Error(),
+		Profile:      profileName,
+		Refusal:      cause.Error(),
 	}
 	if err := evidence.WriteJSON(attemptPath, &doc); err != nil {
 		return &cliError{

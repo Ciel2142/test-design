@@ -23,6 +23,15 @@
       "command": ["printenv", "LIVE_FIXTURE_CANARY"],
       "predicates": [{"form": "exit-code", "value": "1"}],
       "scBindings": ["SC-11"]
+    },
+    {
+      "expectation": "queue depth is reported while the app runs",
+      "command": ["echo", "live-fixture-depth=0"],
+      "predicates": [
+        {"form": "exit-code", "value": "0"},
+        {"form": "matches", "stream": "stdout", "value": "live-fixture-depth="}
+      ],
+      "scBindings": ["SC-13"]
     }
   ],
   "cleanup": [

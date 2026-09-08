@@ -184,6 +184,43 @@ func verdictsByRow(verdicts []liveRowVerdict) map[string]string {
 	return out
 }
 
+// rowVerdict returns the entry for rowID and fails when there is none: every
+// applicable row carries exactly one verdict, never zero.
+func rowVerdict(t *testing.T, verdicts []liveRowVerdict, rowID string) liveRowVerdict {
+	t.Helper()
+	for _, v := range verdicts {
+		if v.RowID == rowID {
+			return v
+		}
+	}
+	t.Fatalf("row verdicts = %+v, want an entry for %s", verdicts, rowID)
+	return liveRowVerdict{}
+}
+
+// dropLiveDecision removes the fixture coverage doc's ## Live decision section
+// and commits, leaving the legacy shape the live ops must refuse.
+func dropLiveDecision(t *testing.T, repo string) {
+	t.Helper()
+	path := filepath.Join(repo, filepath.FromSlash(liveFixtureCoverageSource))
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read live coverage doc: %v", err)
+	}
+	before, rest, ok := strings.Cut(string(data), "## Live decision")
+	if !ok {
+		t.Fatalf("live coverage doc has no ## Live decision section to drop")
+	}
+	_, after, ok := strings.Cut(rest, "## Retired")
+	if !ok {
+		t.Fatalf("live coverage doc has no ## Retired section after ## Live decision")
+	}
+	if err := os.WriteFile(path, []byte(before+"## Retired"+after), 0o644); err != nil {
+		t.Fatalf("write live coverage doc: %v", err)
+	}
+	mustGit(t, repo, "add", "-A")
+	mustGit(t, repo, "commit", "-q", "-m", "drop the live decision section")
+}
+
 // assertNoCanaryUnder fails when the canary value appears in any file under dir:
 // the sanitized environment must keep it out of every artifact the run leaves.
 func assertNoCanaryUnder(t *testing.T, dir string) {
@@ -211,8 +248,8 @@ func assertNoCanaryUnder(t *testing.T, dir string) {
 
 // TestExecuteLive_FixtureWalkthroughVerdicts is the wave's live acceptance: a
 // local profile whose start creates a run-ID-named scratch resource, one passing
-// and one failing walkthrough expectation, a gap row, and cleanup evidence
-// proving the resource is gone.
+// and one failing walkthrough expectation, a layer-1 gap row that is still run,
+// and cleanup evidence proving the resource is gone.
 func TestExecuteLive_FixtureWalkthroughVerdicts(t *testing.T) {
 	repo := liveFixtureRepo(t)
 	headBefore := strings.TrimSpace(mustGit(t, repo, "rev-parse", "HEAD"))
@@ -234,11 +271,20 @@ func TestExecuteLive_FixtureWalkthroughVerdicts(t *testing.T) {
 	want := map[string]string{
 		"SC-11": "LIVE-PASS",
 		"SC-12": "LIVE-FAIL",
-		"SC-13": "LIVE-N/A (layer 1 gap)",
+		"SC-13": "LIVE-PASS",
 	}
 	for id, verdict := range want {
 		if got[id] != verdict {
 			t.Errorf("verdict for %s = %q, want %q", id, got[id], verdict)
+		}
+	}
+	// The gap is annotated, never substituted for the row's real outcome.
+	if v := rowVerdict(t, out.RowVerdicts, "SC-13"); !v.Layer1Gap {
+		t.Errorf("SC-13 verdict = %+v, want layer1Gap true for the row the trace reported as a gap", v)
+	}
+	for _, id := range []string{"SC-11", "SC-12"} {
+		if v := rowVerdict(t, out.RowVerdicts, id); v.Layer1Gap {
+			t.Errorf("%s verdict = %+v, want layer1Gap false for a row layer 1 covered", id, v)
 		}
 	}
 	if _, present := got["SC-14"]; present {
@@ -262,6 +308,9 @@ func TestExecuteLive_FixtureWalkthroughVerdicts(t *testing.T) {
 	if ev.RunID != "live-fixture" {
 		t.Errorf("evidence runId = %q, want live-fixture", ev.RunID)
 	}
+	if ev.RepoCommit != headBefore {
+		t.Errorf("evidence repoCommit = %q, want the commit prepare-live measured %q", ev.RepoCommit, headBefore)
+	}
 	if ev.ProfilePath != liveFixtureProfilePath {
 		t.Errorf("evidence profilePath = %q, want %q", ev.ProfilePath, liveFixtureProfilePath)
 	}
@@ -276,7 +325,7 @@ func TestExecuteLive_FixtureWalkthroughVerdicts(t *testing.T) {
 	if len(ev.HealthSteps) != 1 || ev.HealthSteps[0].ExitStatus != 0 {
 		t.Errorf("health steps = %+v, want the scratch resource to exist at health time", ev.HealthSteps)
 	}
-	if len(ev.Steps) != 3 {
+	if len(ev.Steps) != 4 {
 		t.Fatalf("walkthrough steps = %+v, want every plan step executed", ev.Steps)
 	}
 	if ev.Steps[0].Result != "pass" || ev.Steps[1].Result != "fail" {
@@ -386,6 +435,97 @@ func TestExecuteLive_MissingStateRefused(t *testing.T) {
 	}
 }
 
+// TestExecuteLive_MissingLiveDecisionRefused locks the layer-3 gate: a coverage
+// source with no ## Live decision is incomplete design, never an implicit
+// applicable set, so the op refuses before it decides what to run.
+func TestExecuteLive_MissingLiveDecisionRefused(t *testing.T) {
+	repo := liveFixtureRepo(t)
+	prep := preparedLive(t, repo, "live-no-decision")
+	dropLiveDecision(t, repo)
+	tracePath := writeGapTraceEvidence(t)
+	planPath := filepath.Join(repo, filepath.FromSlash(liveFixturePlanPath))
+
+	code, stdout, stderr := runVerifyOp(t, "execute-live",
+		executeLiveRequestJSON(t, repo, prep.RunDir, planPath, tracePath))
+	if code != exitError {
+		t.Fatalf("exit code = %d, want %d; stdout=%s", code, exitError, stdout)
+	}
+	got := decodeCLIError(t, stderr)
+	if got.Code != "live-decision-incomplete" {
+		t.Errorf("error code = %q, want live-decision-incomplete", got.Code)
+	}
+	if !strings.Contains(got.Message, "missing") {
+		t.Errorf("message = %q, want it to carry the live decision's own refusal code", got.Message)
+	}
+	if _, err := os.Stat(filepath.Join(prep.RunDir, liveEvidenceFile)); !os.IsNotExist(err) {
+		t.Error("live-evidence.json exists, want no run behind an incomplete live decision")
+	}
+}
+
+// TestExecuteLive_PreparedDescriptorAcceptedAndCommitStamped locks the
+// prepare-live to execute-live handoff: the descriptor is accepted exactly as
+// prepared, and the commit prepare-live measured is stamped at the first
+// evidence write, before the post-compare rewrite can add it.
+func TestExecuteLive_PreparedDescriptorAcceptedAndCommitStamped(t *testing.T) {
+	repo := liveFixtureRepo(t)
+	head := strings.TrimSpace(mustGit(t, repo, "rev-parse", "HEAD"))
+	prep := preparedLive(t, repo, "live-descriptor")
+	if prep.RepoCommit != head {
+		t.Fatalf("prepare-live repoCommit = %q, want HEAD %q", prep.RepoCommit, head)
+	}
+	tracePath := writeGapTraceEvidence(t)
+	planPath := filepath.Join(repo, filepath.FromSlash(liveFixturePlanPath))
+	evidencePath := filepath.Join(prep.RunDir, liveEvidenceFile)
+
+	req := &executeLiveRequest{
+		verifyRequest: verifyRequest{
+			SchemaVersion:  "1",
+			RepoRoot:       repo,
+			CoverageSource: liveFixtureCoverageSource,
+		},
+		RunDir:        prep.RunDir,
+		PlanPath:      planPath,
+		TraceEvidence: tracePath,
+	}
+	var beforeCompare string
+	cliErr := executeLiveOp(req, discard{}, func() {
+		beforeCompare = readLiveEvidence(t, evidencePath).RepoCommit
+	})
+	if cliErr != nil {
+		t.Fatalf("executeLiveOp: code=%q message=%q", cliErr.Code, cliErr.Message)
+	}
+	if beforeCompare != head {
+		t.Errorf("repoCommit at the first evidence write = %q, want %q", beforeCompare, head)
+	}
+
+	ev := readLiveEvidence(t, evidencePath)
+	if ev.RepoCommit != head {
+		t.Errorf("repoCommit after the post-compare rewrite = %q, want %q", ev.RepoCommit, head)
+	}
+	if !ev.SnapshotEqual {
+		t.Error("evidence snapshotEqual = false, want the completed run stamped after the compare")
+	}
+	if ev.ProfilePath != liveFixtureProfilePath {
+		t.Errorf("evidence profilePath = %q, want %q", ev.ProfilePath, liveFixtureProfilePath)
+	}
+
+	// The resolved prefix survives the handoff: execute-live validates it
+	// rather than rewriting it away.
+	st, err := live.LoadState(prep.RunDir)
+	if err != nil {
+		t.Fatalf("LoadState: %v", err)
+	}
+	var descriptor struct {
+		ResourcePrefixes []string `json:"resourcePrefixes"`
+	}
+	if err := json.Unmarshal(st.Descriptor, &descriptor); err != nil {
+		t.Fatalf("descriptor did not decode: %v", err)
+	}
+	if len(descriptor.ResourcePrefixes) != 1 || descriptor.ResourcePrefixes[0] != "scratch-live-descriptor" {
+		t.Errorf("state resourcePrefixes = %v, want [scratch-live-descriptor]", descriptor.ResourcePrefixes)
+	}
+}
+
 func TestExecuteLive_StartFailureMarksBoundRowsInconclusive(t *testing.T) {
 	repo := liveFixtureRepo(t)
 	commitLiveProfileOverride(t, repo, map[string]any{
@@ -410,8 +550,11 @@ func TestExecuteLive_StartFailureMarksBoundRowsInconclusive(t *testing.T) {
 			t.Errorf("verdict for %s = %q, want LIVE-INCONCLUSIVE after a start failure", id, got[id])
 		}
 	}
-	if got["SC-13"] != "LIVE-N/A (layer 1 gap)" {
-		t.Errorf("verdict for SC-13 = %q, want the layer-1 gap verdict", got["SC-13"])
+	if got["SC-13"] != "LIVE-INCONCLUSIVE" {
+		t.Errorf("verdict for SC-13 = %q, want a gap row to share the start failure's real verdict", got["SC-13"])
+	}
+	if v := rowVerdict(t, out.RowVerdicts, "SC-13"); !v.Layer1Gap {
+		t.Errorf("SC-13 verdict = %+v, want layer1Gap true alongside its real verdict", v)
 	}
 
 	ev := readLiveEvidence(t, out.EvidencePath)
@@ -552,7 +695,7 @@ func TestExecuteLive_RedactionBarrierWithholdsStepButKeepsVerdict(t *testing.T) 
 				"expectation": "the non-happy walkthrough is refused",
 				"command":     []string{"echo", "live-fixture-accepted"},
 				"predicates":  []map[string]string{{"form": "exit-code", "value": "0"}},
-				"scBindings":  []string{"SC-12"},
+				"scBindings":  []string{"SC-12", "SC-13"},
 			},
 		},
 	})
@@ -567,12 +710,7 @@ func TestExecuteLive_RedactionBarrierWithholdsStepButKeepsVerdict(t *testing.T) 
 		t.Fatalf("stdout did not decode: %v\nstdout=%s", err, stdout)
 	}
 
-	var sc11 liveRowVerdict
-	for _, v := range out.RowVerdicts {
-		if v.RowID == "SC-11" {
-			sc11 = v
-		}
-	}
+	sc11 := rowVerdict(t, out.RowVerdicts, "SC-11")
 	if sc11.Verdict != "LIVE-PASS" {
 		t.Errorf("verdict for SC-11 = %q, want the verdict kept behind the redaction barrier", sc11.Verdict)
 	}
@@ -653,7 +791,7 @@ func TestExecuteLive_WorstVerdictWinsAcrossSteps(t *testing.T) {
 				"expectation": "both rows start from a passing step",
 				"command":     []string{"echo", "live-fixture-ready"},
 				"predicates":  []map[string]string{{"form": "exit-code", "value": "0"}},
-				"scBindings":  []string{"SC-11", "SC-12"},
+				"scBindings":  []string{"SC-11", "SC-12", "SC-13"},
 			},
 			{
 				"expectation": "SC-11 also has an unmet expectation",
@@ -735,9 +873,10 @@ func TestExecuteLive_MissingTraceEvidenceRefused(t *testing.T) {
 	}
 }
 
-// TestExecuteLive_GapRowMustNotBeBound locks the plan-validation refusal at the
-// op boundary: a plan that claims a layer-1 gap row is rejected, not run.
-func TestExecuteLive_GapRowMustNotBeBound(t *testing.T) {
+// TestExecuteLive_GapRowBindingAccepted locks the layer-3 contract at the op
+// boundary: a plan that binds a layer-1 gap row is executed rather than refused,
+// and the row earns the step's real verdict with the gap recorded beside it.
+func TestExecuteLive_GapRowBindingAccepted(t *testing.T) {
 	repo := liveFixtureRepo(t)
 	prep := preparedLive(t, repo, "live-gap-bound")
 	tracePath := writeGapTraceEvidence(t, "SC-13")
@@ -755,15 +894,25 @@ func TestExecuteLive_GapRowMustNotBeBound(t *testing.T) {
 
 	code, stdout, stderr := runVerifyOp(t, "execute-live",
 		executeLiveRequestJSON(t, repo, prep.RunDir, planPath, tracePath))
-	if code != exitError {
-		t.Fatalf("exit code = %d, want %d; stdout=%s", code, exitError, stdout)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
 	}
-	got := decodeCLIError(t, stderr)
-	if got.Code != "gap-row-bound" {
-		t.Errorf("error code = %q, want gap-row-bound", got.Code)
+	var out executeLiveOutput
+	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
+		t.Fatalf("stdout did not decode: %v\nstdout=%s", err, stdout)
 	}
-	if !strings.Contains(got.Message, "SC-13") {
-		t.Errorf("message = %q, want it to name SC-13", got.Message)
+
+	sc13 := rowVerdict(t, out.RowVerdicts, "SC-13")
+	if sc13.Verdict != "LIVE-PASS" {
+		t.Errorf("verdict for SC-13 = %q, want the bound step's real verdict LIVE-PASS", sc13.Verdict)
+	}
+	if !sc13.Layer1Gap {
+		t.Errorf("SC-13 verdict = %+v, want layer1Gap true so the layer-1 gap still blocks", sc13)
+	}
+
+	ev := readLiveEvidence(t, out.EvidencePath)
+	if len(ev.Steps) != 1 {
+		t.Errorf("walkthrough steps = %+v, want the gap row's step actually executed", ev.Steps)
 	}
 }
 
@@ -789,8 +938,8 @@ func TestExecuteLive_MissingRowPredicatesRefused(t *testing.T) {
 
 func TestLiveRunLimitsPreserveEvidenceAndRunIndependentCleanup(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		command string
+		name        string
+		command     string
 		outputBytes int64
 	}{
 		{"timeout", "echo ready; sleep 20", 1024},
@@ -800,7 +949,7 @@ func TestLiveRunLimitsPreserveEvidenceAndRunIndependentCleanup(t *testing.T) {
 			dir := t.TempDir()
 			profile := &live.Profile{
 				TimeoutSeconds: 1, CleanupTimeoutSeconds: 3, MaxOutputBytes: tc.outputBytes,
-				Cleanup: [][]string{{"/bin/sh", "-c", "sleep 1.2; printf cleaned > cleanup-marker"}},
+				Cleanup:         [][]string{{"/bin/sh", "-c", "sleep 1.2; printf cleaned > cleanup-marker"}},
 				CleanupEvidence: []live.Predicate{{Form: "exit-code", Value: "0"}},
 			}
 			run := newLiveRun(t.TempDir(), dir, profile)
@@ -825,7 +974,9 @@ func TestLiveRunLimitsPreserveEvidenceAndRunIndependentCleanup(t *testing.T) {
 					found = true
 				}
 			}
-			if !found { t.Fatal("failure raw capture was not included in evidence") }
+			if !found {
+				t.Fatal("failure raw capture was not included in evidence")
+			}
 		})
 	}
 }
@@ -833,7 +984,9 @@ func TestLiveRunLimitsPreserveEvidenceAndRunIndependentCleanup(t *testing.T) {
 func TestExecuteLiveDisposesWorktreeAfterEvidenceWriteFailure(t *testing.T) {
 	repo := liveFixtureRepo(t)
 	prep := preparedLive(t, repo, "live-write-failure")
-	if err := os.Mkdir(filepath.Join(prep.RunDir, liveEvidenceFile), 0o755); err != nil { t.Fatal(err) }
+	if err := os.Mkdir(filepath.Join(prep.RunDir, liveEvidenceFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	code, _, stderr := runVerifyOp(t, "execute-live", executeLiveRequestJSON(t, repo, prep.RunDir,
 		filepath.Join(repo, filepath.FromSlash(liveFixturePlanPath)), writeGapTraceEvidence(t, "SC-13")))
 	if code != exitError || decodeCLIError(t, stderr).Code != "evidence-write-failed" {

@@ -11,6 +11,7 @@ import (
 
 	"test-design/internal/coverage"
 	"test-design/internal/evidence"
+	"test-design/internal/live"
 	"test-design/internal/worktree"
 )
 
@@ -67,7 +68,10 @@ func recordAttemptHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer
 	}
 	name := liveAttemptEvidenceFile
 	if attempt.Layer == 3 {
-		if attempt.RowID != "" || !hasApplicableLiveRows(src) {
+		if cliErr := requireLiveDecision(op, src); cliErr != nil {
+			return cliErr
+		}
+		if attempt.RowID != "" || len(live.ApplicableRows(src)) == 0 {
 			return &cliError{Code: "no-applicable-rows", Message: op + ": live attempts apply to the whole applicable live layer, not an individual row"}
 		}
 	} else {
@@ -101,7 +105,7 @@ func recordAttemptHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer
 	}
 	doc := attemptEvidence{
 		Envelope: evidence.Envelope{SchemaVersion: evidence.SchemaVersion, VerifierVersion: evidence.VerifierVersion},
-		RunID: req.RunID, RowID: attempt.RowID, Source: src.Path, SourceSHA256: src.SHA256,
+		RunID:    req.RunID, RowID: attempt.RowID, Source: src.Path, SourceSHA256: src.SHA256,
 		RepoCommit: commit, Refusal: attempt.Refusal,
 	}
 	if attempt.Layer == 3 {
