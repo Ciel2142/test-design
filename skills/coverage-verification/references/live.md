@@ -108,7 +108,10 @@ The evidence's JSON names are the contract; read them by field, not by summary:
 - `rowVerdicts[].verdict` is the worst outcome among a row's bound steps: `LIVE-PASS`,
   `LIVE-FAIL`, or `LIVE-INCONCLUSIVE` when a bound step never completed or the walkthrough never
   reached a step the row binds. Earlier and later failures merge the same way regardless of
-  order: once a row is `LIVE-FAIL` a later `LIVE-PASS` on another bound step cannot clear it.
+  order: once a row is `LIVE-FAIL` a later `LIVE-PASS` on another bound step cannot clear it. A
+  health phase that passes proves readiness only and never yields a row verdict by itself; plan
+  steps run only when both `start` and `health` passed, so a bound row no completed plan step
+  reached is `LIVE-INCONCLUSIVE`.
 - `unboundFailures` lists every completed command whose predicates failed but that reached no row
   verdict: a `start` or `health` command, a plan `step` with no `scBindings`, or a `plan-cleanup`
   step whose bindings could not apply because the walkthrough never ran. Each entry names `phase`
@@ -127,10 +130,13 @@ The evidence's JSON names are the contract; read them by field, not by summary:
   no completed command failed but at least one never completed (a deadline, a cancellation, the
   output cap, or a capture error): its cause lives in `executionErrors`, and cleanup is unproven
   rather than vindicated.
-- `executionErrors` names every command that did not complete — timeout, signal, cancellation,
-  output-cap overflow, or a capture error — as `<phase>[<index>]: <cause>`. A step named there has
-  no reduced entry in its phase's step list and no `unboundFailures` entry: non-completion is a
-  fact distinct from a completed, failed predicate.
+- `executionErrors` mixes three causes, not one: a command that did not complete (timeout,
+  signal, cancellation, output-cap overflow, or a capture error) as `<phase>[<index>]: <cause>`;
+  a completed command whose raw stdout/stderr/combined output could not be SHA-256'd, as
+  `hash <path>: <err>`; and a completed command whose decisive output the redaction barrier
+  withheld, also as `<phase>[<index>]: <cause>`. A step named by the first or third form has no
+  reduced entry in its phase's step list and no `unboundFailures` entry: neither a non-completion
+  nor a withheld transcript is a completed, failed predicate.
 - Phase results — `startSteps[].result`, `healthSteps[].result`, and the profile-cleanup entries
   inside `cleanupSteps[].result` — are `pass` iff the command completed with exit 0 (start,
   health, and every profile cleanup command carry this predicate implicitly, and the configured

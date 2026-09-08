@@ -87,12 +87,12 @@ These rules cover what `execute-live` refuses before it runs anything. Once it d
 more facts shape how the plan you hand back is judged:
 
 - **A predicate on an unbound step is still a claim, and its failure blocks the layer.** A start
-  or health command, a plan step with no `scBindings`, or a plan-cleanup step whose verdict
-  application is suppressed still has its predicates evaluated. A failure there is not
-  discarded: it lands in `unboundFailures` and finalize turns a non-empty list into
-  `live-unbound-assertion-failed` (BLOCKED), naming every `phase[index] expectation`. Write an
-  unbound step's expectation and predicates as carefully as a bound one — nothing shields it from
-  judgment.
+  or health command, a plan step with no `scBindings`, or a plan-cleanup step with no
+  `scBindings` or whose verdict application is suppressed still has its predicates evaluated. A
+  failure there is not discarded: it lands in `unboundFailures` and finalize turns a non-empty
+  list into `live-unbound-assertion-failed` (BLOCKED), naming every `phase[index] expectation`.
+  Write an unbound step's expectation and predicates as carefully as a bound one — nothing
+  shields it from judgment.
 - **A plan-cleanup step's failure is recorded even when its rows never ran.** If the walkthrough
   failed before plan-cleanup started, a plan-cleanup step's verdict cannot apply to the rows it
   binds — those rows already carry the walkthrough's own outcome — but a failed predicate on the
