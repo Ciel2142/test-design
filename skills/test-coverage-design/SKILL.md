@@ -48,10 +48,13 @@ never make the plugin the verification target.
 If the feature has **≤2 behaviors and no persistence, no concurrency, and no external
 dependency**, do not produce a separate document. Append a `## Test coverage` section to
 the approved spec containing the scenario table, the `## Verification` block, the
-`Baseline:` header line, and a `## Baseline failures` section; present that amendment for
-approval, then use the planning handoff below. The section follows the same
-schema, ID allocation, and two-commit baseline protocol as a standalone coverage source —
-the floor rule only changes where it lives, never what it must contain.
+`Baseline:` header line, a `## Live decision` section, and a `## Baseline failures`
+section; present that amendment for approval, then use the planning handoff below. The
+section follows the same schema, ID allocation, live decision, and two-commit baseline
+protocol as a standalone coverage source — the floor rule only changes where it lives,
+never what it must contain. A floor-rule feature has no external dependency, so its live
+decision is normally `not-applicable` with its reason stated; it is still written down,
+because `preflight` refuses a source without one as `live-decision-incomplete`.
 
 Below that size the rows are the plan's test steps restated, and a separate doc costs two
 human gates to re-derive them. Say which rule applied: "Floor rule applies — 2 behaviors,
