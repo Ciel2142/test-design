@@ -120,6 +120,7 @@ func TestPluginDocs_AgentToolRestrictions(t *testing.T) {
 		{"agents/mutator.md", map[string]bool{"Read": true, "Edit": true}},
 		{"agents/live-runner.md", map[string]bool{"Read": true, "Grep": true, "Glob": true}},
 		{"agents/coverage-critic.md", map[string]bool{"Read": true, "Grep": true, "Glob": true}},
+		{"agents/scenario-reviewer.md", map[string]bool{"Read": true, "Grep": true, "Glob": true}},
 	} {
 		tools := agentTools(t, root, agent.path)
 		for _, tool := range tools {
