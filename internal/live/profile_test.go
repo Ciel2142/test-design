@@ -312,6 +312,21 @@ func TestValidateResolvedAcceptsSubstitutedDescriptor(t *testing.T) {
 	}
 }
 
+// TestValidateResolvedRefusesEmptyRunID closes the vacuous acceptance: every
+// resourcePrefixes entry contains the empty string, so without the guard a
+// caller that lost its run ID validates a descriptor no run owns.
+func TestValidateResolvedRefusesEmptyRunID(t *testing.T) {
+	p := resolvedProfile("run-abc")
+
+	err := p.ValidateResolved("")
+	if err == nil {
+		t.Fatal("ValidateResolved(\"\") returned nil error, want run-id-missing")
+	}
+	if !strings.Contains(err.Error(), "run-id-missing:") {
+		t.Errorf("error = %q, want it to contain run-id-missing:", err.Error())
+	}
+}
+
 func TestValidateResolvedRunIDMissingFromResources(t *testing.T) {
 	p := resolvedProfile("run-abc")
 	p.ResourcePrefixes = []string{"fixture-run-abc", "orphan-resource"}

@@ -109,7 +109,15 @@ func (p *Profile) ValidateTemplate() error {
 // runID itself, and that substitution left no {run-id} token behind anywhere a
 // command, prefix or endpoint could still carry one. A leftover token would
 // otherwise reach the running system verbatim.
+//
+// An empty runID is refused first: every string contains the empty string, so
+// the resourcePrefixes check would pass vacuously and a descriptor whose
+// resources belong to no run at all would validate.
 func (p *Profile) ValidateResolved(runID string) error {
+	if runID == "" {
+		return fmt.Errorf("live profile: run-id-missing: a resolved descriptor is validated against the run id it was substituted with, and none was given")
+	}
+
 	if err := p.validateInvariants(); err != nil {
 		return err
 	}
