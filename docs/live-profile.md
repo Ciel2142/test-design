@@ -40,8 +40,8 @@ layer 3 reports `n/a`.
 | `start` | `[][]string` | Commands run in order before the walkthrough, each as an argv array. The first nonzero exit stops the sequence; the walkthrough is then skipped and every bound row is `LIVE-INCONCLUSIVE`. |
 | `health` | `[][]string` | Commands run in order after `start`. Same stop-on-first-failure rule. Use this for readiness probes so a slow start is not charged to a row. |
 | `walkthrough` | `[][]string` | Commands the plan may use for the rows themselves. The verifier does **not** run these; they exist to declare programs. |
-| `cleanup` | `[][]string` | Commands run unconditionally at the end, whether or not `start` succeeded. Required, non-empty. |
-| `cleanupEvidence` | `[]Predicate` | Predicates evaluated against the **last** `cleanup` command's result. They are the profile author's own proof that the run left nothing behind; `cleanupOK` in the evidence is exactly whether they held. Required, non-empty. |
+| `cleanup` | `[][]string` | Commands run unconditionally at the end, whether or not `start` succeeded. Every command must exit 0; a command that does not complete (deadline, cancellation, output cap, capture error) leaves cleanup unproven rather than failed outright. Required, non-empty. |
+| `cleanupEvidence` | `[]Predicate` | Predicates evaluated against the **configured last** `cleanup` command's result, and only if that command completed. They are the profile author's own proof that the run left nothing behind: `cleanupOK` in the evidence is true only when every `cleanup` command exited 0 and these predicates held on the last one; a known failure of any command's exit or of these predicates is never cleared by a later command's success. Required, non-empty. |
 | `envAllowlist` | `[]string` | Names of environment variables the commands inherit from the verifier's process. Everything else is stripped. See "Environment and secrets". |
 | `resourcePrefixes` | `[]string` | Every name or prefix the run may create. Each entry **must** contain `{run-id}` in the committed profile, and the run ID itself once `prepare-live` has substituted it; the verifier refuses `run-id-missing-from-resources` otherwise, so two concurrent runs can never collide on a fixture. |
 | `endpoints` | `[]string` | URLs or `host:port` pairs the plan may reference. Under `local`, each must resolve to loopback. Under `ephemeral`, list what the environment exposes. May be `[]`. |
@@ -105,8 +105,10 @@ quoting the refusal.
    `LIVE-FAIL` for every row it binds; a step whose process never ran is
    `LIVE-INCONCLUSIVE`. A row bound by several steps takes the worst verdict.
 4. Plan `cleanup` steps, unconditionally.
-5. Profile `cleanup` commands, unconditionally; `cleanupEvidence` is evaluated against the
-   last one.
+5. Profile `cleanup` commands, unconditionally. Every command must exit 0, and the configured
+   last one's predicates — its implicit `exit-code 0` plus `cleanupEvidence` — must also hold; a
+   cleanup command that does not complete leaves cleanup unproven rather than passed or failed
+   outright, and is recorded in `executionErrors` instead.
 
 Every command runs in the disposable worktree with the sanitized environment. Raw stdout and
 stderr land under the run directory outside the repository; the evidence carries reduced,
@@ -190,6 +192,8 @@ Checklist before committing a profile:
 - `schemaVersion` is `"1"` and `classification` is `local` or `ephemeral`.
 - Every program the walkthrough will need appears as `argv[0]` somewhere in the four
   command lists.
+- The `start` recipe stamps the revision it deploys and refuses to run against a stale
+  deployment; the verifier only records what the recipe prints, it does not check identity itself.
 - Every endpoint the walkthrough will hit is listed, loopback under `local`.
 - Every created resource carries `{run-id}` and is listed under `resourcePrefixes`.
 - `cleanup` ends with a command whose output proves the resources are gone, and

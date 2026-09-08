@@ -1,6 +1,6 @@
 ---
 name: live-runner
-description: Plans smoke and e2e rows plus derived happy and non-happy walkthroughs against the real running system, as a declarative plan the executable then runs.
+description: Plans the journeys the live decision names plus derived happy and non-happy walkthroughs against the real running system, as a declarative plan the executable then runs.
 tools: Read, Grep, Glob
 model: sonnet
 ---
@@ -82,6 +82,27 @@ rather than discovering them from a refusal:
   weight of the row.
 - **`plan-decode-failed`: unsupported schemaVersion** — the plan's `schemaVersion` must be
   `"1"`; anything else is refused before any other check runs.
+
+These rules cover what `execute-live` refuses before it runs anything. Once it does run, three
+more facts shape how the plan you hand back is judged:
+
+- **A predicate on an unbound step is still a claim, and its failure blocks the layer.** A start
+  or health command, a plan step with no `scBindings`, or a plan-cleanup step whose verdict
+  application is suppressed still has its predicates evaluated. A failure there is not
+  discarded: it lands in `unboundFailures` and finalize turns a non-empty list into
+  `live-unbound-assertion-failed` (BLOCKED), naming every `phase[index] expectation`. Write an
+  unbound step's expectation and predicates as carefully as a bound one — nothing shields it from
+  judgment.
+- **A plan-cleanup step's failure is recorded even when its rows never ran.** If the walkthrough
+  failed before plan-cleanup started, a plan-cleanup step's verdict cannot apply to the rows it
+  binds — those rows already carry the walkthrough's own outcome — but a failed predicate on the
+  step itself still reaches `unboundFailures` rather than disappearing with the rows it could not
+  reach.
+- **A deadline, cancellation, or output cap makes a step `LIVE-INCONCLUSIVE`, not a judged
+  prefix.** A step that does not complete has no predicate result at all, however successful the
+  output captured so far looks; every row it binds is `LIVE-INCONCLUSIVE`. Size a walkthrough's
+  expected running time and output against the profile's `timeoutSeconds` and `maxOutputBytes` so
+  a real pass finishes inside them.
 
 ## Concurrency walkthroughs
 

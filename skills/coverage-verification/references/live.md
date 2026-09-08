@@ -82,11 +82,12 @@ validates the plan against the profile, starts the environment, runs the steps, 
 transcripts, runs cleanup unconditionally, disposes the worktree, and writes
 `live-evidence.json`.
 
-Read `evidencePath` — it is `layer3.evidencePath` in the finalize request — plus
-`rowVerdicts`, `cleanupOK`, and `cleanupFailed` for the running summary. Every applicable row
+Read `evidencePath` — it is `layer3.evidencePath` in the finalize request — plus `rowVerdicts`,
+`unboundFailures`, `cleanupOK`, and `cleanupFailed` for the running summary. Every applicable row
 carries `LIVE-PASS`, `LIVE-FAIL`, or `LIVE-INCONCLUSIVE`; a gap row gets the journey's
 truthful outcome like any other, with `layer1Gap: true` recorded beside its verdict. The
-layer-1 gap still blocks the branch on layer 1's own account.
+layer-1 gap still blocks the branch on layer 1's own account. `cleanupOK` and `cleanupFailed`
+are not a strict inverse — see "Outcomes" below for the third state neither covers.
 
 **The reduced transcripts inside the evidence are the record; the agent's summary is not.**
 Nothing here needs re-checking by hand: the verdicts come from the op that ran the commands,
@@ -99,4 +100,54 @@ all — malformed JSON, a `schemaVersion` other than `"1"`, no steps, or a step 
 `expectation` or `command` — is `plan-decode-failed`, quoting the decoder's own message. Each
 is a defect in the agent's plan, not in the repository: re-dispatch `live-runner` quoting the
 refusal message so it designs to the rule it broke.
+
+### Outcomes
+
+The evidence's JSON names are the contract; read them by field, not by summary:
+
+- `rowVerdicts[].verdict` is the worst outcome among a row's bound steps: `LIVE-PASS`,
+  `LIVE-FAIL`, or `LIVE-INCONCLUSIVE` when a bound step never completed or the walkthrough never
+  reached a step the row binds. Earlier and later failures merge the same way regardless of
+  order: once a row is `LIVE-FAIL` a later `LIVE-PASS` on another bound step cannot clear it.
+- `unboundFailures` lists every completed command whose predicates failed but that reached no row
+  verdict: a `start` or `health` command, a plan `step` with no `scBindings`, or a `plan-cleanup`
+  step whose bindings could not apply because the walkthrough never ran. Each entry names `phase`
+  (`start | health | step | plan-cleanup`), a 1-based `index` within that phase, and
+  `expectation` — the planner's own text, passed through the same redaction barrier as a
+  transcript and replaced with the literal `[withheld by redaction barrier]` on a hit. The array
+  is always present, empty when there is nothing to report.
+- `cleanupOK`, `cleanupFailed`, and neither are a tri-state over the profile's own `cleanup`
+  commands only — a plan's `cleanup` steps are judged like any other plan step, bound or
+  unbound, per the `unboundFailures` bullet above.
+  `cleanupFailed` is true the moment any profile cleanup command completes with a known failure —
+  a nonzero exit, or the configured last command completing with its `cleanupEvidence` unheld —
+  and that failure is never cleared by a later command succeeding or masked by another command
+  failing to complete. `cleanupOK` is true only when every command completed and the last one's
+  `cleanupEvidence` held; it is mutually exclusive with `cleanupFailed`. Neither flag is true when
+  no completed command failed but at least one never completed (a deadline, a cancellation, the
+  output cap, or a capture error): its cause lives in `executionErrors`, and cleanup is unproven
+  rather than vindicated.
+- `executionErrors` names every command that did not complete — timeout, signal, cancellation,
+  output-cap overflow, or a capture error — as `<phase>[<index>]: <cause>`. A step named there has
+  no reduced entry in its phase's step list and no `unboundFailures` entry: non-completion is a
+  fact distinct from a completed, failed predicate.
+- Phase results — `startSteps[].result`, `healthSteps[].result`, and the profile-cleanup entries
+  inside `cleanupSteps[].result` — are `pass` iff the command completed with exit 0 (start,
+  health, and every profile cleanup command carry this predicate implicitly, and the configured
+  last cleanup command additionally carries `cleanupEvidence`); a completed nonzero exit is
+  `fail`, and a command that never completed has no reduced step at all.
+
+Finalize turns these into layer-3 reasons: a non-empty `unboundFailures` yields
+`live-unbound-assertion-failed` (BLOCKED), detailing every `phase[index] expectation` entry;
+`cleanupFailed` yields `live-cleanup-failed` and the neither-state yields `live-cleanup-missing`,
+both PARTIAL; a non-empty `executionErrors` yields `live-execution-errors` (PARTIAL); and a row
+verdict of `LIVE-FAIL` or `LIVE-INCONCLUSIVE` is BLOCKED for that row. These are independent —
+several can fire on the same run — and none of them can turn a run's verdict into a pass.
+
+Artifact identity has no dedicated evidence field: the deploy recipe stamps and checks the
+repository revision itself, refusing to run against a stale checkout on its own account, and the
+verifier only preserves what the recipe printed — each step's `decisiveOutput` carries the
+recipe's own deploy line, readiness line, or matched business line, with context, whichever the
+step's predicates picked out. The recipe's lines are the record; the verifier adds no
+interpretation of its own.
 
