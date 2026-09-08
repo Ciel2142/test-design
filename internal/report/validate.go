@@ -26,6 +26,7 @@ const (
 	CodeMissingAttemptEvidence  = "missing-attempt-evidence"
 	CodeInvalidMutationOutcome  = "invalid-mutation-outcome"
 	CodeInvalidVerdict          = "invalid-verdict"
+	CodeLiveDecisionIncomplete  = "live-decision-incomplete"
 )
 
 type RefusalError struct {
@@ -319,7 +320,22 @@ func hasRealSourceVerdict(canaryBatch Batch, byID map[string]Batch, voided map[s
 // live.ApplicableRows and from nothing else: a row is owed a live verdict
 // because a required journey names it or because the decision is absent and
 // its level is smoke or e2e, never because of the level alone.
+//
+// A not-applicable decision is checked before it is trusted. It is the one
+// decision that shrinks the obligation — live.ApplicableRows reads it as "no
+// obligation at all" — so an unvalidated one could zero layer 3 exactly where
+// ValidateLiveDecision would have refused it, leaving a document to talk its
+// own live layer away. Every other declared decision leaves an applicable set
+// that is a superset of the level rule's, so no row is ever silently dropped
+// by trusting it here. A source carrying no section at all is legacy and keeps
+// the level rule.
 func validateLayer3(in *Inputs) error {
+	if in.Source != nil && in.Source.LiveDecision != nil && in.Source.LiveDecision.Decision == coverage.LiveNotApplicable {
+		if err := coverage.ValidateLiveDecision(in.Source); err != nil {
+			return refuse(CodeLiveDecisionIncomplete, "the coverage source's live decision cannot be trusted to zero layer 3: %v", err)
+		}
+	}
+
 	liveRows := live.ApplicableRows(in.Source)
 	liveApplicable := make(map[string]bool, len(liveRows))
 	for _, r := range liveRows {

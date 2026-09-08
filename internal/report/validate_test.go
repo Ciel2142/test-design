@@ -389,6 +389,11 @@ func TestValidateMissingVerdictLayer3JourneyedRowAbsent(t *testing.T) {
 
 func TestValidateUnexpectedLiveEvidenceNotApplicableDecision(t *testing.T) {
 	in := baseInputs()
+	// A not-applicable decision is only entitled where no active row is smoke
+	// or e2e, so the levels move with the decision: layer 3 is then empty by
+	// the document's own choice and the supplied live evidence is unexpected.
+	in.Source.Rows[1].Level = "integration"
+	in.Source.Rows[2].Level = "integration"
 	in.Source.LiveDecision = &coverage.LiveDecision{
 		Decision: coverage.LiveNotApplicable,
 		Reason:   "the fixture has no deployable surface",
@@ -396,6 +401,37 @@ func TestValidateUnexpectedLiveEvidenceNotApplicableDecision(t *testing.T) {
 	re := wantRefusal(t, Validate(in), CodeUnexpectedLiveEvidence)
 	if !strings.Contains(re.Detail, "no applicable live rows") {
 		t.Errorf("Detail = %q, want it to say no applicable live rows exist", re.Detail)
+	}
+}
+
+// TestValidateLiveDecisionContradictionRefused locks the gate finalize needs
+// against a decision no design-time validator ever accepted: not-applicable
+// while active smoke or e2e rows exist. Without the gate the applicable set is
+// empty, layer 3 goes n/a, and a document talks its own live layer away.
+func TestValidateLiveDecisionContradictionRefused(t *testing.T) {
+	in := baseInputs()
+	in.Source.LiveDecision = &coverage.LiveDecision{
+		Decision: coverage.LiveNotApplicable,
+		Reason:   "the fixture has no deployable surface",
+	}
+	in.Live = nil
+	re := wantRefusal(t, Validate(in), CodeLiveDecisionIncomplete)
+	if !strings.Contains(re.Detail, "contradiction") {
+		t.Errorf("Detail = %q, want it to carry the live decision's own code", re.Detail)
+	}
+	if !strings.Contains(re.Detail, "SC-02") {
+		t.Errorf("Detail = %q, want it to name the contradicting smoke row SC-02", re.Detail)
+	}
+}
+
+// TestValidateLegacyNoLiveDecisionStillValidates keeps the deliberate fallback
+// for a document written before the section existed: no section at all is not
+// an invalid decision, and the level rule still selects its live rows.
+func TestValidateLegacyNoLiveDecisionStillValidates(t *testing.T) {
+	in := baseInputs()
+	in.Source.LiveDecision = nil
+	if err := Validate(in); err != nil {
+		t.Fatalf("Validate: %v", err)
 	}
 }
 
