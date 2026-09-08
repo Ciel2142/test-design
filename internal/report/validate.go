@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"test-design/internal/coverage"
+	"test-design/internal/live"
 )
 
 const (
@@ -63,7 +64,7 @@ func Validate(in *Inputs) error {
 	if err := validateLayer2(in, active, gaps); err != nil {
 		return err
 	}
-	if err := validateLayer3(in, active, gaps); err != nil {
+	if err := validateLayer3(in); err != nil {
 		return err
 	}
 	if err := validateLayer4(in, active, gaps); err != nil {
@@ -313,19 +314,21 @@ func hasRealSourceVerdict(canaryBatch Batch, byID map[string]Batch, voided map[s
 	return false
 }
 
-func validateLayer3(in *Inputs, active []coverage.Row, gaps map[string]bool) error {
-	var liveRows []coverage.Row
-	liveApplicable := make(map[string]bool)
-	for _, r := range active {
-		if r.Level == "smoke" || r.Level == "e2e" {
-			liveRows = append(liveRows, r)
-			liveApplicable[r.ID] = true
-		}
+// validateLayer3 checks the live evidence against the layer-3 obligation the
+// coverage source itself declares. The applicable set comes from
+// live.ApplicableRows and from nothing else: a row is owed a live verdict
+// because a required journey names it or because the decision is absent and
+// its level is smoke or e2e, never because of the level alone.
+func validateLayer3(in *Inputs) error {
+	liveRows := live.ApplicableRows(in.Source)
+	liveApplicable := make(map[string]bool, len(liveRows))
+	for _, r := range liveRows {
+		liveApplicable[r.ID] = true
 	}
 
 	if len(liveRows) == 0 {
 		if in.Live != nil {
-			return refuse(CodeUnexpectedLiveEvidence, "live evidence supplied but no smoke/e2e active rows exist")
+			return refuse(CodeUnexpectedLiveEvidence, "live evidence supplied but no applicable live rows exist")
 		}
 		return nil
 	}
@@ -349,7 +352,7 @@ func validateLayer3(in *Inputs, active []coverage.Row, gaps map[string]bool) err
 
 	for _, v := range in.Live.RowVerdicts {
 		if !liveApplicable[v.RowID] {
-			return refuse(CodeUnexpectedLiveEvidence, "live rowVerdicts names row %s, which is not a smoke/e2e active row", v.RowID)
+			return refuse(CodeUnexpectedLiveEvidence, "live rowVerdicts names row %s, which is not an applicable live row", v.RowID)
 		}
 	}
 
@@ -364,12 +367,6 @@ func validateLayer3(in *Inputs, active []coverage.Row, gaps map[string]bool) err
 		}
 		if !validLiveVerdict(v.Verdict) {
 			return refuse(CodeInvalidVerdict, "row %s carries live verdict %q, outside LIVE-PASS|LIVE-FAIL|LIVE-INCONCLUSIVE|%s", row.ID, v.Verdict, valueLiveGap)
-		}
-		if gaps[row.ID] && v.Verdict != valueLiveGap {
-			return refuse(CodeMissingVerdict, "row %s is a layer-1 gap and must carry %s, got %q", row.ID, valueLiveGap, v.Verdict)
-		}
-		if !gaps[row.ID] && v.Verdict == valueLiveGap {
-			return refuse(CodeInvalidVerdict, "row %s is not a layer-1 gap and must not carry %s", row.ID, valueLiveGap)
 		}
 	}
 	return nil

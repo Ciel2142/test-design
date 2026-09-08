@@ -7,6 +7,7 @@ import (
 
 	"test-design/internal/coverage"
 	"test-design/internal/evidence"
+	"test-design/internal/live"
 )
 
 const (
@@ -297,15 +298,15 @@ func deriveLayer2(rs *reasonSet, in *Inputs, active []coverage.Row) map[string]C
 	return refs
 }
 
+// deriveLayer3 renders the live layer over the obligation the coverage source
+// declares: live.ApplicableRows decides which rows carry a live verdict, and
+// every other active row stays plain N/A.
 func deriveLayer3(rs *reasonSet, in *Inputs, active []coverage.Row) (map[string]string, Layer3Summary) {
 	values := make(map[string]string, len(active))
-	var applicable []coverage.Row
 	for _, row := range active {
 		values[row.ID] = valueNA
-		if row.Level == "smoke" || row.Level == "e2e" {
-			applicable = append(applicable, row)
-		}
 	}
+	applicable := live.ApplicableRows(in.Source)
 
 	sum := Layer3Summary{Applicable: len(applicable)}
 	if len(applicable) == 0 {

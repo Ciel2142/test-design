@@ -353,13 +353,61 @@ func TestValidateUnexpectedLiveEvidenceInapplicableRow(t *testing.T) {
 	}
 }
 
-func TestValidateGapRowLayer3MustCarryNA(t *testing.T) {
+// journeyedSourceInputs makes SC-01 an integration row and hands the source a
+// required live decision whose single journey names it, so layer 3 owes a
+// verdict for a row no level filter would ever select.
+func journeyedSourceInputs() *Inputs {
+	in := baseInputs()
+	in.Source.Rows[0].Level = "integration"
+	in.Source.LiveDecision = &coverage.LiveDecision{
+		Decision: coverage.LiveRequired,
+		Reason:   "the walkthrough is only observable against the running system",
+		Journeys: []coverage.Journey{{
+			ID:        "J-1",
+			Scenarios: []string{"SC-01", "SC-02", "SC-03"},
+			Expected:  "the walkthrough reaches the ready marker",
+		}},
+	}
+	return in
+}
+
+func TestValidateLayer3JourneyedIntegrationRowIsApplicable(t *testing.T) {
+	in := journeyedSourceInputs()
+	in.Live.RowVerdicts = append(in.Live.RowVerdicts, LiveRowVerdict{RowID: "SC-01", Verdict: "LIVE-PASS"})
+	if err := Validate(in); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+}
+
+func TestValidateMissingVerdictLayer3JourneyedRowAbsent(t *testing.T) {
+	in := journeyedSourceInputs()
+	re := wantRefusal(t, Validate(in), CodeMissingVerdict)
+	if !strings.Contains(re.Detail, "SC-01") {
+		t.Errorf("Detail = %q, want it to name the journeyed row SC-01", re.Detail)
+	}
+}
+
+func TestValidateUnexpectedLiveEvidenceNotApplicableDecision(t *testing.T) {
+	in := baseInputs()
+	in.Source.LiveDecision = &coverage.LiveDecision{
+		Decision: coverage.LiveNotApplicable,
+		Reason:   "the fixture has no deployable surface",
+	}
+	re := wantRefusal(t, Validate(in), CodeUnexpectedLiveEvidence)
+	if !strings.Contains(re.Detail, "no applicable live rows") {
+		t.Errorf("Detail = %q, want it to say no applicable live rows exist", re.Detail)
+	}
+}
+
+func TestValidateGapRowLayer3KeepsItsLiveVerdict(t *testing.T) {
 	in := baseInputs()
 	in.Batches = greenBatches()
 	in.Trace.Findings = []TraceFinding{{Kind: "gap", RowID: "SC-02", Detail: "no tagged test"}}
 	in.Batches[2].Verdicts[0].Verdict = "MISSING"
 	in.Mutations = nil
-	wantRefusal(t, Validate(in), CodeMissingVerdict)
+	if err := Validate(in); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
 }
 
 func TestValidateMutationOnGapRow(t *testing.T) {
@@ -423,12 +471,11 @@ func TestValidateInvalidVerdictLayer3Token(t *testing.T) {
 	wantRefusal(t, Validate(in), CodeInvalidVerdict)
 }
 
-func TestValidateInvalidVerdictLayer3GapTokenOnNonGapRow(t *testing.T) {
+func TestValidateLayer3HistoricalGapTokenIsAccepted(t *testing.T) {
 	in := baseInputs()
 	in.Live.RowVerdicts[0].Verdict = "LIVE-N/A (layer 1 gap)"
-	re := wantRefusal(t, Validate(in), CodeInvalidVerdict)
-	if !strings.Contains(re.Detail, "SC-02") {
-		t.Errorf("Detail = %q, want it to name SC-02, which is bound at layer 1", re.Detail)
+	if err := Validate(in); err != nil {
+		t.Fatalf("Validate: %v", err)
 	}
 }
 

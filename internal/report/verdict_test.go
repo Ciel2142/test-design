@@ -347,6 +347,28 @@ func TestComputeGapRowIsBlocked(t *testing.T) {
 	}
 }
 
+func TestComputeGapRowKeepsItsLiveVerdict(t *testing.T) {
+	in := gapInputs()
+	in.Live.RowVerdicts[0].Verdict = "LIVE-PASS"
+
+	r := mustCompute(t, in)
+
+	wantVerdict(t, r, "BLOCKED")
+	if got := rowOf(t, r, "SC-02").Layer3; got != "LIVE-PASS" {
+		t.Errorf("SC-02 Layer3 = %q, want the live run's own verdict LIVE-PASS", got)
+	}
+	wantReason(t, r, "1", "SC-02", "gap")
+	for _, rn := range r.Reasons {
+		if rn.Layer == "3" {
+			t.Errorf("layer-3 reason %+v, want none; the gap blocks at layer 1 alone", rn)
+		}
+	}
+	if r.Layers.Layer3 != (Layer3Summary{Status: "pass", Applicable: 2, Pass: 2}) {
+		t.Errorf("Layer3 summary = %+v, want 2 applicable / 2 pass", r.Layers.Layer3)
+	}
+	wantLayerStatus(t, r, "blocked", "blocked", "pass", "n/a")
+}
+
 func TestComputeSurvivedSiteIsBlocked(t *testing.T) {
 	in := greenInputs()
 	in.Mutations[0].Evidence.Sites[1].Outcome = "survived"
@@ -608,6 +630,36 @@ func TestComputeLayer3NotApplicableIsNA(t *testing.T) {
 	wantLayerStatus(t, r, "pass", "pass", "n/a", "n/a")
 	if got := rowOf(t, r, "SC-01").Layer3; got != "N/A" {
 		t.Errorf("SC-01 Layer3 = %q, want N/A", got)
+	}
+}
+
+// TestComputeLayer3JourneyedIntegrationRowCarriesItsLiveVerdict locks the
+// rendering half of the layer-3 contract: the rows deriveLayer3 renders come
+// from the coverage source's live decision, so a journeyed integration row
+// carries the live run's own verdict instead of the plain N/A a level filter
+// would leave behind.
+func TestComputeLayer3JourneyedIntegrationRowCarriesItsLiveVerdict(t *testing.T) {
+	in := greenInputs()
+	in.Source.Rows[0].Level = "integration"
+	in.Source.LiveDecision = &coverage.LiveDecision{
+		Decision: coverage.LiveRequired,
+		Reason:   "the walkthrough is only observable against the running system",
+		Journeys: []coverage.Journey{{
+			ID:        "J-1",
+			Scenarios: []string{"SC-01"},
+			Expected:  "the walkthrough reaches the ready marker",
+		}},
+	}
+	in.Live.RowVerdicts = append(in.Live.RowVerdicts, LiveRowVerdict{RowID: "SC-01", Verdict: "LIVE-PASS"})
+
+	r := mustCompute(t, in)
+
+	wantVerdict(t, r, "PASS")
+	if got := rowOf(t, r, "SC-01").Layer3; got != "LIVE-PASS" {
+		t.Errorf("SC-01 Layer3 = %q, want the journeyed row's live verdict LIVE-PASS", got)
+	}
+	if r.Layers.Layer3 != (Layer3Summary{Status: "pass", Applicable: 3, Pass: 3}) {
+		t.Errorf("Layer3 summary = %+v, want 3 applicable / 3 pass", r.Layers.Layer3)
 	}
 }
 
