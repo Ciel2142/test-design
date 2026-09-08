@@ -53,7 +53,7 @@ func TestProfileRejectsNegativeExecutionLimits(t *testing.T) {
 			if err := json.Unmarshal(sampleProfileJSON(t, map[string]any{field: -1}), &p); err != nil {
 				t.Fatal(err)
 			}
-			if err := p.Validate("limits"); err == nil {
+			if err := p.ValidateTemplate(); err == nil {
 				t.Fatalf("negative %s accepted", field)
 			}
 		})
@@ -67,7 +67,7 @@ func TestProfileSeparatesExecutionAndCleanupLimits(t *testing.T) {
 	}), &p); err != nil {
 		t.Fatal(err)
 	}
-	if err := p.Validate("limits"); err != nil {
+	if err := p.ValidateTemplate(); err != nil {
 		t.Fatal(err)
 	}
 	if got := p.Limits(false); got.Timeout != time.Second || got.OutputBytes != 128 {
@@ -192,32 +192,32 @@ func validProfile() *Profile {
 	}
 }
 
-func TestValidateAcceptsWellFormedLocalProfile(t *testing.T) {
+func TestValidateTemplateAcceptsWellFormedLocalProfile(t *testing.T) {
 	p := validProfile()
-	if err := p.Validate("run-abc"); err != nil {
-		t.Errorf("Validate() = %v, want nil", err)
+	if err := p.ValidateTemplate(); err != nil {
+		t.Errorf("ValidateTemplate() = %v, want nil", err)
 	}
 }
 
-func TestValidateAcceptsEphemeralProfileWithNonLoopbackEndpoint(t *testing.T) {
+func TestValidateTemplateAcceptsEphemeralProfileWithNonLoopbackEndpoint(t *testing.T) {
 	p := validProfile()
 	p.Classification = "ephemeral"
 	p.Endpoints = []string{"http://10.0.5.9:8099"}
-	if err := p.Validate("run-abc"); err != nil {
-		t.Errorf("Validate() = %v, want nil (endpoint check is local-only)", err)
+	if err := p.ValidateTemplate(); err != nil {
+		t.Errorf("ValidateTemplate() = %v, want nil (endpoint check is local-only)", err)
 	}
 }
 
-func TestValidateAcceptsLoopbackEndpointVariants(t *testing.T) {
+func TestValidateTemplateAcceptsLoopbackEndpointVariants(t *testing.T) {
 	loopbacks := []string{"http://127.0.0.1:8099", "http://localhost:8099", "http://[::1]:8099"}
 	p := validProfile()
 	p.Endpoints = loopbacks
-	if err := p.Validate("run-abc"); err != nil {
-		t.Errorf("Validate() = %v, want nil for loopback endpoints %v", err, loopbacks)
+	if err := p.ValidateTemplate(); err != nil {
+		t.Errorf("ValidateTemplate() = %v, want nil for loopback endpoints %v", err, loopbacks)
 	}
 }
 
-func TestValidateUnsupportedClassification(t *testing.T) {
+func TestValidateTemplateUnsupportedClassification(t *testing.T) {
 	tests := []struct {
 		name           string
 		classification string
@@ -230,9 +230,9 @@ func TestValidateUnsupportedClassification(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			p := validProfile()
 			p.Classification = tc.classification
-			err := p.Validate("run-abc")
+			err := p.ValidateTemplate()
 			if err == nil {
-				t.Fatal("Validate() returned nil error, want unsupported-classification")
+				t.Fatal("ValidateTemplate() returned nil error, want unsupported-classification")
 			}
 			if !strings.Contains(err.Error(), "unsupported-classification") {
 				t.Errorf("error = %q, want it to contain unsupported-classification", err.Error())
@@ -241,13 +241,13 @@ func TestValidateUnsupportedClassification(t *testing.T) {
 	}
 }
 
-func TestValidateUndeclaredEndpointForLocalClassification(t *testing.T) {
+func TestValidateTemplateUndeclaredEndpointForLocalClassification(t *testing.T) {
 	p := validProfile()
 	p.Endpoints = []string{"http://198.51.100.7:8099"}
 
-	err := p.Validate("run-abc")
+	err := p.ValidateTemplate()
 	if err == nil {
-		t.Fatal("Validate() returned nil error, want undeclared-endpoint")
+		t.Fatal("ValidateTemplate() returned nil error, want undeclared-endpoint")
 	}
 	if !strings.Contains(err.Error(), "undeclared-endpoint") {
 		t.Errorf("error = %q, want it to contain undeclared-endpoint", err.Error())
@@ -257,13 +257,13 @@ func TestValidateUndeclaredEndpointForLocalClassification(t *testing.T) {
 	}
 }
 
-func TestValidateRunIDMissingFromResources(t *testing.T) {
+func TestValidateTemplateRunIDMissingFromResources(t *testing.T) {
 	p := validProfile()
 	p.ResourcePrefixes = []string{"fixture-{run-id}", "orphan-resource"}
 
-	err := p.Validate("run-abc")
+	err := p.ValidateTemplate()
 	if err == nil {
-		t.Fatal("Validate() returned nil error, want run-id-missing-from-resources")
+		t.Fatal("ValidateTemplate() returned nil error, want run-id-missing-from-resources")
 	}
 	if !strings.Contains(err.Error(), "run-id-missing-from-resources") {
 		t.Errorf("error = %q, want it to contain run-id-missing-from-resources", err.Error())
@@ -273,7 +273,7 @@ func TestValidateRunIDMissingFromResources(t *testing.T) {
 	}
 }
 
-func TestValidateMissingCleanup(t *testing.T) {
+func TestValidateTemplateMissingCleanup(t *testing.T) {
 	tests := []struct {
 		name    string
 		corrupt func(*Profile)
@@ -285,12 +285,104 @@ func TestValidateMissingCleanup(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			p := validProfile()
 			tc.corrupt(p)
-			err := p.Validate("run-abc")
+			err := p.ValidateTemplate()
 			if err == nil {
-				t.Fatal("Validate() returned nil error, want missing-cleanup")
+				t.Fatal("ValidateTemplate() returned nil error, want missing-cleanup")
 			}
 			if !strings.Contains(err.Error(), "missing-cleanup") {
 				t.Errorf("error = %q, want it to contain missing-cleanup", err.Error())
+			}
+		})
+	}
+}
+
+// resolvedProfile returns the descriptor prepare-live produces for runID: the
+// committed template with every {run-id} token already replaced.
+func resolvedProfile(runID string) *Profile {
+	p := validProfile()
+	p.Start = [][]string{{"./scripts/start.sh", "--scratch", "fixture-" + runID}}
+	p.ResourcePrefixes = []string{"fixture-" + runID}
+	return p
+}
+
+func TestValidateResolvedAcceptsSubstitutedDescriptor(t *testing.T) {
+	p := resolvedProfile("run-abc")
+	if err := p.ValidateResolved("run-abc"); err != nil {
+		t.Errorf("ValidateResolved() = %v, want nil for a descriptor produced by substitution", err)
+	}
+}
+
+func TestValidateResolvedRunIDMissingFromResources(t *testing.T) {
+	p := resolvedProfile("run-abc")
+	p.ResourcePrefixes = []string{"fixture-run-abc", "orphan-resource"}
+
+	err := p.ValidateResolved("run-abc")
+	if err == nil {
+		t.Fatal("ValidateResolved() returned nil error, want run-id-missing-from-resources")
+	}
+	if !strings.Contains(err.Error(), "run-id-missing-from-resources") {
+		t.Errorf("error = %q, want it to contain run-id-missing-from-resources", err.Error())
+	}
+	if !strings.Contains(err.Error(), "orphan-resource") {
+		t.Errorf("error = %q, want it to name the offending entry", err.Error())
+	}
+}
+
+func TestValidateResolvedRefusesLeftoverRunIDToken(t *testing.T) {
+	tests := []struct {
+		field   string
+		corrupt func(*Profile)
+	}{
+		{"start", func(p *Profile) { p.Start = [][]string{{"./scripts/start.sh", "fixture-{run-id}"}} }},
+		{"health", func(p *Profile) { p.Health = [][]string{{"./scripts/health.sh", "fixture-{run-id}"}} }},
+		{"walkthrough", func(p *Profile) { p.Walkthrough = [][]string{{"./scripts/walk.sh", "fixture-{run-id}"}} }},
+		{"cleanup", func(p *Profile) { p.Cleanup = [][]string{{"./scripts/cleanup.sh", "fixture-{run-id}"}} }},
+		// This prefix carries the run ID too, so it clears the
+		// run-id-missing-from-resources check and reaches the token sweep.
+		{"resourcePrefixes", func(p *Profile) { p.ResourcePrefixes = []string{"fixture-run-abc-{run-id}"} }},
+		{"endpoints", func(p *Profile) { p.Endpoints = []string{"http://127.0.0.1:8099/{run-id}"} }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.field, func(t *testing.T) {
+			p := resolvedProfile("run-abc")
+			tc.corrupt(p)
+
+			err := p.ValidateResolved("run-abc")
+			if err == nil {
+				t.Fatalf("ValidateResolved() returned nil error, want unresolved-run-id %s", tc.field)
+			}
+			if !strings.Contains(err.Error(), "unresolved-run-id") {
+				t.Errorf("error = %q, want it to contain unresolved-run-id", err.Error())
+			}
+			if !strings.Contains(err.Error(), tc.field) {
+				t.Errorf("error = %q, want it to name the offending field %s", err.Error(), tc.field)
+			}
+		})
+	}
+}
+
+func TestValidateResolvedKeepsTemplateInvariants(t *testing.T) {
+	tests := []struct {
+		name    string
+		refusal string
+		corrupt func(*Profile)
+	}{
+		{"negative limits", "invalid-limits", func(p *Profile) { p.TimeoutSeconds = -1 }},
+		{"classification", "unsupported-classification", func(p *Profile) { p.Classification = "production" }},
+		{"endpoint", "undeclared-endpoint", func(p *Profile) { p.Endpoints = []string{"http://198.51.100.7:8099"} }},
+		{"cleanup", "missing-cleanup", func(p *Profile) { p.CleanupEvidence = nil }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			p := resolvedProfile("run-abc")
+			tc.corrupt(p)
+
+			err := p.ValidateResolved("run-abc")
+			if err == nil {
+				t.Fatalf("ValidateResolved() returned nil error, want %s", tc.refusal)
+			}
+			if !strings.Contains(err.Error(), tc.refusal) {
+				t.Errorf("error = %q, want it to contain %s", err.Error(), tc.refusal)
 			}
 		})
 	}

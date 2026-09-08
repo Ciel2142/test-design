@@ -13,19 +13,19 @@ import (
 )
 
 type Profile struct {
-	SchemaVersion    string      `json:"schemaVersion"`
-	Classification   string      `json:"classification"`
-	Start            [][]string  `json:"start"`
-	Health           [][]string  `json:"health"`
-	Walkthrough      [][]string  `json:"walkthrough"`
-	Cleanup          [][]string  `json:"cleanup"`
-	CleanupEvidence  []Predicate `json:"cleanupEvidence"`
-	EnvAllowlist     []string    `json:"envAllowlist"`
-	ResourcePrefixes []string    `json:"resourcePrefixes"`
-	Endpoints        []string    `json:"endpoints"`
-	TimeoutSeconds        int64 `json:"timeoutSeconds,omitempty"`
-	CleanupTimeoutSeconds int64 `json:"cleanupTimeoutSeconds,omitempty"`
-	MaxOutputBytes        int64 `json:"maxOutputBytes,omitempty"`
+	SchemaVersion         string      `json:"schemaVersion"`
+	Classification        string      `json:"classification"`
+	Start                 [][]string  `json:"start"`
+	Health                [][]string  `json:"health"`
+	Walkthrough           [][]string  `json:"walkthrough"`
+	Cleanup               [][]string  `json:"cleanup"`
+	CleanupEvidence       []Predicate `json:"cleanupEvidence"`
+	EnvAllowlist          []string    `json:"envAllowlist"`
+	ResourcePrefixes      []string    `json:"resourcePrefixes"`
+	Endpoints             []string    `json:"endpoints"`
+	TimeoutSeconds        int64       `json:"timeoutSeconds,omitempty"`
+	CleanupTimeoutSeconds int64       `json:"cleanupTimeoutSeconds,omitempty"`
+	MaxOutputBytes        int64       `json:"maxOutputBytes,omitempty"`
 }
 
 type Predicate struct {
@@ -35,18 +35,19 @@ type Predicate struct {
 }
 
 const (
-	defaultTimeout = 120 * time.Second
-	defaultCleanupTimeout = 30 * time.Second
+	defaultTimeout              = 120 * time.Second
+	defaultCleanupTimeout       = 30 * time.Second
 	defaultMaxOutputBytes int64 = 16777216
 )
 
 type Limits struct {
-	Timeout time.Duration
+	Timeout     time.Duration
 	OutputBytes int64
 }
 
 // Limits returns independent deadlines for ordinary and cleanup commands.
-// Validate must succeed before a profile is used for execution.
+// ValidateTemplate or ValidateResolved must succeed before a profile is used
+// for execution.
 func (p *Profile) Limits(cleanup bool) Limits {
 	seconds, timeout := p.TimeoutSeconds, defaultTimeout
 	if cleanup {
@@ -81,10 +82,59 @@ func LoadProfile(path string) (*Profile, error) {
 	return &p, nil
 }
 
-// Validate checks the fail-closed invariants required before any live
-// process starts. runID is accepted for future {run-id} substitution
-// callers; this task performs no substitution.
-func (p *Profile) Validate(runID string) error {
+// runIDToken is the placeholder a committed profile writes wherever the run
+// identifier belongs; prepare-live replaces it with the run ID it minted.
+const runIDToken = "{run-id}"
+
+// ValidateTemplate checks a profile as committed: the fail-closed invariants
+// every live run needs, plus the requirement that each resourcePrefixes entry
+// still carries the {run-id} token, so no committed profile can name a
+// resource shared between runs.
+func (p *Profile) ValidateTemplate() error {
+	if err := p.validateInvariants(); err != nil {
+		return err
+	}
+
+	for _, entry := range p.ResourcePrefixes {
+		if !strings.Contains(entry, runIDToken) {
+			return fmt.Errorf("live profile: run-id-missing-from-resources %s", entry)
+		}
+	}
+
+	return p.validateCleanup()
+}
+
+// ValidateResolved checks the descriptor prepare-live produced for runID: the
+// same invariants as the template, that each resourcePrefixes entry now names
+// runID itself, and that substitution left no {run-id} token behind anywhere a
+// command, prefix or endpoint could still carry one. A leftover token would
+// otherwise reach the running system verbatim.
+func (p *Profile) ValidateResolved(runID string) error {
+	if err := p.validateInvariants(); err != nil {
+		return err
+	}
+
+	for _, entry := range p.ResourcePrefixes {
+		if !strings.Contains(entry, runID) {
+			return fmt.Errorf("live profile: run-id-missing-from-resources %s", entry)
+		}
+	}
+
+	for _, field := range p.substitutedFields() {
+		for _, value := range field.values {
+			if strings.Contains(value, runIDToken) {
+				return fmt.Errorf("live profile: unresolved-run-id %s", field.name)
+			}
+		}
+	}
+
+	return p.validateCleanup()
+}
+
+// validateInvariants holds the checks a template and a resolved descriptor
+// share, in the refusal order both report: invalid-limits,
+// unsupported-classification, undeclared-endpoint.
+func (p *Profile) validateInvariants() error {
 	if p.TimeoutSeconds < 0 || p.CleanupTimeoutSeconds < 0 || p.MaxOutputBytes < 0 {
 		return fmt.Errorf("live profile: invalid-limits: limits must not be negative")
 	}
@@ -104,17 +154,42 @@ func (p *Profile) Validate(runID string) error {
 		}
 	}
 
-	for _, entry := range p.ResourcePrefixes {
-		if !strings.Contains(entry, "{run-id}") {
-			return fmt.Errorf("live profile: run-id-missing-from-resources %s", entry)
-		}
-	}
+	return nil
+}
 
+func (p *Profile) validateCleanup() error {
 	if len(p.Cleanup) == 0 || len(p.CleanupEvidence) == 0 {
 		return fmt.Errorf("live profile: missing-cleanup")
 	}
-
 	return nil
+}
+
+// substitutedField is one profile field prepare-live substitutes, carried
+// under the JSON name a refusal reports.
+type substitutedField struct {
+	name   string
+	values []string
+}
+
+// substitutedFields lists every field prepare-live substitutes, so the
+// unresolved-run-id sweep and the substitution stay in step.
+func (p *Profile) substitutedFields() []substitutedField {
+	return []substitutedField{
+		{"start", flattenArgv(p.Start)},
+		{"health", flattenArgv(p.Health)},
+		{"walkthrough", flattenArgv(p.Walkthrough)},
+		{"cleanup", flattenArgv(p.Cleanup)},
+		{"resourcePrefixes", p.ResourcePrefixes},
+		{"endpoints", p.Endpoints},
+	}
+}
+
+func flattenArgv(groups [][]string) []string {
+	var out []string
+	for _, argv := range groups {
+		out = append(out, argv...)
+	}
+	return out
 }
 
 func isLoopbackEndpoint(endpoint string) bool {
