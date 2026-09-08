@@ -1,0 +1,4 @@
+Revision 1
+  agent commit: 75c0902 (feat(agents): add the design-stage scenario reviewer)
+  git hash-object agents/scenario-reviewer.md: 1cad237c1e6cc7079943fff84c26950de3ffd24c
+  dispatched at HEAD: 3e6d24b (review mode: draft-a, draft-b, risk-contrast)
