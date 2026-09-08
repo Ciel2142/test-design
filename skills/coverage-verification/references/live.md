@@ -132,11 +132,13 @@ The evidence's JSON names are the contract; read them by field, not by summary:
   rather than vindicated.
 - `executionErrors` mixes three causes, not one: a command that did not complete (timeout,
   signal, cancellation, output-cap overflow, or a capture error) as `<phase>[<index>]: <cause>`;
-  a completed command whose raw stdout/stderr/combined output could not be SHA-256'd, as
-  `hash <path>: <err>`; and a completed command whose decisive output the redaction barrier
-  withheld, also as `<phase>[<index>]: <cause>`. A step named by the first or third form has no
-  reduced entry in its phase's step list and no `unboundFailures` entry: neither a non-completion
-  nor a withheld transcript is a completed, failed predicate.
+  the raw stdout/stderr/combined output of any command that started — whether or not it went on
+  to complete — that could not be SHA-256'd, as `hash <path>: <err>` (this can co-occur with that
+  same step's own non-completion entry; it does not imply the step has a result); and a completed
+  command whose decisive output the redaction barrier withheld, also as `<phase>[<index>]:
+  <cause>`. A step named by the first or third form has no reduced entry in its phase's step list
+  and no `unboundFailures` entry: neither a non-completion nor a withheld transcript is a
+  completed, failed predicate.
 - Phase results — `startSteps[].result`, `healthSteps[].result`, and the profile-cleanup entries
   inside `cleanupSteps[].result` — are `pass` iff the command completed with exit 0 (start,
   health, and every profile cleanup command carry this predicate implicitly, and the configured
