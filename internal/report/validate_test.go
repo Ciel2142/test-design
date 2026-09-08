@@ -10,7 +10,7 @@ import (
 
 func baseSource() *coverage.Source {
 	return &coverage.Source{
-		Path: greenSourcePath,
+		Path:   greenSourcePath,
 		SHA256: "sha-source-1",
 		Rows: []coverage.Row{
 			{ID: "SC-01", Level: "unit", Risk: "low"},
@@ -25,8 +25,8 @@ func baseSource() *coverage.Source {
 func baseTrace() *TraceEvidence {
 	return &TraceEvidence{
 		RunID:        "run-1",
-		RepoCommit: "head-1",
-		Source: greenSourcePath,
+		RepoCommit:   "head-1",
+		Source:       greenSourcePath,
 		SourceSHA256: "sha-source-1",
 	}
 }
@@ -66,8 +66,8 @@ func baseBatches() []Batch {
 func baseLive() *LiveEvidence {
 	return &LiveEvidence{
 		RunID:        "run-1",
-		RepoCommit: "head-1",
-		Source: greenSourcePath,
+		RepoCommit:   "head-1",
+		Source:       greenSourcePath,
 		SourceSHA256: "sha-source-1",
 		RowVerdicts: []LiveRowVerdict{
 			{RowID: "SC-02", Verdict: "LIVE-PASS"},
@@ -83,12 +83,12 @@ func baseMutations() []MutationInput {
 			RowID:        "SC-02",
 			EvidencePath: "testdata/mutation-valid.json",
 			Evidence: &MutationEvidence{
-				RunID: "run-1",
-				RepoCommit: "head-1",
-				Source: greenSourcePath,
+				RunID:        "run-1",
+				RepoCommit:   "head-1",
+				Source:       greenSourcePath,
 				SourceSHA256: "sha-source-1",
-				RowID: "SC-02",
-				Sites: []MutationSiteOutcome{{Site: "x", Outcome: "caught"}},
+				RowID:        "SC-02",
+				Sites:        []MutationSiteOutcome{{Site: "x", Outcome: "caught"}},
 			},
 		},
 	}
@@ -96,14 +96,14 @@ func baseMutations() []MutationInput {
 
 func baseInputs() *Inputs {
 	return &Inputs{
-		Source:    baseSource(),
-		RunID:     "run-1",
+		Source:     baseSource(),
+		RunID:      "run-1",
 		HeadCommit: "head-1",
-		Trace:     baseTrace(),
-		Freshness: Freshness{Result: "fresh"},
-		Batches:   baseBatches(),
-		Live:      baseLive(),
-		Mutations: baseMutations(),
+		Trace:      baseTrace(),
+		Freshness:  Freshness{Result: "fresh"},
+		Batches:    baseBatches(),
+		Live:       baseLive(),
+		Mutations:  baseMutations(),
 	}
 }
 

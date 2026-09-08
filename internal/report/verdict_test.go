@@ -86,7 +86,7 @@ func greenLive() *LiveEvidence {
 		RunID:        "run-1",
 		Source:       greenSourcePath,
 		SourceSHA256: "sha-source-1",
-		RepoCommit: "head-1",
+		RepoCommit:   "head-1",
 		RowVerdicts: []LiveRowVerdict{
 			{RowID: "SC-02", Verdict: "LIVE-PASS"},
 			{RowID: "SC-03", Verdict: "LIVE-PASS"},
@@ -101,11 +101,11 @@ func greenMutations() []MutationInput {
 		RowID:        "SC-02",
 		EvidencePath: "run/mutation-SC-02.json",
 		Evidence: &MutationEvidence{
-			RunID: "run-1",
-			RepoCommit: "head-1",
-			Source: greenSourcePath,
+			RunID:        "run-1",
+			RepoCommit:   "head-1",
+			Source:       greenSourcePath,
 			SourceSHA256: "sha-source-1",
-			RowID: "SC-02",
+			RowID:        "SC-02",
 			Sites: []MutationSiteOutcome{
 				{Site: "pkg/b.go:12", Outcome: "caught"},
 				{Site: "pkg/b.go:20", Outcome: "caught"},
@@ -416,7 +416,7 @@ func TestComputeMutationEnvironmentalIsPartial(t *testing.T) {
 		Outcome:             "environmental",
 		Reason:              "docker unavailable",
 		AttemptEvidencePath: "run/mutation-attempt-SC-02.json",
-		Attempt: &Attempt{RunID: "run-1", RowID: "SC-02", RepoCommit: "head-1", Source: greenSourcePath, SourceSHA256: "sha-source-1", Refusal: "docker unavailable"},
+		Attempt:             &Attempt{RunID: "run-1", RowID: "SC-02", RepoCommit: "head-1", Source: greenSourcePath, SourceSHA256: "sha-source-1", Refusal: "docker unavailable"},
 	}}
 
 	r := mustCompute(t, in)
