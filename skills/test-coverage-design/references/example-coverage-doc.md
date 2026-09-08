@@ -39,7 +39,13 @@ None — the suite was green at the baseline commit.
 - `LIVE J-1 expected result is not observable on the deployed revision` — "the store call
   failed" is internal state. **Applied**: J-1 now names the status, the body, and the unacked
   message.
-- Recheck: all three `RESOLVED`, no `NEW GAP`. Nothing was left `OPEN` for the user.
+- Recheck: `MERGE` and `LIVE` came back `RESOLVED`; `RISK SC-01 med→high` came back `OPEN`,
+  because SC-01 is still `med` and the recheck never sees why it was rejected. No `NEW GAP`.
+- Carried to the user at approval alongside
+  `Cost: 4 surviving scenarios, 3 high-risk obligations, 1 live journeys`: leaving SC-01
+  `med` means the lower-bound guard carries no layer 4 mutation evidence, so nothing but
+  SC-01's own test stands between a loosened guard and a zero-quantity order. The user kept
+  `med`.
 
 ## Invariants
 

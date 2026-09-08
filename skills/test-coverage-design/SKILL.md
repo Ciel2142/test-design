@@ -284,9 +284,11 @@ escalated; ordinary cleanup is applied or rejected.
 
 Then dispatch it once more with the amended draft and its own previous findings, and
 `mode: recheck`. It answers each previous finding `RESOLVED`, `OPEN`, or `NEW GAP`, and
-reviews the amended rows. **There is exactly one recheck.** Anything still `OPEN` or
-`NEW GAP` after it goes to the user at approval, each with its concrete consequence; the
-user decides, and there is no further round.
+reviews the amended rows. A finding you rejected comes back `OPEN` — the recheck reads the
+amended draft and its own previous findings, never your reasons — so expect to carry it, with
+your reason and its concrete consequence, to the user. **There is exactly one recheck.**
+Anything still `OPEN` or `NEW GAP` after it goes to the user at approval, each with its
+concrete consequence; the user decides, and there is no further round.
 
 Record the round in a `## Review record` section of the coverage source:
 
