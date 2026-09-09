@@ -113,8 +113,9 @@ The evidence's JSON names are the contract; read them by field, not by summary:
   steps run only when both `start` and `health` passed, so a bound row no completed plan step
   reached is `LIVE-INCONCLUSIVE`.
 - `unboundFailures` lists every completed command whose predicates failed but that reached no row
-  verdict: a `start` or `health` command, a plan `step` with no `scBindings`, or a `plan-cleanup`
-  step whose bindings could not apply because the walkthrough never ran. Each entry names `phase`
+  verdict: a `start` or `health` command, a plan `step` with no `scBindings`, a `plan-cleanup` step
+  with no `scBindings`, or a `plan-cleanup` step whose bindings could not apply because `start` or
+  `health` failed and the walkthrough never ran. Each entry names `phase`
   (`start | health | step | plan-cleanup`), a 1-based `index` within that phase, and
   `expectation` — the planner's own text, passed through the same redaction barrier as a
   transcript and replaced with the literal `[withheld by redaction barrier]` on a hit. The array
@@ -135,10 +136,15 @@ The evidence's JSON names are the contract; read them by field, not by summary:
   the raw stdout/stderr/combined output of any command that started — whether or not it went on
   to complete — that could not be SHA-256'd, as `hash <path>: <err>` (this can co-occur with that
   same step's own non-completion entry; it does not imply the step has a result); and a completed
-  command whose decisive output the redaction barrier withheld, also as `<phase>[<index>]:
-  <cause>`. A step named by the first or third form has no reduced entry in its phase's step list
-  and no `unboundFailures` entry: neither a non-completion nor a withheld transcript is a
-  completed, failed predicate.
+  command whose transcript the redaction barrier withheld, also as `<phase>[<index>]: <cause>`.
+  The first and third forms differ in what else the run records. A step that did not complete has
+  no reduced entry in its phase's step list and no `unboundFailures` entry: a non-completion is
+  not a completed, failed predicate. A step whose transcript was withheld has no reduced entry
+  either, but it did complete and its predicates were still judged: it settles the rows it binds
+  as any other step would, and an unbound one whose predicates failed is listed in
+  `unboundFailures` — carrying `[withheld by redaction barrier]` in place of its `expectation`
+  when that text is what the barrier caught, and the planner's own text when the value was in the
+  command or the output instead.
 - Phase results — `startSteps[].result`, `healthSteps[].result`, and the profile-cleanup entries
   inside `cleanupSteps[].result` — are `pass` iff the command completed with exit 0 (start,
   health, and every profile cleanup command carry this predicate implicitly, and the configured

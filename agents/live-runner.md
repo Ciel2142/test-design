@@ -93,11 +93,13 @@ more facts shape how the plan you hand back is judged:
   list into `live-unbound-assertion-failed` (BLOCKED), naming every `phase[index] expectation`.
   Write an unbound step's expectation and predicates as carefully as a bound one — nothing
   shields it from judgment.
-- **A plan-cleanup step's failure is recorded even when its rows never ran.** If the walkthrough
-  failed before plan-cleanup started, a plan-cleanup step's verdict cannot apply to the rows it
-  binds — those rows already carry the walkthrough's own outcome — but a failed predicate on the
-  step itself still reaches `unboundFailures` rather than disappearing with the rows it could not
-  reach.
+- **A plan-cleanup step's failure is recorded even when the walkthrough never ran.** Only `start`
+  or `health` failing suppresses a plan-cleanup step's verdicts: the walkthrough those rows
+  needed never happened, so they stay `LIVE-INCONCLUSIVE` and the cleanup step cannot speak for
+  them — but a failed predicate on the step itself still reaches `unboundFailures` rather than
+  disappearing with the rows it could not reach. A business step that failed suppresses nothing:
+  the walkthrough ran, so the plan-cleanup steps after it carry their verdicts to the rows they
+  bind as usual, and the worse of the two outcomes is the one a row keeps.
 - **A deadline, cancellation, or output cap makes a step `LIVE-INCONCLUSIVE`, not a judged
   prefix.** A step that does not complete has no predicate result at all, however successful the
   output captured so far looks; every row it binds is `LIVE-INCONCLUSIVE`. Size a walkthrough's
