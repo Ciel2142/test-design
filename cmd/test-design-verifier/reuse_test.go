@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -783,4 +784,368 @@ func TestReuse_RefusesAPolicyInputItCannotIdentify(t *testing.T) {
 	if got := reuseDecisionFor(t, identified.Review, "A"); !got.Reused {
 		t.Errorf("group A = %+v, want it adopted under the policy the prior run recorded", got)
 	}
+}
+
+// pinToolchainMap fixes the whole tool-version map the trace records, so a
+// test can present a run whose version probes answered nothing at all. Nested
+// calls unwind in order.
+func pinToolchainMap(t *testing.T, versions map[string]string) {
+	t.Helper()
+	previous := toolVersionsFor
+	toolVersionsFor = func(string, string, []string) map[string]string {
+		return maps.Clone(versions)
+	}
+	t.Cleanup(func() { toolVersionsFor = previous })
+}
+
+// subdirectoryFixtureRepo is the go fixture with its module moved under sub/
+// and the coverage document naming sub as the runner root, so every path the
+// trace binds is relative to a directory below the repository root.
+func subdirectoryFixtureRepo(t *testing.T) string {
+	t.Helper()
+	return fixtureRepoWith(t, func(repo string) {
+		if err := os.MkdirAll(filepath.Join(repo, "sub"), 0o755); err != nil {
+			t.Fatalf("mkdir sub: %v", err)
+		}
+		for _, name := range []string{"go.mod", "orders", "payments"} {
+			if err := os.Rename(filepath.Join(repo, name), filepath.Join(repo, "sub", name)); err != nil {
+				t.Fatalf("move %s under sub: %v", name, err)
+			}
+		}
+		rewriteFixtureDoc(t, repo, func(doc string) string {
+			return strings.Replace(doc, "- runner-root: .", "- runner-root: sub", 1)
+		})
+	})
+}
+
+// TestReuse_ARunnerRootBelowTheRepositoryKeysTheBundleByRepositoryPath holds
+// the bundle to the repository's own paths. The trace binds a test relative to
+// the runner root, but a manifest is compared against git's repo-relative
+// paths, so a bundle keyed by the runner-relative file would digest nothing
+// under a runner root other than "." and classify every change as unowned.
+func TestReuse_ARunnerRootBelowTheRepositoryKeysTheBundleByRepositoryPath(t *testing.T) {
+	repo := subdirectoryFixtureRepo(t)
+	const priorRunID = "reuse-runner-root-prior"
+	const runID = "reuse-runner-root-new"
+	const ordersTest = "sub/orders/orders_test.go"
+	policy := reusePolicy(t)
+
+	priorDispatch := tracedDispatch(t, repo, priorRunID)
+	if got := dispatchRowFor(t, priorDispatch, "SC-01").File; got != "orders/orders_test.go" {
+		t.Fatalf("dispatch file = %q, want the trace to bind relative to the runner root", got)
+	}
+	started := startReviewGroupWith(t, repo, priorRunID, "A", policy, "SC-01", "SC-02", "SC-10")
+	paths := []string{}
+	for _, file := range started.Bundle {
+		paths = append(paths, file.Path)
+		want, err := evidence.SHA256File(filepath.Join(repo, filepath.FromSlash(file.Path)))
+		if err != nil {
+			t.Errorf("bundle names %s, which the repository does not hold: %v", file.Path, err)
+			continue
+		}
+		if file.SHA256 != want {
+			t.Errorf("bundle[%s] = %q, want the real file's digest %q", file.Path, file.SHA256, want)
+		}
+	}
+	if !slices.Contains(paths, ordersTest) {
+		t.Errorf("bundle paths = %v, want %s among them, keyed by its repository path", paths, ordersTest)
+	}
+	if !slices.Equal(started.ManifestIncomplete, []string{"reads-unrecorded"}) {
+		t.Errorf("started manifestIncomplete = %v, want only reads-unrecorded: every bundled file is identifiable", started.ManifestIncomplete)
+	}
+	completeReviewGroupWith(t, repo, priorRunID, "A", priorDispatch, &[]string{}, "SC-01", "SC-02", "SC-10")
+	startReviewGroupWith(t, repo, priorRunID, "B", policy, "SC-05", "SC-06")
+	completeReviewGroupWith(t, repo, priorRunID, "B", priorDispatch, &[]string{}, "SC-05", "SC-06")
+
+	appendToRepoFile(t, repo, ordersTest, "\n// an edit to the file, not to any declaration it holds\n")
+	commitAll(t, repo, "edit a test file exactly one group was handed, below the runner root")
+
+	tracedDispatch(t, repo, runID)
+	out := runReuse(t, repo, runID, priorRunID, policy)
+
+	changed := reuseChangedPathFor(t, out, ordersTest)
+	if changed.Class != changeIsolated || !slices.Equal(changed.Groups, []string{"A"}) {
+		t.Errorf("%s = %+v, want it isolated to group A", ordersTest, changed)
+	}
+	want := "isolated-change:" + ordersTest
+	if got := reuseDecisionFor(t, out.Review, "A"); got.Reused || got.Reason != want {
+		t.Errorf("group A = %+v, want it refused %q", got, want)
+	}
+	if got := reuseDecisionFor(t, out.Review, "B"); !got.Reused {
+		t.Errorf("group B = %+v, want it adopted: nothing it was handed moved", got)
+	}
+}
+
+// TestReuse_AMutationRowIsJudgedOnTheTraceThatPrecededIt pins which trace
+// speaks for a row's toolchain: the one recorded before the row, not the run's
+// latest. A row measured under one toolchain, followed by a repeated trace
+// under another, was still measured under the first, so a run on the second
+// toolchain may not adopt it as matched.
+func TestReuse_AMutationRowIsJudgedOnTheTraceThatPrecededIt(t *testing.T) {
+	repo := fixtureRepo(t)
+	const priorRunID = "reuse-preceding-trace-prior"
+	const runID = "reuse-preceding-trace-new"
+	rows := []string{"SC-01", "SC-02", "SC-10"}
+	policy := reusePolicy(t)
+
+	pinToolchain(t, "go version go1.0.0")
+	priorDispatch := tracedDispatch(t, repo, priorRunID)
+	startReviewGroupWith(t, repo, priorRunID, "A", policy, rows...)
+	completeReviewGroupWith(t, repo, priorRunID, "A", priorDispatch, &[]string{}, rows...)
+	unappliableRow(t, repo, priorRunID, "SC-10")
+
+	pinToolchain(t, "go version go2.0.0")
+	code, _, stderr := runVerifyOp(t, "trace", requestWith(t, repo, priorRunID, map[string]any{
+		"repeat": map[string]any{"reason": "the toolchain was upgraded after the row was measured"},
+	}))
+	if code != exitOK {
+		t.Fatalf("repeat trace exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+
+	tracedDispatch(t, repo, runID)
+	out := runReuse(t, repo, runID, priorRunID, policy)
+
+	if got := reuseDecisionFor(t, out.Mutation, "SC-10"); got.Reused || got.Reason != "toolchain-changed" {
+		t.Errorf("SC-10 = %+v, want it refused toolchain-changed: the trace preceding the row recorded go1.0.0 and still verifies, and this run measures under go2.0.0", got)
+	}
+}
+
+// TestReuse_AnUnidentifiedToolchainNeverMatchesAnother keeps two failed
+// version probes from agreeing with each other: a prior run whose trace
+// recorded no tool version at all, or a run asking that recorded none, has
+// nothing to compare, and nothing compared is not a match.
+func TestReuse_AnUnidentifiedToolchainNeverMatchesAnother(t *testing.T) {
+	repo := fixtureRepo(t)
+	const priorRunID = "reuse-empty-toolchain-prior"
+	rows := []string{"SC-01", "SC-02", "SC-10"}
+	policy := reusePolicy(t)
+
+	pinToolchainMap(t, map[string]string{})
+	priorDispatch := tracedDispatch(t, repo, priorRunID)
+	startReviewGroupWith(t, repo, priorRunID, "A", policy, rows...)
+	completeReviewGroupWith(t, repo, priorRunID, "A", priorDispatch, &[]string{}, rows...)
+	unappliableRow(t, repo, priorRunID, "SC-10")
+
+	t.Run("both unidentified", func(t *testing.T) {
+		const runID = "reuse-empty-toolchain-both"
+		tracedDispatch(t, repo, runID)
+		out := runReuse(t, repo, runID, priorRunID, policy)
+		if got := reuseDecisionFor(t, out.Mutation, "SC-10"); got.Reused || got.Reason != "toolchain-unrecorded" {
+			t.Errorf("SC-10 = %+v, want it refused toolchain-unrecorded: two empty toolchains are not the same toolchain", got)
+		}
+		if got := reuseDecisionFor(t, out.Review, "A"); !got.Reused {
+			t.Errorf("group A = %+v, want the review still adopted: a critic reads source, it does not run it", got)
+		}
+	})
+
+	t.Run("only the prior unidentified", func(t *testing.T) {
+		const runID = "reuse-empty-toolchain-prior-only"
+		pinToolchain(t, "go version go1.0.0")
+		tracedDispatch(t, repo, runID)
+		out := runReuse(t, repo, runID, priorRunID, policy)
+		if got := reuseDecisionFor(t, out.Mutation, "SC-10"); got.Reused || got.Reason != "toolchain-unrecorded" {
+			t.Errorf("SC-10 = %+v, want it refused toolchain-unrecorded", got)
+		}
+	})
+}
+
+// TestReuse_RefusesADirtyWorkingTreeBeforeJudgingAnything holds reuse to the
+// same gate every other op that reads the repository answers first: an
+// uncommitted change is a tree no comparison against a commit describes, so
+// nothing is judged and nothing is adopted.
+func TestReuse_RefusesADirtyWorkingTreeBeforeJudgingAnything(t *testing.T) {
+	repo := fixtureRepo(t)
+	const priorRunID = "reuse-dirty-prior"
+	const runID = "reuse-dirty-new"
+	policy := reusePolicy(t)
+
+	priorDispatch := tracedDispatch(t, repo, priorRunID)
+	startReviewGroupWith(t, repo, priorRunID, "A", policy, "SC-01", "SC-02")
+	completeReviewGroupWith(t, repo, priorRunID, "A", priorDispatch, &[]string{}, "SC-01", "SC-02")
+	tracedDispatch(t, repo, runID)
+
+	writeRepoFile(t, repo, "orders/scratch.txt", "uncommitted\n")
+	t.Cleanup(func() { mustGit(t, repo, "clean", "-qfd") })
+
+	got := refuseReuse(t, repo, runID, priorRunID, policy)
+	if got.Code != "source-not-reproducible" || !strings.Contains(got.Message, "orders/scratch.txt") {
+		t.Errorf("refusal = %+v, want source-not-reproducible naming orders/scratch.txt", got)
+	}
+	for _, rec := range runResume(t, repo, runID).Records {
+		if rec.Kind == runstate.KindReviewGroup {
+			t.Errorf("ledger holds %s %s, want nothing adopted over a dirty tree", rec.Kind, rec.ID)
+		}
+	}
+}
+
+// stateDirectories names every directory under the verifier's state root, so
+// a test can hold an op to creating none.
+func stateDirectories(t *testing.T) []string {
+	t.Helper()
+	root := os.Getenv(runstate.EnvStateDir)
+	var dirs []string
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() && path != root {
+			dirs = append(dirs, path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk state root %s: %v", root, err)
+	}
+	return dirs
+}
+
+// TestReuse_AMissingPriorLedgerLeavesTheStateRootUntouched keeps a typo from
+// leaving a trace: asking to stand on a run that never existed is answered
+// from what is on disk, without opening a ledger directory for it.
+func TestReuse_AMissingPriorLedgerLeavesTheStateRootUntouched(t *testing.T) {
+	repo := fixtureRepo(t)
+	const runID = "reuse-missing-prior-untouched"
+	tracedDispatch(t, repo, runID)
+	before := stateDirectories(t)
+
+	if got := refuseReuse(t, repo, runID, "never-ran", nil); got.Code != "prior-ledger-missing" {
+		t.Errorf("error code = %q, want prior-ledger-missing", got.Code)
+	}
+	if after := stateDirectories(t); !slices.Equal(after, before) {
+		t.Errorf("state root directories = %v, want the %v it held before: a missing prior ledger is not created", after, before)
+	}
+}
+
+// TestReuse_ARowRecordedWithoutAnIdentityIsRefusedByName covers a row that
+// was answered without ever being prepared: record-attempt opens it with no
+// bound test, so nothing about its identity can be compared, which is not the
+// same as an identity that compared differently.
+func TestReuse_ARowRecordedWithoutAnIdentityIsRefusedByName(t *testing.T) {
+	repo := fixtureRepo(t)
+	const priorRunID = "reuse-no-identity-prior"
+	const runID = "reuse-no-identity-new"
+	rows := []string{"SC-01", "SC-02", "SC-10"}
+	policy := reusePolicy(t)
+
+	priorDispatch := tracedDispatch(t, repo, priorRunID)
+	startReviewGroupWith(t, repo, priorRunID, "A", policy, rows...)
+	completeReviewGroupWith(t, repo, priorRunID, "A", priorDispatch, &[]string{}, rows...)
+	code, _, stderr := runVerifyOp(t, "record-attempt", requestWith(t, repo, priorRunID, map[string]any{
+		"layer": 4, "rowID": "SC-10", "refusal": "the mutation runner could not start in this environment",
+	}))
+	if code != exitOK {
+		t.Fatalf("record-attempt exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+
+	tracedDispatch(t, repo, runID)
+	out := runReuse(t, repo, runID, priorRunID, policy)
+
+	if got := reuseDecisionFor(t, out.Mutation, "SC-10"); got.Reused || got.Reason != "identity-unrecorded" {
+		t.Errorf("SC-10 = %+v, want it refused identity-unrecorded: the row was never prepared against a bound test", got)
+	}
+}
+
+// breakLedgerRecordInputs damages one field of every kind record's captured
+// inputs in the ledger at path, leaving the checkpoint valid JSON and every
+// other field in place, and returns the original bytes so a test can put them
+// back. Each kind is damaged in a field only its own shape declares.
+func breakLedgerRecordInputs(t *testing.T, path string, kind runstate.Kind) []byte {
+	t.Helper()
+	damage := map[runstate.Kind]func(map[string]any){
+		runstate.KindReviewGroup: func(inputs map[string]any) { inputs["rows"] = "SC-01" },
+		runstate.KindMutationRow: func(inputs map[string]any) { inputs["runnerKind"] = 7 },
+	}[kind]
+	if damage == nil {
+		t.Fatalf("breakLedgerRecordInputs: no damage is defined for kind %s", kind)
+	}
+
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read ledger: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(original, &doc); err != nil {
+		t.Fatalf("decode ledger: %v", err)
+	}
+	records, _ := doc["records"].([]any)
+	broken := 0
+	for _, entry := range records {
+		rec, _ := entry.(map[string]any)
+		if rec["kind"] != string(kind) {
+			continue
+		}
+		inputs, ok := rec["inputs"].(map[string]any)
+		if !ok {
+			continue
+		}
+		damage(inputs)
+		broken++
+	}
+	if broken == 0 {
+		t.Fatalf("ledger %s holds no %s record with captured inputs", path, kind)
+	}
+	data, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("encode ledger: %v", err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write ledger: %v", err)
+	}
+	return original
+}
+
+// fixtureLedgerPath is where a fixture run's checkpoint lives.
+func fixtureLedgerPath(t *testing.T, repo, runID string) string {
+	t.Helper()
+	store, cliErr := openLedger("test", fixtureVerifyRequest(repo, runID))
+	if cliErr != nil {
+		t.Fatalf("openLedger: %v", cliErr.Message)
+	}
+	return filepath.Join(store.Dir(), runstate.LedgerFile)
+}
+
+// TestReuse_ARecordWhoseInputsWillNotDecodeIsRefusedByName tells a record
+// this executable cannot read apart from one written before manifests existed:
+// the first is a checkpoint nothing can be told about, the second is history.
+func TestReuse_ARecordWhoseInputsWillNotDecodeIsRefusedByName(t *testing.T) {
+	repo := fixtureRepo(t)
+	const priorRunID = "reuse-unreadable-record-prior"
+	rows := []string{"SC-01", "SC-02", "SC-10"}
+	policy := reusePolicy(t)
+
+	priorDispatch := tracedDispatch(t, repo, priorRunID)
+	startReviewGroupWith(t, repo, priorRunID, "A", policy, rows...)
+	completeReviewGroupWith(t, repo, priorRunID, "A", priorDispatch, &[]string{}, rows...)
+	unappliableRow(t, repo, priorRunID, "SC-10")
+	ledgerPath := fixtureLedgerPath(t, repo, priorRunID)
+
+	t.Run("review group", func(t *testing.T) {
+		const runID = "reuse-unreadable-record-review"
+		original := breakLedgerRecordInputs(t, ledgerPath, runstate.KindReviewGroup)
+		t.Cleanup(func() {
+			if err := os.WriteFile(ledgerPath, original, 0o644); err != nil {
+				t.Fatalf("restore ledger: %v", err)
+			}
+		})
+		tracedDispatch(t, repo, runID)
+		out := runReuse(t, repo, runID, priorRunID, policy)
+		if got := reuseDecisionFor(t, out.Review, "A"); got.Reused || got.Reason != "record-unreadable" {
+			t.Errorf("group A = %+v, want it refused record-unreadable", got)
+		}
+	})
+
+	t.Run("mutation row", func(t *testing.T) {
+		const runID = "reuse-unreadable-record-row"
+		original := breakLedgerRecordInputs(t, ledgerPath, runstate.KindMutationRow)
+		t.Cleanup(func() {
+			if err := os.WriteFile(ledgerPath, original, 0o644); err != nil {
+				t.Fatalf("restore ledger: %v", err)
+			}
+		})
+		tracedDispatch(t, repo, runID)
+		out := runReuse(t, repo, runID, priorRunID, policy)
+		if got := reuseDecisionFor(t, out.Mutation, "SC-10"); got.Reused || got.Reason != "record-unreadable" {
+			t.Errorf("SC-10 = %+v, want it refused record-unreadable", got)
+		}
+	})
 }

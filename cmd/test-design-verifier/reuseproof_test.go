@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -37,6 +38,11 @@ const (
 	shippingTestFile = "shipping/shipping_test.go"
 	shippingReadFile = "shipping/testdata/rates.txt"
 	shippingSrcFile  = "shipping/shipping.go"
+	// shippingNotesFile is a second supporting file the critic reports reading,
+	// placed inside the coverage directory reuse exempts from path
+	// classification: a change to it is never widened, so the only thing that
+	// can refuse a record over it is the digest the manifest recorded.
+	shippingNotesFile = "docs/superpowers/coverage/2026-09-07-shipping-rates-notes.md"
 
 	// shippingGuardRefuses and shippingGuardAccepts are the two bodies of
 	// Rate's empty-zone guard: the committed one, and the mutant that accepts
@@ -46,6 +52,7 @@ const (
 	shippingGuardAccepts = "\t\treturn 7, nil"
 
 	shippingRates = "eu=7\n"
+	shippingNotes = "# shipping rates\n\nThe eu zone is the only published zone; its rate is 7.\n"
 
 	shippingTestSource = `package shipping
 
@@ -122,6 +129,7 @@ func reuseFixture(t *testing.T) string {
 		writeRepoFile(t, repo, shippingSrcFile, shippingSource(shippingGuardRefuses))
 		writeRepoFile(t, repo, shippingTestFile, shippingTestSource)
 		writeRepoFile(t, repo, shippingReadFile, shippingRates)
+		writeRepoFile(t, repo, shippingNotesFile, shippingNotes)
 		rewriteFixtureDoc(t, repo, func(doc string) string { return doc + shippingCoverageTable })
 	})
 }
@@ -292,7 +300,7 @@ func TestReuse_MatchesCompleteInputsBeforeReuse(t *testing.T) {
 	}
 
 	completed := completeReviewGroupWith(t, repo, priorRunID, "G-ship", priorDispatch,
-		&[]string{shippingReadFile}, proofShipRows...)
+		&[]string{shippingReadFile, shippingNotesFile}, proofShipRows...)
 	if !completed.ManifestComplete || len(completed.ManifestIncomplete) != 0 {
 		t.Fatalf("completed manifest = %v/%v, want it complete with no reasons",
 			completed.ManifestComplete, completed.ManifestIncomplete)
@@ -323,8 +331,8 @@ func TestReuse_MatchesCompleteInputsBeforeReuse(t *testing.T) {
 		if basis.PriorCommit != base || len(basis.ChangedPaths) != 0 {
 			t.Errorf("G-ship basis = %+v, want the prior commit and no changed path", basis)
 		}
-		if !slices.Equal(basis.ClaimRows, proofShipRows) || basis.ContextFiles != 2 {
-			t.Errorf("G-ship basis = %+v, want its two rows and its two context files", basis)
+		if !slices.Equal(basis.ClaimRows, proofShipRows) || basis.ContextFiles != 3 {
+			t.Errorf("G-ship basis = %+v, want its two rows and its three context files", basis)
 		}
 		if basis.Policy != basisMatched || basis.Toolchain != basisNotApplicable {
 			t.Errorf("G-ship basis = %+v, want policy matched and toolchain not-applicable", basis)
@@ -405,6 +413,23 @@ func TestReuse_MatchesCompleteInputsBeforeReuse(t *testing.T) {
 			rowReason:  "module-changed:" + shippingReadFile,
 		},
 		{
+			// A read inside the exempt coverage directory is never widened, so
+			// the refusal here comes from the recorded digest and nothing else.
+			name: "exempt-read",
+			prepare: func(t *testing.T, repo string) {
+				appendToRepoFile(t, repo, shippingNotesFile, "\nA note appended after the review.\n")
+				commitAll(t, repo, "edit the note the critic read inside the coverage directory")
+			},
+			shipReason: "context-changed:" + shippingNotesFile,
+			rowReason:  "context-changed:" + shippingNotesFile,
+			extra: func(t *testing.T, out reuseOutput) {
+				if len(out.ChangedPaths) != 1 || out.ChangedPaths[0].Path != shippingNotesFile ||
+					out.ChangedPaths[0].Class != changeExempt {
+					t.Errorf("changedPaths = %+v, want only %s, classified exempt", out.ChangedPaths, shippingNotesFile)
+				}
+			},
+		},
+		{
 			name: "production",
 			prepare: func(t *testing.T, repo string) {
 				appendToRepoFile(t, repo, shippingSrcFile, "\n// a production comment nobody reviewed\n")
@@ -438,10 +463,7 @@ func TestReuse_MatchesCompleteInputsBeforeReuse(t *testing.T) {
 		{
 			name: "toolchain",
 			prepare: func(t *testing.T, repo string) {
-				t.Cleanup(func() { toolVersionsFor = toolVersions })
-				toolVersionsFor = func(dir, kind string, command []string) map[string]string {
-					return map[string]string{"go": "go version go0.0 test/arch"}
-				}
+				pinToolchain(t, "go version go0.0 test/arch")
 			},
 			rowReason: "toolchain-changed",
 		},
@@ -527,7 +549,7 @@ func proofAssertShipManifest(t *testing.T, repo, evidencePath string, policy *re
 	}
 
 	proofDigestsMatch(t, repo, "bundle", manifest.Bundle, shippingTestFile)
-	proofDigestsMatch(t, repo, "reads", manifest.Reads, shippingReadFile)
+	proofDigestsMatch(t, repo, "reads", manifest.Reads, shippingReadFile, shippingNotesFile)
 
 	runner := manifest.Runner
 	if runner.Kind != src.Runner.Kind || runner.Root != src.Runner.Root ||
@@ -801,6 +823,23 @@ func TestReuse_LegacyRecordsAreHistoricalNotReusable(t *testing.T) {
 // against a manifest contract this executable does not implement.
 func proofLegacyReviewRun(t *testing.T, repo, runID string, manifest *evidence.Manifest) (ledgerPath, artifactPath string) {
 	t.Helper()
+	return proofHandWrittenReviewRun(t, repo, runID, manifest, func(t *testing.T, path string, doc *reviewEvidence) {
+		t.Helper()
+		if err := evidence.WriteJSON(path, doc); err != nil {
+			t.Fatalf("write review evidence: %v", err)
+		}
+	})
+}
+
+// proofHandWrittenReviewRun writes one completed review record of G-ship
+// straight through the store, with manifest as the record's own, and lets
+// write put whatever bytes it likes at the artifact path before the record is
+// completed over them: the ledger digests the bytes as they are.
+func proofHandWrittenReviewRun(
+	t *testing.T, repo, runID string, manifest *evidence.Manifest,
+	write func(t *testing.T, path string, doc *reviewEvidence),
+) (ledgerPath, artifactPath string) {
+	t.Helper()
 	const groupID = "G-ship"
 
 	dispatch := tracedDispatch(t, repo, runID)
@@ -849,14 +888,83 @@ func proofLegacyReviewRun(t *testing.T, repo, runID string, manifest *evidence.M
 			Inputs:       inputs,
 			Verdicts:     verdicts,
 		}
-		if err := evidence.WriteJSON(artifactPath, &doc); err != nil {
-			return err
-		}
+		write(t, artifactPath, &doc)
 		_, err = l.Complete(runstate.KindReviewGroup, groupID, "holds", map[string]string{artifactEvidence: artifactPath}, "")
 		return err
 	})
 	if err != nil {
-		t.Fatalf("write the legacy review record: %v", err)
+		t.Fatalf("write the hand-written review record: %v", err)
 	}
 	return filepath.Join(store.Dir(), runstate.LedgerFile), artifactPath
+}
+
+// TestReuse_RefusesAnArtifactThatVerifiesButWillNotDecode reaches the one
+// reason left between a digest that holds and a manifest that can be read: the
+// ledger recorded the digest of bytes that were never a document. Only a
+// record written by hand can carry one, and it is refused by name.
+func TestReuse_RefusesAnArtifactThatVerifiesButWillNotDecode(t *testing.T) {
+	repo := reuseFixture(t)
+	policy := reusePolicy(t)
+	const priorRunID = "reuse-proof-undecodable-prior"
+	const runID = "reuse-proof-undecodable-new"
+
+	manifest := &evidence.Manifest{Version: evidence.ManifestVersion, Complete: true, Incomplete: []string{}}
+	_, artifactPath := proofHandWrittenReviewRun(t, repo, priorRunID, manifest, func(t *testing.T, path string, _ *reviewEvidence) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte("{not a document"), 0o644); err != nil {
+			t.Fatalf("write undecodable artifact: %v", err)
+		}
+	})
+	before := proofDigest(t, artifactPath)
+
+	out := proofTraceAndReuse(t, repo, runID, priorRunID, policy)
+
+	proofRefused(t, "G-ship", reuseDecisionFor(t, out.Review, "G-ship"), "artifact-unreadable:"+artifactEvidence)
+	if got := proofDigest(t, artifactPath); got != before {
+		t.Errorf("prior artifact digest = %q, want it unchanged at %q", got, before)
+	}
+}
+
+// TestReuse_AReadoptedRowIsJudgedOnItsOwnRecordedContext follows one measured
+// row through three runs. The first reviewed its group with a critic that read
+// the shipping test; the second adopted the row but reviewed the group afresh
+// with a critic that did not; the third edits the shipping test. That file is
+// isolated to another group as the second run recorded it, but the row's own
+// manifest still names it, and the row is judged on its own manifest.
+func TestReuse_AReadoptedRowIsJudgedOnItsOwnRecordedContext(t *testing.T) {
+	repo := reuseFixture(t)
+	first := reusePolicy(t)
+	second := &reviewPolicy{
+		Critic:       "coverage-critic",
+		Instructions: []string{writePolicyFile(t, "critic.md", "judge the name, not the assertion\n")},
+	}
+	const runA = "reuse-proof-own-context-a"
+	const runB = "reuse-proof-own-context-b"
+	const runC = "reuse-proof-own-context-c"
+
+	dispatchA := tracedDispatch(t, repo, runA)
+	completeGroupWith(t, repo, runA, "G-orders", dispatchA, first, &[]string{shippingTestFile}, proofOrdersRows...)
+	completeGroupWith(t, repo, runA, "G-pay", dispatchA, first, &[]string{}, proofPayRows...)
+	completeGroupWith(t, repo, runA, "G-ship", dispatchA, first, &[]string{}, proofShipRows...)
+	unappliableRow(t, repo, runA, "SC-10")
+
+	dispatchB := tracedDispatch(t, repo, runB)
+	adopted := runReuse(t, repo, runB, runA, second)
+	proofRefused(t, "G-orders", reuseDecisionFor(t, adopted.Review, "G-orders"), "policy-changed")
+	proofReused(t, "SC-10", reuseDecisionFor(t, adopted.Mutation, "SC-10"), "unappliable")
+	completeGroupWith(t, repo, runB, "G-orders", dispatchB, second, &[]string{}, proofOrdersRows...)
+	completeGroupWith(t, repo, runB, "G-pay", dispatchB, second, &[]string{}, proofPayRows...)
+	completeGroupWith(t, repo, runB, "G-ship", dispatchB, second, &[]string{}, proofShipRows...)
+
+	appendToRepoFile(t, repo, shippingTestFile, "\n// a repair to the file, not to any declaration it holds\n")
+	commitAll(t, repo, "repair the test file the first run's critic read")
+
+	out := proofTraceAndReuse(t, repo, runC, runB, second)
+
+	changed := reuseChangedPathFor(t, out, shippingTestFile)
+	if changed.Class != changeIsolated || !slices.Equal(changed.Groups, []string{"G-ship"}) {
+		t.Errorf("%s = %+v, want it isolated to G-ship as the second run recorded it", shippingTestFile, changed)
+	}
+	proofReused(t, "G-orders", reuseDecisionFor(t, out.Review, "G-orders"), "blocked")
+	proofRefused(t, "SC-10", reuseDecisionFor(t, out.Mutation, "SC-10"), "context-changed:"+shippingTestFile)
 }

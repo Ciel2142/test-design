@@ -6,13 +6,16 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 
 	"test-design/internal/coverage"
 	"test-design/internal/evidence"
 	"test-design/internal/runstate"
+	"test-design/internal/worktree"
 )
 
 // This file lets one run stand on an earlier run's answers. It adopts nothing
@@ -37,6 +40,10 @@ const (
 	basisNotApplicable = "not-applicable"
 
 	reasonFreshRequired = "fresh-required"
+	// reasonRecordUnreadable is a prior record whose captured inputs will not
+	// decode: not legacy, which is a shape this executable knows and predates,
+	// but a shape it cannot read at all.
+	reasonRecordUnreadable = "record-unreadable"
 )
 
 type reuseRequest struct {
@@ -147,6 +154,24 @@ func reuseHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer) *cliEr
 	src, cliErr := loadVerifiedSource(op, req.RepoRoot, req.CoverageSource)
 	if cliErr != nil {
 		return cliErr
+	}
+	// The repository is read the way trace and finalize read it: as a commit.
+	// An uncommitted change is a tree no comparison against the prior commit
+	// describes, so it is refused before anything is judged, with the reason
+	// every other op gives.
+	ctrl, err := worktree.NewController(req.RepoRoot)
+	if err != nil {
+		return &cliError{Code: "controller-failed", Message: fmt.Sprintf("%s: %v", op, err)}
+	}
+	before, err := ctrl.TakeSnapshot()
+	if err != nil {
+		return &cliError{Code: "snapshot-failed", Message: fmt.Sprintf("%s: %v", op, err)}
+	}
+	if !before.Clean() {
+		return &cliError{
+			Code:    "source-not-reproducible",
+			Message: fmt.Sprintf("%s: source not reproducible: %s", op, describeDirty(req.RepoRoot)),
+		}
 	}
 	repoCommit, cliErr := headCommit(op, req.RepoRoot)
 	if cliErr != nil {
@@ -261,9 +286,22 @@ func (p *priorRun) identity() runstate.Identity { return p.ledger.Identity }
 func openPriorRun(op string, req *reuseRequest, src *coverage.Source) (*priorRun, *cliError) {
 	priorReq := req.verifyRequest
 	priorReq.RunID = req.PriorRunID
-	store, cliErr := openLedger(op, &priorReq)
+	// The prior run is read, never created: its ledger is looked for on disk
+	// before any store is opened over it, so a run ID nobody ever traced leaves
+	// no directory behind for the next reuse to mistake for a run.
+	dir, cliErr := locateLedgerDir(op, &priorReq)
 	if cliErr != nil {
 		return nil, cliErr
+	}
+	store, cliErr := openExistingLedger(op, dir)
+	if cliErr != nil {
+		return nil, cliErr
+	}
+	if store == nil {
+		return nil, &cliError{
+			Code:    "prior-ledger-missing",
+			Message: fmt.Sprintf("%s: run %s has no ledger under this repository", op, req.PriorRunID),
+		}
 	}
 	ledger, err := store.Load()
 	switch {
@@ -295,6 +333,72 @@ func openPriorRun(op string, req *reuseRequest, src *coverage.Source) (*priorRun
 		prior.dispatchRows = dispatchRowsByID(prior.dispatch)
 	}
 	return prior, nil
+}
+
+// locateLedgerDir places a run's ledger directory exactly as openLedger does —
+// the resolved state root, refused when it resolves inside the repository —
+// without creating it. It is the read-only half of openLedger, for the ops
+// that answer "is there a ledger" from what is on disk.
+func locateLedgerDir(op string, req *verifyRequest) (string, *cliError) {
+	fail := func(err error) *cliError {
+		return &cliError{Code: "ledger-open-failed", Message: fmt.Sprintf("%s: %v", op, err)}
+	}
+	stateDir, err := runstate.DefaultStateDir()
+	if err != nil {
+		return "", fail(err)
+	}
+	resolvedState, err := resolveExistingPrefix(stateDir)
+	if err != nil {
+		return "", fail(fmt.Errorf("resolve state dir %s: %w", stateDir, err))
+	}
+	repoRoot, err := resolveThroughSymlinks(req.RepoRoot)
+	if err != nil {
+		return "", fail(fmt.Errorf("resolve repo root %s: %w", req.RepoRoot, err))
+	}
+	if isWithinPath(repoRoot, resolvedState) {
+		return "", fail(fmt.Errorf("state dir %s resolves inside repository %s", resolvedState, repoRoot))
+	}
+	dir, err := runstate.Locate(resolvedState, repoRoot, req.RunID)
+	if err != nil {
+		return "", fail(err)
+	}
+	return dir, nil
+}
+
+// openExistingLedger opens a store over dir only when dir already holds a
+// ledger file, and reports a nil store when it does not. Nothing is created
+// on the way to a nil answer.
+func openExistingLedger(op, dir string) (*runstate.Store, *cliError) {
+	_, err := os.Stat(filepath.Join(dir, runstate.LedgerFile))
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return nil, nil
+	case err != nil:
+		return nil, &cliError{Code: "ledger-open-failed", Message: fmt.Sprintf("%s: %v", op, err)}
+	}
+	store, err := runstate.Open(dir)
+	if err != nil {
+		return nil, &cliError{Code: "ledger-open-failed", Message: fmt.Sprintf("%s: %v", op, err)}
+	}
+	return store, nil
+}
+
+// tracePreceding is the trace record — current or superseded — with the
+// greatest sequence number below seq: the trace the prior run stood on when
+// it opened the record at seq, and so the one that says which toolchain that
+// record was measured under. Nil when no trace preceded it.
+func (p *priorRun) tracePreceding(seq int) *runstate.Record {
+	var preceding *runstate.Record
+	for i := range p.ledger.Records {
+		rec := &p.ledger.Records[i]
+		if rec.Kind != runstate.KindPhase || rec.ID != tracePhaseID || rec.Seq >= seq {
+			continue
+		}
+		if preceding == nil || rec.Seq > preceding.Seq {
+			preceding = rec
+		}
+	}
+	return preceding
 }
 
 // priorTrace is the dispatch document of the prior run's current trace and the
@@ -361,11 +465,13 @@ func readPriorGroups(ledger *runstate.Ledger) []*priorGroup {
 }
 
 // readPriorGroup reads one group's evidence, in the order the answers come: a
-// group the prior run never closed has nothing to read, a record that captured
-// no manifest is from before manifests existed and is never repaired, and the
-// artifact's bytes are re-hashed before anything inside them is believed. The
-// manifest taken is the artifact's, which is the complete one; the record's own
-// inputs are consulted only to tell a legacy record from a current one.
+// group the prior run never closed has nothing to read, a record whose inputs
+// will not decode is a checkpoint nothing can be told about, a record that
+// captured no manifest is from before manifests existed and is never repaired,
+// and the artifact's bytes are re-hashed before anything inside them is
+// believed. The manifest taken is the artifact's, which is the complete one;
+// the record's own inputs are consulted only to tell a legacy record from a
+// current one.
 func readPriorGroup(rec *runstate.Record) *priorGroup {
 	group := &priorGroup{rec: rec, bundle: map[string]bool{}, context: map[string]bool{}}
 	var inputs reviewGroupInputs
@@ -380,7 +486,10 @@ func readPriorGroup(rec *runstate.Record) *priorGroup {
 	case rec.Status != runstate.StatusCompleted:
 		group.reason = "prior-not-completed"
 		return group
-	case inputsErr != nil || inputs.Manifest == nil:
+	case inputsErr != nil:
+		group.reason = reasonRecordUnreadable
+		return group
+	case inputs.Manifest == nil:
 		group.reason = "legacy-no-manifest"
 		return group
 	}
@@ -670,8 +779,10 @@ func (r *reuseRun) mutationDecisions(l *runstate.Ledger) ([]reuseDecision, error
 			decisions = append(decisions, decision)
 			continue
 		}
-		reference := r.reference(rec, []string{rec.ID}, context.group, basisNotApplicable, basisMatched)
-		// The adopted row keeps its review context's manifest, with the
+		reference := r.reference(rec, []string{rec.ID}, context.group.rec.ID,
+			len(context.recorded.ContextPaths()), basisNotApplicable, basisMatched)
+		// The adopted row keeps the manifest it was judged against — its
+		// review context's, or its own when it was adopted before — with the
 		// toolchain it was actually measured under in place of the one that
 		// reviewed it, so the next run judges the row on its own execution
 		// rather than on a review it may have inherited.
@@ -686,20 +797,46 @@ func (r *reuseRun) mutationDecisions(l *runstate.Ledger) ([]reuseDecision, error
 }
 
 // mutationContext is what a prior mutation row is judged against: the group
-// whose manifest is its review context, and the toolchain the row was actually
-// measured under, which is not always the one that reviewed it.
+// that reviewed it, the manifest that stands for the row — the group's for a
+// row the prior run measured itself, the row's own recorded one for a row that
+// run adopted, since a fresh review may have read less than the original — and
+// the toolchain the row was actually measured under, which is not always the
+// one that reviewed it.
 type mutationContext struct {
 	group     *priorGroup
+	recorded  *evidence.Manifest
 	toolchain map[string]string
 }
 
-// manifest is the review context with the row's own executing toolchain in
-// place of the reviewing run's: everything else about the inputs is the
-// group's, but which toolchain ran the mutant is the row's own fact.
+// manifest is the recorded context with the row's own executing toolchain in
+// place of whatever that context carried: everything else about the inputs is
+// the context's, but which toolchain ran the mutant is the row's own fact.
 func (c *mutationContext) manifest() *evidence.Manifest {
-	measured := *c.group.manifest
+	measured := *c.recorded
 	measured.ToolVersions = c.toolchain
 	return &measured
+}
+
+// adoptedMutation is the row's inputs as a record the prior run adopted from
+// an earlier one carries them, nil for a row that run measured itself.
+func adoptedMutation(rec *runstate.Record) *reusedMutationInputs {
+	var adopted reusedMutationInputs
+	if err := recordInputs(rec, &adopted); err != nil || adopted.Reuse == nil || adopted.Manifest == nil {
+		return nil
+	}
+	return &adopted
+}
+
+// recordReuse is the reuse reference a prior record carries, nil for a record
+// the prior run produced itself.
+func recordReuse(rec *runstate.Record) *evidence.ReuseReference {
+	var carried struct {
+		Reuse *evidence.ReuseReference `json:"reuse"`
+	}
+	if err := recordInputs(rec, &carried); err != nil {
+		return nil
+	}
+	return carried.Reuse
 }
 
 // mutationRefusal is why this run may not stand on one prior mutation row,
@@ -728,9 +865,17 @@ func (r *reuseRun) mutationRefusal(
 	if row := r.inactiveRow([]string{rec.ID}); row != "" {
 		return "row-inactive:" + row, nil
 	}
-	// An input identity this run cannot read is not one it can show unchanged.
+	// An input identity this run cannot read is not one it can show unchanged;
+	// one that was never recorded — a row answered without ever being prepared
+	// against a bound test — has nothing to compare at all.
+	if inputsErr != nil {
+		return reasonRecordUnreadable, nil
+	}
+	if inputs.Identity == (mutationRowIdentity{}) {
+		return "identity-unrecorded", nil
+	}
 	bound, _ := r.dispatchRow(rec.ID)
-	if inputsErr != nil || inputs.Identity.Scope != bound.Scope || inputs.Identity.Name != bound.TestName {
+	if inputs.Identity.Scope != bound.Scope || inputs.Identity.Name != bound.TestName {
 		return "identity-changed", nil
 	}
 	if r.changes.widened != "" {
@@ -739,13 +884,19 @@ func (r *reuseRun) mutationRefusal(
 	if reason := r.changes.isolated[group.rec.ID]; reason != "" {
 		return reason, nil
 	}
-	toolchain, known := r.executingToolchain(rec)
-	if !known {
+	adopted := adoptedMutation(rec)
+	toolchain, known := r.executingToolchain(rec, adopted)
+	// Two empty toolchains are not the same toolchain: a version probe that
+	// answered nothing, on either side, leaves nothing to compare.
+	if !known || len(toolchain) == 0 || len(r.dispatch.ToolVersions) == 0 {
 		return "toolchain-unrecorded", nil
 	}
 	// A mutation row is judged on its own claim and on the toolchain that ran
 	// it; the critic policy that reviewed its group answers for the group.
-	context := &mutationContext{group: group, toolchain: toolchain}
+	context := &mutationContext{group: group, recorded: group.manifest, toolchain: toolchain}
+	if adopted != nil {
+		context.recorded = adopted.Manifest
+	}
 	manifest := context.manifest()
 	reasons := evidence.Mismatch(manifest, r.probe(manifest, nil), []string{rec.ID}, false, true)
 	if len(reasons) > 0 {
@@ -760,19 +911,30 @@ func (r *reuseRun) mutationRefusal(
 // executingToolchain is the toolchain a prior mutation row was measured under.
 // A row this run's predecessor adopted from an earlier one carries it in its
 // own recorded manifest; a row that run measured itself was measured under the
-// toolchain its trace recorded. When neither can be established the row is not
-// judged at all: a mutant whose execution environment is unknown is not one a
-// later run can show unchanged, and the reviewing run's toolchain is not an
-// answer — an adopted review may have been made under a third one entirely.
-func (r *reuseRun) executingToolchain(rec *runstate.Record) (map[string]string, bool) {
-	var adopted reusedMutationInputs
-	if err := recordInputs(rec, &adopted); err == nil && adopted.Reuse != nil && adopted.Manifest != nil {
+// trace that preceded the row in its ledger — not the run's latest trace,
+// which may have been repeated under another toolchain after the row was
+// measured — and only when that trace's document still verifies. When neither
+// can be established the row is not judged at all: a mutant whose execution
+// environment is unknown is not one a later run can show unchanged, and the
+// reviewing run's toolchain is not an answer — an adopted review may have been
+// made under a third one entirely.
+func (r *reuseRun) executingToolchain(rec *runstate.Record, adopted *reusedMutationInputs) (map[string]string, bool) {
+	if adopted != nil {
 		return adopted.Manifest.ToolVersions, true
 	}
-	if r.prior.dispatch != nil {
-		return r.prior.dispatch.ToolVersions, true
+	trace := r.prior.tracePreceding(rec.Seq)
+	if trace == nil || len(runstate.Verify(trace)) > 0 {
+		return nil, false
 	}
-	return nil, false
+	artifact, ok := trace.Artifacts[artifactDispatchInputs]
+	if !ok {
+		return nil, false
+	}
+	dispatch, err := loadDispatchInputs(artifact.Path)
+	if err != nil {
+		return nil, false
+	}
+	return dispatch.ToolVersions, true
 }
 
 // contextGroup is the prior group whose manifest stands for a row: the one that
@@ -855,7 +1017,8 @@ func (r *reuseRun) adoptReview(l *runstate.Ledger, group *priorGroup) (*evidence
 	if !ok {
 		return nil, fmt.Errorf("%s: group %s names a row this run's trace does not", r.op, group.rec.ID)
 	}
-	reference := r.reference(group.rec, group.rows, group, basisMatched, basisNotApplicable)
+	reference := r.reference(group.rec, group.rows, group.rec.ID,
+		len(group.manifest.ContextPaths()), basisMatched, basisNotApplicable)
 	inputs.Manifest, inputs.Reuse = group.manifest, reference
 	return reference, r.adopt(l, runstate.KindReviewGroup, group.rec, inputs, reference)
 }
@@ -890,14 +1053,17 @@ func (r *reuseRun) adopt(
 }
 
 // reference is the provenance an adopted record carries: which run, commit,
-// document and record it came from, the original artifact by path and digest,
-// and the basis it was judged on.
+// document and record produced it, the original artifact by path and digest,
+// and the basis it was judged on. A record the prior run itself adopted was
+// produced by an earlier run still, and the artifact says so: the producer is
+// copied from the reference that record carries, while the basis names the
+// prior run's commit, which is what this run compared against.
 func (r *reuseRun) reference(
-	rec *runstate.Record, rows []string, context *priorGroup, policy, toolchain string,
+	rec *runstate.Record, rows []string, ownGroup string, contextFiles int, policy, toolchain string,
 ) *evidence.ReuseReference {
 	_, artifact, _ := recordArtifact(rec)
 	identity := r.prior.identity()
-	return &evidence.ReuseReference{
+	reference := &evidence.ReuseReference{
 		PriorRunID:        r.prior.runID,
 		PriorRepoCommit:   identity.RepoCommit,
 		PriorSourceSHA256: identity.SourceSHA256,
@@ -906,13 +1072,21 @@ func (r *reuseRun) reference(
 		Artifact:          evidence.FileRef{Path: artifact.Path, SHA256: artifact.SHA256},
 		Basis: evidence.ReuseBasis{
 			PriorCommit:  identity.RepoCommit,
-			ChangedPaths: r.changes.basisPaths(context.rec.ID),
+			ChangedPaths: r.changes.basisPaths(ownGroup),
 			ClaimRows:    append([]string{}, rows...),
-			ContextFiles: len(context.manifest.ContextPaths()),
+			ContextFiles: contextFiles,
 			Policy:       policy,
 			Toolchain:    toolchain,
 		},
 	}
+	if producer := recordReuse(rec); producer != nil {
+		reference.PriorRunID = producer.PriorRunID
+		reference.PriorRepoCommit = producer.PriorRepoCommit
+		reference.PriorSourceSHA256 = producer.PriorSourceSHA256
+		reference.PriorSeq = producer.PriorSeq
+		reference.Artifact = producer.Artifact
+	}
+	return reference
 }
 
 // firstIncomplete names the first reason a manifest gives for being incomplete,
