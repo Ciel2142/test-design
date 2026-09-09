@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"test-design/internal/mutation"
 	"test-design/internal/report"
 	"test-design/internal/runstate"
 )
@@ -364,5 +365,461 @@ func TestRestart_RecoversLiveStateBeforeRepeating(t *testing.T) {
 		if got := decodeCLIError(t, stderr).Code; got != "live-attempt-completed" {
 			t.Errorf("error code = %q, want live-attempt-completed", got)
 		}
+	})
+}
+
+// The mutation restart proof below interrupts a real evaluation the same way:
+// the workspace it leaves is a worktree carrying a mutant that was never
+// measured and the residue of the run that was measuring it, and what the row
+// owes afterwards is read from the run's own state and ledger.
+
+const (
+	// slowFixtureTest names the fixture test the SC-09 row's targeted runs
+	// select. It is what pgrep looks for while the interrupted run drains; no
+	// proof in this package carries it in its own arguments, so a match is
+	// always the fixture's run and never the test that is waiting on it.
+	slowFixtureTest = "TestSameName"
+
+	// mutationInterruptDeadline bounds the wait for the interrupted site to
+	// reach that test. It is generous because it covers the fixture module's
+	// first compilation as well as the run itself, and because it only bounds
+	// a failure.
+	mutationInterruptDeadline = 90 * time.Second
+
+	// mutationDrainDeadline is how long the targeted run the kill never
+	// reached may take to finish. It has a process group of its own, so it
+	// sleeps out the fixture's stall and exits by itself.
+	mutationDrainDeadline = 15 * time.Second
+)
+
+// slowFixtureImports replaces the fixture orders test's single import, so the
+// slowed target test can write a file and stall.
+const slowFixtureImports = `import (
+	"os"
+	"testing"
+	"time"
+)`
+
+// slowFixtureTargetHead is the opening of TestSameName exactly as the fixture
+// commits it, and slowFixtureSlowHead is that opening with a residue file and
+// a stall in front of the assertion it already made. The test's name, the
+// coverage tag above it and every other test in the file are outside both, so
+// the trace's bindings and the row's identity are what they always were.
+const slowFixtureTargetHead = `func TestSameName(t *testing.T) {
+	if err := ValidateQuantity(1); err != nil {`
+
+const slowFixtureSlowHead = `func TestSameName(t *testing.T) {
+	if err := os.WriteFile("residue.txt", []byte("residue\n"), 0o644); err != nil {
+		t.Fatalf("write residue.txt: %v", err)
+	}
+	time.Sleep(3 * time.Second)
+	if err := ValidateQuantity(1); err != nil {`
+
+// slowFixtureEdit returns the fixtureRepoWith edit that makes the SC-09 row's
+// target interruptible. The residue is the proof that a run reached the test —
+// a file in the package directory, so the workspace carries it where a diff
+// would see it — and the stall holds the run open long enough for a kill to
+// land inside it. It is committed with the fixture, so the repository the ops
+// see is clean.
+func slowFixtureEdit(t *testing.T) func(repo string) {
+	t.Helper()
+	return func(repo string) {
+		path := filepath.Join(repo, "orders", "orders_test.go")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read the fixture's orders test: %v", err)
+		}
+		src := replaceExactlyOnce(t, string(data), `import "testing"`, slowFixtureImports)
+		src = replaceExactlyOnce(t, src, slowFixtureTargetHead, slowFixtureSlowHead)
+		if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+			t.Fatalf("write the fixture's orders test: %v", err)
+		}
+	}
+}
+
+// replaceExactlyOnce is strings.Replace that refuses to guess: a fixture edit
+// that matched nothing, or matched more than the one place it named, would
+// leave a subject nobody described.
+func replaceExactlyOnce(t *testing.T, src, old, replacement string) string {
+	t.Helper()
+	if got := strings.Count(src, old); got != 1 {
+		t.Fatalf("the fixture source contains %d occurrences of %q, want exactly 1", got, old)
+	}
+	return strings.Replace(src, old, replacement, 1)
+}
+
+// originalRepoState is the original repository's own standing: the commit it
+// sits on, how many times its refs have moved, and what its working tree
+// holds. A mutation workspace is a worktree of this repository, so a
+// restoration or a recreation that reached past the worktree shows up in one
+// of the three.
+type originalRepoState struct {
+	head   string
+	reflog int
+	status []string
+}
+
+func captureOriginalRepo(t *testing.T, repo string) originalRepoState {
+	t.Helper()
+	return originalRepoState{
+		head:   strings.TrimSpace(mustGit(t, repo, "rev-parse", "HEAD")),
+		reflog: reflogLength(t, repo),
+		status: gitStatusLines(t, repo),
+	}
+}
+
+// reflogLength is `git reflog | wc -l` for repo.
+func reflogLength(t *testing.T, repo string) int {
+	t.Helper()
+	n := 0
+	for _, line := range strings.Split(mustGit(t, repo, "reflog"), "\n") {
+		if strings.TrimSpace(line) != "" {
+			n++
+		}
+	}
+	return n
+}
+
+// requireOriginalRepoUntouched holds the invariant every step of a mutation
+// restart owes: whatever happened to the workspace, the repository the run is
+// verifying is where it was when the run began. step names what just ran, so a
+// failure says which one reached too far.
+func requireOriginalRepoUntouched(t *testing.T, repo string, before originalRepoState, step string) {
+	t.Helper()
+	got := captureOriginalRepo(t, repo)
+	if got.head != before.head {
+		t.Errorf("after %s: original repository HEAD = %q, want %q", step, got.head, before.head)
+	}
+	if got.reflog != before.reflog {
+		t.Errorf("after %s: original repository reflog holds %d entries, want %d", step, got.reflog, before.reflog)
+	}
+	if !reflect.DeepEqual(got.status, before.status) {
+		t.Errorf("after %s: original repository status = %v, want %v", step, got.status, before.status)
+	}
+}
+
+// interruptMutationAtSiteB takes the SC-09 row through its first site in
+// process, applies the caught mutant for a second one, and kills a real
+// verifier while that site's mutated run is under way. It returns once the
+// targeted run has finished on its own, so what the caller inspects is a
+// workspace nothing is still writing to.
+func interruptMutationAtSiteB(t *testing.T, repo, runID string) prepareMutationOutput {
+	t.Helper()
+
+	// The trace is what gives resume the dispatch inputs it reads a row's
+	// standing against; without it the mutation layer reports only that it is
+	// waiting on the phase.
+	code, _, stderr := runVerifyOp(t, "trace", verifyRequestJSON(t, repo, runID))
+	if code != exitOK {
+		t.Fatalf("trace exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+	prep := preparedMutation(t, repo, runID, "SC-09")
+
+	// site-a is the equivalent mutant the other multi-site proofs use, driven
+	// in process: nothing about a site that completes needs interrupting.
+	mutateOrdersGuard(t, prep.WorktreePath, "	if qty < 0 {\n\t\treturn fmt.Errorf(\"quantity must be positive\")\n\t}\n\treturn nil")
+	code, _, stderr = runVerifyOp(t, "evaluate-mutation",
+		evaluateMutationRequestJSON(t, repo, runID, prep.RunDir, "site-a", false))
+	if code != exitOK {
+		t.Fatalf("site-a exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+
+	// site-a's own residue goes now, and the test is the one to remove it: the
+	// slowed target writes residue.txt on every run and RestoreTracked leaves
+	// untracked files where they are, so site-a's copy would still be sitting
+	// in the workspace when site-b's diff is policed — and a second entry in
+	// that diff is refused as multi-site before the interruption could ever
+	// happen. The residue this proof is about is the one site-b's killed
+	// mutated run leaves behind.
+	residue := filepath.Join(prep.WorktreePath, "orders", "residue.txt")
+	if err := os.Remove(residue); err != nil {
+		t.Fatalf("remove the completed site's own residue: %v", err)
+	}
+
+	mutateOrdersGuard(t, prep.WorktreePath, `	return fmt.Errorf("always rejected")`)
+	verifier := startVerifierProcess(t, "evaluate-mutation",
+		evaluateMutationRequestJSON(t, repo, runID, prep.RunDir, "site-b", true))
+
+	// Both conditions together are the kill window: the state names the site
+	// the verifier is inside, and the residue proves its mutated run really
+	// reached the target test rather than merely being about to.
+	if !pollUntil(mutationInterruptDeadline, func() bool {
+		st, err := mutation.LoadState(prep.RunDir)
+		if err != nil || st.Started == nil || st.Started.Site != "site-b" || st.Started.Phase != "mutated" {
+			return false
+		}
+		_, err = os.Stat(residue)
+		return err == nil
+	}) {
+		t.Fatalf("site-b's mutated run did not reach the fixture's target test within %s", mutationInterruptDeadline)
+	}
+	verifier.killAndWait(t)
+	waitForNoProcessMatching(t, slowFixtureTest, mutationDrainDeadline)
+
+	return prep
+}
+
+// requireInterruptedWorkspace holds what the kill left in the workspace: the
+// mutant that was never measured, and the residue of the run that was
+// measuring it.
+func requireInterruptedWorkspace(t *testing.T, worktreePath string) {
+	t.Helper()
+	if diff := mustGit(t, worktreePath, "diff", "HEAD"); strings.TrimSpace(diff) == "" {
+		t.Error("worktree diff against HEAD is empty, want the mutant the killed run was measuring")
+	}
+	residue := filepath.Join(worktreePath, "orders", "residue.txt")
+	if _, err := os.Stat(residue); err != nil {
+		t.Errorf("stat %s: %v, want the interrupted run's residue still in the workspace", residue, err)
+	}
+}
+
+// requireInterruptedRow holds what the run owes after the kill, read from the
+// ledger and the row's own state: the row is open, one site is answered, and
+// the other is named as the one the workspace is uncertain about.
+func requireInterruptedRow(t *testing.T, repo, runID string) resumeOutput {
+	t.Helper()
+	res := runResume(t, repo, runID)
+	row := resumeRow(t, res, "SC-09")
+	if got, want := row.Status, string(runstate.StatusStarted); got != want {
+		t.Errorf("row status = %q, want %q after the verifier was killed mid-site (reason %q)", got, want, row.Reason)
+	}
+	if want := []string{"site-a"}; !reflect.DeepEqual(row.CompletedSites, want) {
+		t.Errorf("completedSites = %v, want %v", row.CompletedSites, want)
+	}
+	if got := row.InterruptedSite; got != "site-b" {
+		t.Errorf("interruptedSite = %q, want site-b", got)
+	}
+	return res
+}
+
+// requireSiteInterruptedRefusal drives the real evaluate-mutation over the
+// uncertain workspace and holds the refusal by name: nothing is measured until
+// a recovery has actually succeeded.
+func requireSiteInterruptedRefusal(t *testing.T, repo, runID, runDir string) {
+	t.Helper()
+	code, stdout, stderr := runVerifyOp(t, "evaluate-mutation",
+		evaluateMutationRequestJSON(t, repo, runID, runDir, "site-b", true))
+	if code != exitError {
+		t.Fatalf("evaluate-mutation exit code = %d, want %d over an interrupted workspace; stdout=%s", code, exitError, stdout)
+	}
+	if got := decodeCLIError(t, stderr).Code; got != "site-interrupted" {
+		t.Errorf("error code = %q, want site-interrupted", got)
+	}
+}
+
+// requireRestoredWorkspace holds what a recovered workspace owes the site about
+// to be measured in it: nothing of the interrupted run survives, not even an
+// ignored path, and it stands at the commit the row was prepared at.
+func requireRestoredWorkspace(t *testing.T, worktreePath, commit string) {
+	t.Helper()
+	status := strings.TrimSpace(mustGit(t, worktreePath, "status", "--porcelain=v1", "--ignored", "--untracked-files=all"))
+	if status != "" {
+		t.Errorf("worktree status = %q, want empty including ignored paths", status)
+	}
+	residue := filepath.Join(worktreePath, "orders", "residue.txt")
+	if _, err := os.Stat(residue); !os.IsNotExist(err) {
+		t.Errorf("os.Stat(%s) err = %v, want the interrupted run's residue gone", residue, err)
+	}
+	if head := strings.TrimSpace(mustGit(t, worktreePath, "rev-parse", "HEAD")); head != commit {
+		t.Errorf("worktree HEAD = %q, want the prepared commit %q", head, commit)
+	}
+}
+
+// requireRegisteredWorktree holds that path is one of the worktrees the
+// verifier owns. Both sides are resolved before they are compared: the glob
+// walks TMPDIR as the environment spells it, which on macOS is /var, while a
+// controller resolves its temporary root before it creates anything under it,
+// so every path an op reports names the same directory as /private/var.
+func requireRegisteredWorktree(t *testing.T, path string) {
+	t.Helper()
+	registered := verifierWorktrees(t)
+	want := resolvedPath(t, path)
+	for _, wt := range registered {
+		if resolvedPath(t, wt) == want {
+			return
+		}
+	}
+	t.Errorf("registered worktrees = %v, want the recreated %q among them", registered, path)
+}
+
+func resolvedPath(t *testing.T, path string) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatalf("resolve %s: %v", path, err)
+	}
+	return resolved
+}
+
+// requireRecoveredProgress holds what a successful recovery reports about the
+// row it recovered: the site that finished is kept, and the site the kill
+// landed in is named.
+func requireRecoveredProgress(t *testing.T, out recoverMutationOutput) {
+	t.Helper()
+	if out.RowID != "SC-09" {
+		t.Errorf("rowId = %q, want SC-09", out.RowID)
+	}
+	if want := []string{"site-a"}; !reflect.DeepEqual(out.CompletedSites, want) {
+		t.Errorf("completedSites = %v, want %v", out.CompletedSites, want)
+	}
+	if out.InterruptedSite != "site-b" {
+		t.Errorf("interruptedSite = %q, want site-b", out.InterruptedSite)
+	}
+}
+
+// requireSecondSiteMeasured measures the site the interruption cost the row, in
+// the workspace the recovery handed back, and holds the row's answer: the
+// caught mutant, evidence naming both sites in the order they ran, and a
+// completed row whose outcome is the one site the mutant walked past.
+func requireSecondSiteMeasured(t *testing.T, repo, runID, runDir, worktreePath string) {
+	t.Helper()
+	mutateOrdersGuard(t, worktreePath, `	return fmt.Errorf("always rejected")`)
+
+	code, stdout, stderr := runVerifyOp(t, "evaluate-mutation",
+		evaluateMutationRequestJSON(t, repo, runID, runDir, "site-b", true))
+	if code != exitOK {
+		t.Fatalf("repeated site-b exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+	var out evaluateMutationOutput
+	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
+		t.Fatalf("evaluate-mutation stdout did not decode: %v\nstdout=%s", err, stdout)
+	}
+	if out.Outcome != "caught" {
+		t.Errorf("site-b outcome = %q, want caught", out.Outcome)
+	}
+	if len(out.Sites) != 2 {
+		t.Fatalf("sites = %+v, want the site that finished before the kill and the one repeated after it", out.Sites)
+	}
+	if out.Sites[0].Site != "site-a" || out.Sites[0].Outcome != "survived" {
+		t.Errorf("sites[0] = %+v, want site-a survived", out.Sites[0])
+	}
+	if out.Sites[1].Site != "site-b" || out.Sites[1].Outcome != "caught" {
+		t.Errorf("sites[1] = %+v, want site-b caught", out.Sites[1])
+	}
+	// The repeated site reuses the interrupted site's index, so its captures
+	// overwrite the ones the kill left rather than accumulating beside them.
+	if !strings.HasSuffix(out.Sites[1].MutatedRunDir, "site-2-mutated") {
+		t.Errorf("sites[1].MutatedRunDir = %q, want it to end with site-2-mutated", out.Sites[1].MutatedRunDir)
+	}
+	assertEvidenceFile(t, out.EvidencePath, runID, "SC-09", "go", 2, []string{"survived", "caught"})
+
+	row := resumeRow(t, runResume(t, repo, runID), "SC-09")
+	if got, want := row.Status, string(runstate.StatusCompleted); got != want {
+		t.Errorf("row status = %q, want %q (reason %q)", got, want, row.Reason)
+	}
+	if row.Outcome != "survived" {
+		t.Errorf("row outcome = %q, want survived: one site the mutant walked past answers the whole row", row.Outcome)
+	}
+	if row.EvidencePath != out.EvidencePath {
+		t.Errorf("row evidencePath = %q, want %q", row.EvidencePath, out.EvidencePath)
+	}
+}
+
+// covers: SC-24
+func TestRestart_RestoresMutationWorkspaceBeforeMeasuring(t *testing.T) {
+	t.Run("the recovered workspace is restored in place, then measured", func(t *testing.T) {
+		repo := fixtureRepoWith(t, slowFixtureEdit(t))
+		const runID = "restart-mutation-restored"
+		before := captureOriginalRepo(t, repo)
+
+		prep := interruptMutationAtSiteB(t, repo, runID)
+		requireOriginalRepoUntouched(t, repo, before, "the interruption")
+		requireInterruptedWorkspace(t, prep.WorktreePath)
+
+		requireInterruptedRow(t, repo, runID)
+		requireOriginalRepoUntouched(t, repo, before, "resume")
+
+		requireSiteInterruptedRefusal(t, repo, runID, prep.RunDir)
+		requireOriginalRepoUntouched(t, repo, before, "the refused evaluation")
+
+		rec := runRecoverMutation(t, repo, runID, prep.RunDir)
+		if rec.Recreated {
+			t.Errorf("recreated = true, want the surviving workspace restored in place")
+		}
+		if rec.WorktreePath != prep.WorktreePath {
+			t.Errorf("worktreePath = %q, want the prepared %q", rec.WorktreePath, prep.WorktreePath)
+		}
+		requireRecoveredProgress(t, rec)
+		requireRestoredWorkspace(t, rec.WorktreePath, prep.RepoCommit)
+		requireOriginalRepoUntouched(t, repo, before, "the recovery")
+
+		requireSecondSiteMeasured(t, repo, runID, prep.RunDir, rec.WorktreePath)
+		requireOriginalRepoUntouched(t, repo, before, "the repeated site")
+	})
+
+	t.Run("a workspace that vanished is recreated before the row is measured", func(t *testing.T) {
+		repo := fixtureRepoWith(t, slowFixtureEdit(t))
+		const runID = "restart-mutation-recreated"
+		before := captureOriginalRepo(t, repo)
+
+		prep := interruptMutationAtSiteB(t, repo, runID)
+		requireOriginalRepoUntouched(t, repo, before, "the interruption")
+
+		// The workspace itself is gone, which is what a cleanup sweeping the
+		// machine's temporary directory after a crash would leave.
+		if err := os.RemoveAll(prep.WorktreePath); err != nil {
+			t.Fatalf("remove the interrupted workspace: %v", err)
+		}
+
+		rec := runRecoverMutation(t, repo, runID, prep.RunDir)
+		if !rec.Recreated {
+			t.Errorf("recreated = false, want a workspace that no longer exists recreated")
+		}
+		if rec.WorktreePath == prep.WorktreePath {
+			t.Fatalf("worktreePath = %q, want a fresh workspace, not the one that vanished", rec.WorktreePath)
+		}
+		requireRegisteredWorktree(t, rec.WorktreePath)
+		requireRecoveredProgress(t, rec)
+		requireRestoredWorkspace(t, rec.WorktreePath, prep.RepoCommit)
+		requireOriginalRepoUntouched(t, repo, before, "the recreation")
+
+		// A parent re-dispatching the mutator is sent to the workspace that
+		// exists, not to the one the row was opened against.
+		if got := resumeRow(t, runResume(t, repo, runID), "SC-09").WorktreePath; got != rec.WorktreePath {
+			t.Errorf("row worktreePath = %q, want the recreated %q", got, rec.WorktreePath)
+		}
+
+		requireSecondSiteMeasured(t, repo, runID, prep.RunDir, rec.WorktreePath)
+		requireOriginalRepoUntouched(t, repo, before, "the repeated site")
+	})
+
+	t.Run("a restoration that fails leaves the row where the interruption left it", func(t *testing.T) {
+		repo := fixtureRepoWith(t, slowFixtureEdit(t))
+		const runID = "restart-mutation-unrestorable"
+		before := captureOriginalRepo(t, repo)
+
+		prep := interruptMutationAtSiteB(t, repo, runID)
+		requireOriginalRepoUntouched(t, repo, before, "the interruption")
+
+		// A workspace whose gitdir link is no longer a gitdir link cannot be
+		// restored by any git command run inside it.
+		if err := os.WriteFile(filepath.Join(prep.WorktreePath, ".git"), []byte("not a gitdir link\n"), 0o644); err != nil {
+			t.Fatalf("break the workspace's gitdir link: %v", err)
+		}
+
+		if got := refuseRecoverMutation(t, repo, runID, prep.RunDir).Code; got != "restore-failed" {
+			t.Errorf("error code = %q, want restore-failed", got)
+		}
+		requireOriginalRepoUntouched(t, repo, before, "the refused recovery")
+
+		// The marker the failed recovery left standing is what keeps the row
+		// from being measured on a workspace nobody can vouch for.
+		requireSiteInterruptedRefusal(t, repo, runID, prep.RunDir)
+		requireOriginalRepoUntouched(t, repo, before, "the refused evaluation")
+
+		res := requireInterruptedRow(t, repo, runID)
+		if res.Mutation.Complete {
+			t.Error("mutation.complete = true, want false while the row is still open")
+		}
+		// The row is still owed, and the run's own tally says so: one started
+		// record and nothing to close it. resume's pending list is sectioned by
+		// the rows the dispatch inputs require, which are the high-risk ones,
+		// so a row this low-risk is owed through its own started standing
+		// rather than through an entry there.
+		if res.Counts.Started != 1 {
+			t.Errorf("counts.started = %d, want 1: the interrupted row is the run's one open obligation (pending = %+v)",
+				res.Counts.Started, res.Pending)
+		}
+		requireOriginalRepoUntouched(t, repo, before, "resume")
 	})
 }

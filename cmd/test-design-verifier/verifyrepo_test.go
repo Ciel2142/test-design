@@ -86,9 +86,21 @@ func rewriteFixtureDoc(t *testing.T, repo string, replace func(string) string) {
 // the repository root at a clean HEAD.
 func fixtureRepo(t *testing.T) string {
 	t.Helper()
+	return fixtureRepoWith(t, nil)
+}
+
+// fixtureRepoWith is fixtureRepo with one edit applied to the copied tree
+// before anything is committed, so what edit wrote is part of the commit the
+// coverage document pins its baseline to rather than a dirty working tree the
+// first op would refuse. A nil edit is fixtureRepo itself.
+func fixtureRepoWith(t *testing.T, edit func(repo string)) string {
+	t.Helper()
 	isolateEnv(t)
 	repo := t.TempDir()
 	copyTree(t, filepath.Join("..", "..", "fixtures", "go-project"), repo)
+	if edit != nil {
+		edit(repo)
+	}
 
 	mustGit(t, repo, "init", "-q")
 	mustGit(t, repo, "add", "-A")
