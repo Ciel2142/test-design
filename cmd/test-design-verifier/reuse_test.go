@@ -356,6 +356,9 @@ func TestReuse_AdoptsCompletedEvidenceFromThePriorRun(t *testing.T) {
 	if got := rec.Artifacts[artifactEvidence].Path; got != group.EvidencePath {
 		t.Errorf("adopted artifact path = %q, want the original %q", got, group.EvidencePath)
 	}
+	if got := rec.Artifacts[artifactEvidence].SHA256; got != ref.Artifact.SHA256 {
+		t.Errorf("adopted artifact digest = %q, want the digest the reference verified, %q", got, ref.Artifact.SHA256)
+	}
 	inputs := recordedReviewInputs(t, rec)
 	prior := readReviewEvidence(t, group.EvidencePath)
 	if !reflect.DeepEqual(inputs.Manifest, prior.Inputs.Manifest) {
@@ -452,60 +455,116 @@ func TestReuse_AnIsolatedTestChangeRefusesOnlyItsOwnGroup(t *testing.T) {
 	}
 }
 
-// TestReuse_AnUnownedChangeWidensToEveryRecord proves widening is total: a
-// production change and a test file no manifest names are each read as
-// uncertainty about what they invalidate, so every prior record is refused with
-// the same reason naming the first such path, and only the coverage source's
-// own directory is exempt from the question.
+// TestReuse_AnUnownedChangeWidensToEveryRecord proves widening is total and
+// answered per class: a production change, a test file two groups were handed,
+// and a test file no manifest names each refuse every prior record — the ones
+// whose own context never moved included — with the same reason naming the
+// first such path in sorted order, whichever class that path belongs to. Only
+// the coverage source's own directory is exempt from the question.
 func TestReuse_AnUnownedChangeWidensToEveryRecord(t *testing.T) {
-	repo := fixtureRepo(t)
-	const priorRunID = "reuse-widen-prior"
-	const runID = "reuse-widen-new"
-	const production = "orders/orders.go"
-	const newTest = "orders/extra_test.go"
 	const publication = "docs/superpowers/coverage/2026-08-30-fixture-report.md"
-	policy := reusePolicy(t)
+	const production = "orders/orders.go"
+	const productionEdit = "\n// a production comment nobody reviewed\n"
+	const unownedTest = "package orders\n\n// a helper file no prior manifest names\n"
 
-	priorDispatch := tracedDispatch(t, repo, priorRunID)
-	startReviewGroupWith(t, repo, priorRunID, "A", policy, "SC-01", "SC-02", "SC-10")
-	completeReviewGroupWith(t, repo, priorRunID, "A", priorDispatch, &[]string{}, "SC-01", "SC-02", "SC-10")
-	unappliableRow(t, repo, priorRunID, "SC-10")
+	for _, tc := range []struct {
+		name   string
+		edit   func(t *testing.T, repo string)
+		path   string
+		class  string
+		exempt string
+		want   string
+	}{
+		{
+			name: "a production change alone",
+			edit: func(t *testing.T, repo string) {
+				appendToRepoFile(t, repo, production, productionEdit)
+			},
+			path:  production,
+			class: "shared",
+			want:  "module-changed:" + production,
+		},
+		{
+			name: "a test file two groups were handed",
+			edit: func(t *testing.T, repo string) {
+				appendToRepoFile(t, repo, "payments/payments_test.go", "\n// an edit to a file two groups share\n")
+			},
+			path:  "payments/payments_test.go",
+			class: "shared",
+			want:  "module-changed:payments/payments_test.go",
+		},
+		{
+			name: "an unowned test file sorting before a production change",
+			edit: func(t *testing.T, repo string) {
+				writeRepoFile(t, repo, "orders/extra_test.go", unownedTest)
+				appendToRepoFile(t, repo, production, productionEdit)
+				writeRepoFile(t, repo, publication, "# published report\n")
+			},
+			path:   "orders/extra_test.go",
+			class:  "unknown",
+			exempt: publication,
+			want:   "unknown-ownership:orders/extra_test.go",
+		},
+		{
+			name: "a production change sorting before an unowned test file",
+			edit: func(t *testing.T, repo string) {
+				appendToRepoFile(t, repo, production, productionEdit)
+				writeRepoFile(t, repo, "orders/zz_extra_test.go", unownedTest)
+			},
+			path:  production,
+			class: "shared",
+			want:  "module-changed:" + production,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := fixtureRepo(t)
+			const priorRunID = "reuse-widen-prior"
+			const runID = "reuse-widen-new"
+			policy := reusePolicy(t)
 
-	appendToRepoFile(t, repo, production, "\n// a production comment nobody reviewed\n")
-	writeRepoFile(t, repo, newTest, "package orders\n\n// a helper file no prior manifest names\n")
-	writeRepoFile(t, repo, publication, "# published report\n")
-	commitAll(t, repo, "change production, add a test file, publish a report")
+			priorDispatch := tracedDispatch(t, repo, priorRunID)
+			startReviewGroupWith(t, repo, priorRunID, "A", policy, "SC-01", "SC-02", "SC-10")
+			completeReviewGroupWith(t, repo, priorRunID, "A", priorDispatch, &[]string{}, "SC-01", "SC-02", "SC-10")
+			startReviewGroupWith(t, repo, priorRunID, "B", policy, "SC-05", "SC-06")
+			completeReviewGroupWith(t, repo, priorRunID, "B", priorDispatch, &[]string{}, "SC-05", "SC-06")
+			unappliableRow(t, repo, priorRunID, "SC-10")
 
-	tracedDispatch(t, repo, runID)
-	out := runReuse(t, repo, runID, priorRunID, policy)
+			tc.edit(t, repo)
+			commitAll(t, repo, "change the repository under the prior run")
 
-	if got := reuseChangedPathFor(t, out, publication).Class; got != "exempt" {
-		t.Errorf("%s class = %q, want exempt", publication, got)
-	}
-	if got := reuseChangedPathFor(t, out, production).Class; got != "shared" {
-		t.Errorf("%s class = %q, want shared: a production file is not one group's own", production, got)
-	}
-	if got := reuseChangedPathFor(t, out, newTest).Class; got != "unknown" {
-		t.Errorf("%s class = %q, want unknown: no prior manifest names it", newTest, got)
-	}
-	want := "unknown-ownership:" + newTest
-	if got := reuseDecisionFor(t, out.Review, "A"); got.Reused || got.Reason != want {
-		t.Errorf("group A = %+v, want it refused %q", got, want)
-	}
-	if got := reuseDecisionFor(t, out.Mutation, "SC-10"); got.Reused || got.Reason != want {
-		t.Errorf("SC-10 = %+v, want it refused %q", got, want)
-	}
-	if want := (reuseCounts{Refused: 2}); out.Counts != want {
-		t.Errorf("counts = %+v, want %+v", out.Counts, want)
+			tracedDispatch(t, repo, runID)
+			out := runReuse(t, repo, runID, priorRunID, policy)
+
+			if got := reuseChangedPathFor(t, out, tc.path).Class; got != tc.class {
+				t.Errorf("%s class = %q, want %q", tc.path, got, tc.class)
+			}
+			if tc.exempt != "" {
+				if got := reuseChangedPathFor(t, out, tc.exempt).Class; got != "exempt" {
+					t.Errorf("%s class = %q, want exempt", tc.exempt, got)
+				}
+			}
+			for _, id := range []string{"A", "B"} {
+				if got := reuseDecisionFor(t, out.Review, id); got.Reused || got.Reason != tc.want {
+					t.Errorf("group %s = %+v, want it refused %q", id, got, tc.want)
+				}
+			}
+			if got := reuseDecisionFor(t, out.Mutation, "SC-10"); got.Reused || got.Reason != tc.want {
+				t.Errorf("SC-10 = %+v, want it refused %q", got, tc.want)
+			}
+			if want := (reuseCounts{Refused: 3}); out.Counts != want {
+				t.Errorf("counts = %+v, want %+v", out.Counts, want)
+			}
+		})
 	}
 }
 
 // TestReuse_RefusesPerRecordWhatItCannotProveUnchanged holds the per-record
 // judgement at one commit, where nothing in the repository moved: a group the
 // prior run never closed, one whose manifest never recorded what its critic
-// read, a request that names no policy, a mutation row no group reviewed, and a
-// row the new run has already grouped are each refused on their own, in one
-// output the op still exits zero on.
+// read, a request that names no policy, a mutation row no group reviewed, a
+// completed row whose outcome rests on no file at all, and a row the new run
+// has already grouped are each refused on their own, in one output the op still
+// exits zero on.
 func TestReuse_RefusesPerRecordWhatItCannotProveUnchanged(t *testing.T) {
 	repo := fixtureRepo(t)
 	const priorRunID = "reuse-per-record-prior"
@@ -519,6 +578,7 @@ func TestReuse_RefusesPerRecordWhatItCannotProveUnchanged(t *testing.T) {
 	startReviewGroupWith(t, repo, priorRunID, "D", policy, "SC-03")
 	completeReviewGroupWith(t, repo, priorRunID, "D", priorDispatch, nil, "SC-03")
 	unappliableRow(t, repo, priorRunID, "SC-10")
+	completeRowWithoutArtifact(t, repo, priorRunID, "SC-07")
 
 	tracedDispatch(t, repo, runID)
 
@@ -538,7 +598,10 @@ func TestReuse_RefusesPerRecordWhatItCannotProveUnchanged(t *testing.T) {
 	if got := reuseDecisionFor(t, unspecified.Mutation, "SC-10"); got.Reused || got.Reason != "no-review-context" {
 		t.Errorf("SC-10 = %+v, want it refused no-review-context: no prior group reviewed the row", got)
 	}
-	if want := (reuseCounts{Refused: 4}); unspecified.Counts != want {
+	if got := reuseDecisionFor(t, unspecified.Mutation, "SC-07"); got.Reused || got.Reason != "artifact-missing:evidence" {
+		t.Errorf("SC-07 = %+v, want a completed row pointing at nothing refused artifact-missing:evidence", got)
+	}
+	if want := (reuseCounts{Refused: 5}); unspecified.Counts != want {
 		t.Errorf("counts = %+v, want %+v", unspecified.Counts, want)
 	}
 
@@ -549,5 +612,175 @@ func TestReuse_RefusesPerRecordWhatItCannotProveUnchanged(t *testing.T) {
 	}
 	if lines := gitStatusLines(t, repo); len(lines) != 0 {
 		t.Errorf("git status = %v, want reuse to leave the repository untouched", lines)
+	}
+}
+
+// pinToolchain fixes the tool versions the trace records, so a test can move a
+// run between toolchains without one installed. Nested calls unwind in order.
+func pinToolchain(t *testing.T, version string) {
+	t.Helper()
+	previous := toolVersionsFor
+	toolVersionsFor = func(string, string, []string) map[string]string {
+		return map[string]string{"go": version}
+	}
+	t.Cleanup(func() { toolVersionsFor = previous })
+}
+
+// completeRowWithoutArtifact leaves a completed mutation-row record whose
+// outcome rests on no file at all — the shape a ledger written by a future op
+// that forgot its evidence would carry.
+func completeRowWithoutArtifact(t *testing.T, repo, runID, rowID string) {
+	t.Helper()
+	req := fixtureVerifyRequest(repo, runID)
+	store, cliErr := openLedger("test", req)
+	if cliErr != nil {
+		t.Fatalf("openLedger: %v", cliErr.Message)
+	}
+	src, cliErr := loadVerifiedSource("test", repo, fixtureCoverageSource)
+	if cliErr != nil {
+		t.Fatalf("loadVerifiedSource: %v", cliErr.Message)
+	}
+	commit, cliErr := headCommit("test", repo)
+	if cliErr != nil {
+		t.Fatalf("headCommit: %v", cliErr.Message)
+	}
+	err := store.Update(ledgerIdentity(req, repo, commit, src), func(l *runstate.Ledger) error {
+		if _, err := l.Start(runstate.KindMutationRow, rowID, mutationRowInputs{RunnerKind: src.Runner.Kind}, "", ""); err != nil {
+			return err
+		}
+		_, err := l.Complete(runstate.KindMutationRow, rowID, "caught", nil, "")
+		return err
+	})
+	if err != nil {
+		t.Fatalf("complete %s without an artifact: %v", rowID, err)
+	}
+}
+
+// TestReuse_OwnershipComesFromEveryRecordedManifest proves a change is
+// attributed from every manifest the prior run recorded, not only from the ones
+// whose records can be adopted. A file a completed group and a group that was
+// never closed were both handed belongs to neither alone, so it widens — and
+// the group whose own context never moved is refused with it, rather than
+// adopted behind a boundary the ledger never proved.
+func TestReuse_OwnershipComesFromEveryRecordedManifest(t *testing.T) {
+	repo := fixtureRepo(t)
+	const priorRunID = "reuse-ownership-prior"
+	const runID = "reuse-ownership-new"
+	const shared = "payments/payments_test.go"
+	policy := reusePolicy(t)
+
+	priorDispatch := tracedDispatch(t, repo, priorRunID)
+	startReviewGroupWith(t, repo, priorRunID, "A", policy, "SC-01", "SC-05")
+	completeReviewGroupWith(t, repo, priorRunID, "A", priorDispatch, &[]string{}, "SC-01", "SC-05")
+	// B is handed the same file and is never closed: its bundle lives only in
+	// the record it started.
+	startReviewGroupWith(t, repo, priorRunID, "B", policy, "SC-06")
+	startReviewGroupWith(t, repo, priorRunID, "C", policy, "SC-09")
+	completeReviewGroupWith(t, repo, priorRunID, "C", priorDispatch, &[]string{}, "SC-09")
+
+	appendToRepoFile(t, repo, shared, "\n// an edit to a file a closed and an open group share\n")
+	commitAll(t, repo, "edit a test file two groups were handed")
+
+	tracedDispatch(t, repo, runID)
+	out := runReuse(t, repo, runID, priorRunID, policy)
+
+	changed := reuseChangedPathFor(t, out, shared)
+	if changed.Class != "shared" {
+		t.Errorf("%s class = %q, want shared: two prior groups were handed it", shared, changed.Class)
+	}
+	if !slices.Contains(changed.Groups, "A") || !slices.Contains(changed.Groups, "B") {
+		t.Errorf("%s groups = %v, want both the completed and the started group", shared, changed.Groups)
+	}
+	want := "module-changed:" + shared
+	for _, id := range []string{"A", "C"} {
+		if got := reuseDecisionFor(t, out.Review, id); got.Reused || got.Reason != want {
+			t.Errorf("group %s = %+v, want it refused %q", id, got, want)
+		}
+	}
+	if got := reuseDecisionFor(t, out.Review, "B"); got.Reused || got.Reason != "prior-not-completed" {
+		t.Errorf("group B = %+v, want it refused prior-not-completed", got)
+	}
+	if want := (reuseCounts{Refused: 3}); out.Counts != want {
+		t.Errorf("counts = %+v, want %+v", out.Counts, want)
+	}
+}
+
+// TestReuse_AMutationRowIsJudgedOnTheToolchainThatRanIt follows a row across
+// three runs: one reviewed under a toolchain, one that adopted that review and
+// measured the row under another, and one back on the first. The row was
+// measured under the second, so the third must not accept it on the strength of
+// the review's older manifest — and when the run that measured it can no longer
+// say which toolchain it used, the row is refused rather than assumed.
+func TestReuse_AMutationRowIsJudgedOnTheToolchainThatRanIt(t *testing.T) {
+	repo := fixtureRepo(t)
+	const reviewed = "reuse-toolchain-reviewed"
+	const measured = "reuse-toolchain-measured"
+	const asking = "reuse-toolchain-asking"
+	rows := []string{"SC-01", "SC-02", "SC-10"}
+	policy := reusePolicy(t)
+
+	pinToolchain(t, "go version go1.0.0")
+	priorDispatch := tracedDispatch(t, repo, reviewed)
+	startReviewGroupWith(t, repo, reviewed, "A", policy, rows...)
+	completeReviewGroupWith(t, repo, reviewed, "A", priorDispatch, &[]string{}, rows...)
+
+	pinToolchain(t, "go version go2.0.0")
+	tracedDispatch(t, repo, measured)
+	adopted := runReuse(t, repo, measured, reviewed, policy)
+	if got := reuseDecisionFor(t, adopted.Review, "A"); !got.Reused {
+		t.Fatalf("group A = %+v, want a review adopted across a toolchain change", got)
+	}
+	unappliableRow(t, repo, measured, "SC-10")
+
+	pinToolchain(t, "go version go1.0.0")
+	tracedDispatch(t, repo, asking)
+	out := runReuse(t, repo, asking, measured, policy)
+
+	if got := reuseDecisionFor(t, out.Review, "A"); !got.Reused {
+		t.Errorf("group A = %+v, want the review still adopted: a critic reads source, it does not run it", got)
+	}
+	if got := reuseDecisionFor(t, out.Mutation, "SC-10"); got.Reused || got.Reason != "toolchain-changed" {
+		t.Errorf("SC-10 = %+v, want it refused toolchain-changed: it was measured under the other toolchain", got)
+	}
+
+	// With the run that measured the row unable to say what it ran under, the
+	// row is not judged at all.
+	if err := os.Remove(runResume(t, repo, measured).Trace.DispatchPath); err != nil {
+		t.Fatalf("remove the measuring run's dispatch document: %v", err)
+	}
+	unrecorded := runReuse(t, repo, asking, measured, policy)
+	if got := reuseDecisionFor(t, unrecorded.Mutation, "SC-10"); got.Reused || got.Reason != "toolchain-unrecorded" {
+		t.Errorf("SC-10 = %+v, want it refused toolchain-unrecorded", got)
+	}
+}
+
+// TestReuse_RefusesAPolicyInputItCannotIdentify keeps a partial policy from
+// passing for a matching one: a request naming an instruction file this run
+// cannot read describes a critic whose inputs nobody can compare, and the
+// digests it did compute would match a prior policy that never named the
+// unreadable file at all.
+func TestReuse_RefusesAPolicyInputItCannotIdentify(t *testing.T) {
+	repo := fixtureRepo(t)
+	const priorRunID = "reuse-policy-prior"
+	const runID = "reuse-policy-new"
+	policy := reusePolicy(t)
+
+	priorDispatch := tracedDispatch(t, repo, priorRunID)
+	startReviewGroupWith(t, repo, priorRunID, "A", policy, "SC-01", "SC-02")
+	completeReviewGroupWith(t, repo, priorRunID, "A", priorDispatch, &[]string{}, "SC-01", "SC-02")
+	tracedDispatch(t, repo, runID)
+
+	missing := filepath.Join(t.TempDir(), "second-critic.md")
+	widened := &reviewPolicy{Critic: policy.Critic, Instructions: append(slices.Clone(policy.Instructions), missing)}
+	out := runReuse(t, repo, runID, priorRunID, widened)
+	if want := "policy-unreadable:" + missing; reuseDecisionFor(t, out.Review, "A").Reason != want {
+		t.Errorf("group A = %+v, want it refused %q", reuseDecisionFor(t, out.Review, "A"), want)
+	}
+
+	// The same request naming only what this run can identify adopts, so the
+	// refusal above is the unreadable instruction and nothing else.
+	identified := runReuse(t, repo, runID, priorRunID, policy)
+	if got := reuseDecisionFor(t, identified.Review, "A"); !got.Reused {
+		t.Errorf("group A = %+v, want it adopted under the policy the prior run recorded", got)
 	}
 }

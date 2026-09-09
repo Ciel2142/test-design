@@ -179,15 +179,23 @@ func reuseHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer) *cliEr
 	if cliErr != nil {
 		return cliErr
 	}
+	// A commit this repository has but cannot be diffed against HEAD — a
+	// shallow clone, a corrupted object — is a prior run this one cannot be
+	// compared with, which is what prior-commit-unreachable says.
 	paths, err := changedPaths(req.RepoRoot, prior.identity().RepoCommit, repoCommit)
 	if err != nil {
-		return &cliError{Code: "repo-diff-failed", Message: fmt.Sprintf("%s: %v", op, err)}
+		return &cliError{
+			Code: "prior-commit-unreachable",
+			Message: fmt.Sprintf("%s: cannot compare run %s at %s with HEAD: %v", op,
+				prior.runID, prior.identity().RepoCommit, err),
+		}
 	}
-	policy, _ := policyIdentity(req.Policy)
+	policy, policyProblems := policyIdentity(req.Policy)
 	run := &reuseRun{
 		op: op, req: req, src: src, prior: prior, policy: policy,
-		active:  activeRowIDs(src),
-		changes: classifyChanges(paths, req.CoverageSource, src.Runner.Kind, prior.groups),
+		policyProblems: policyProblems,
+		active:         activeRowIDs(src),
+		changes:        classifyChanges(paths, req.CoverageSource, src.Runner.Kind, prior.groups),
 	}
 
 	var out reuseOutput
@@ -232,10 +240,16 @@ func reuseHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer) *cliEr
 // written: its ledger, the review groups it holds, and the dispatch document
 // its trace wrote when that is still on disk.
 type priorRun struct {
-	runID    string
-	ledger   *runstate.Ledger
-	groups   []*priorGroup
-	dispatch map[string]dispatchRow
+	runID  string
+	ledger *runstate.Ledger
+	groups []*priorGroup
+	// dispatch is the prior trace's document and the digest its record carries,
+	// present only when that record still verifies. It answers two questions —
+	// how the trace bound a row, and which toolchain the run measured under —
+	// and a run directory a temporary root has cleaned leaves both unanswered.
+	dispatch       *dispatchInputs
+	dispatchRows   map[string]dispatchRow
+	dispatchDigest string
 }
 
 func (p *priorRun) identity() runstate.Identity { return p.ledger.Identity }
@@ -275,40 +289,63 @@ func openPriorRun(op string, req *reuseRequest, src *coverage.Source) (*priorRun
 				req.PriorRunID, ledger.Identity.RepoCommit),
 		}
 	}
-	return &priorRun{
-		runID:    req.PriorRunID,
-		ledger:   ledger,
-		groups:   readPriorGroups(ledger),
-		dispatch: priorDispatchRows(ledger),
-	}, nil
+	prior := &priorRun{runID: req.PriorRunID, ledger: ledger, groups: readPriorGroups(ledger)}
+	prior.dispatch, prior.dispatchDigest = priorTrace(ledger)
+	if prior.dispatch != nil {
+		prior.dispatchRows = dispatchRowsByID(prior.dispatch)
+	}
+	return prior, nil
 }
 
-// priorDispatchRows is the prior trace's dispatch document indexed by row, when
-// it is still on disk. It answers one question — whether the trace binds a row
-// differently now — and a run directory a temporary root has since cleaned
-// simply leaves that question unasked; the claim and source comparisons still
-// answer for every row.
-func priorDispatchRows(ledger *runstate.Ledger) map[string]dispatchRow {
+// priorTrace is the dispatch document of the prior run's current trace and the
+// digest that record carries for it, when the record completed and its bytes
+// still verify. Anything less is no document at all: a run that repeated its
+// trace, or whose run directory was cleaned, has nothing here this run may read
+// a prior observation out of.
+func priorTrace(ledger *runstate.Ledger) (*dispatchInputs, string) {
 	rec := runstate.Current(ledger, runstate.KindPhase, tracePhaseID)
-	if rec == nil || rec.Status != runstate.StatusCompleted {
-		return nil
+	if rec == nil || rec.Status != runstate.StatusCompleted || len(runstate.Verify(rec)) > 0 {
+		return nil, ""
 	}
-	dispatch, err := loadDispatchInputs(rec.Artifacts[artifactDispatchInputs].Path)
+	artifact := rec.Artifacts[artifactDispatchInputs]
+	dispatch, err := loadDispatchInputs(artifact.Path)
 	if err != nil {
-		return nil
+		return nil, ""
 	}
-	return dispatchRowsByID(dispatch)
+	return dispatch, artifact.SHA256
 }
 
 // priorGroup is one review-group record of the prior run as reuse reads it: the
 // record, the rows and per-row sources it was judged against, the complete
 // manifest its evidence carries, and the refusal the record alone decides.
 type priorGroup struct {
-	rec      *runstate.Record
-	rows     []string
-	sources  map[string][]string
-	manifest *evidence.Manifest
-	reason   string
+	rec     *runstate.Record
+	rows    []string
+	sources map[string][]string
+	// bundle and context are what this group's critic was handed and what it
+	// was handed or reported reading, gathered from every manifest the prior
+	// run recorded for it. They describe ownership, not eligibility: a group
+	// that cannot be adopted was still handed its files, and a change to one of
+	// them is a change to something somebody reviewed.
+	bundle         map[string]bool
+	context        map[string]bool
+	dispatchDigest string
+	manifest       *evidence.Manifest
+	reason         string
+}
+
+// own records what a manifest says this group's critic was handed and read.
+func (g *priorGroup) own(manifest *evidence.Manifest) {
+	if manifest == nil {
+		return
+	}
+	for path := range manifest.Bundle {
+		g.bundle[path] = true
+		g.context[path] = true
+	}
+	for path := range manifest.Reads {
+		g.context[path] = true
+	}
 }
 
 func readPriorGroups(ledger *runstate.Ledger) []*priorGroup {
@@ -330,10 +367,14 @@ func readPriorGroups(ledger *runstate.Ledger) []*priorGroup {
 // manifest taken is the artifact's, which is the complete one; the record's own
 // inputs are consulted only to tell a legacy record from a current one.
 func readPriorGroup(rec *runstate.Record) *priorGroup {
-	group := &priorGroup{rec: rec}
+	group := &priorGroup{rec: rec, bundle: map[string]bool{}, context: map[string]bool{}}
 	var inputs reviewGroupInputs
 	inputsErr := recordInputs(rec, &inputs)
 	group.rows = inputs.Rows
+	// Ownership is taken from the started manifest before anything is decided
+	// about the record, so a group nothing can adopt still says which files it
+	// was handed.
+	group.own(inputs.Manifest)
 
 	switch {
 	case rec.Status != runstate.StatusCompleted:
@@ -361,7 +402,9 @@ func readPriorGroup(rec *runstate.Record) *priorGroup {
 		group.reason = "legacy-no-manifest"
 		return group
 	}
+	group.own(doc.Inputs.Manifest)
 	group.manifest, group.sources = doc.Inputs.Manifest, doc.Inputs.Sources
+	group.dispatchDigest = doc.Inputs.DispatchInputsSHA256
 	return group
 }
 
@@ -470,12 +513,7 @@ func (c *reuseChanges) basisPaths(ownGroup string) []string {
 func contextOwners(groups []*priorGroup, path string) []string {
 	var owners []string
 	for _, group := range groups {
-		if group.manifest == nil {
-			continue
-		}
-		_, bundled := group.manifest.Bundle[path]
-		_, read := group.manifest.Reads[path]
-		if bundled || read {
+		if group.context[path] {
 			owners = append(owners, group.rec.ID)
 		}
 	}
@@ -486,11 +524,9 @@ func contextOwners(groups []*priorGroup, path string) []string {
 // files, rather than merely reporting that it read it.
 func bundledBy(groups []*priorGroup, id, path string) bool {
 	for _, group := range groups {
-		if group.rec.ID != id || group.manifest == nil {
-			continue
+		if group.rec.ID == id {
+			return group.bundle[path]
 		}
-		_, bundled := group.manifest.Bundle[path]
-		return bundled
 	}
 	return false
 }
@@ -513,16 +549,17 @@ func isPublication(coverageSource, path string) bool {
 // reuseRun is one reuse in progress: what this run observes now, what the prior
 // run recorded, and what moved between them.
 type reuseRun struct {
-	op       string
-	req      *reuseRequest
-	src      *coverage.Source
-	prior    *priorRun
-	changes  *reuseChanges
-	policy   *evidence.PolicyIdentity
-	dispatch *dispatchInputs
-	digest   string
-	active   []string
-	claims   map[string]string
+	op             string
+	req            *reuseRequest
+	src            *coverage.Source
+	prior          *priorRun
+	changes        *reuseChanges
+	policy         *evidence.PolicyIdentity
+	policyProblems []string
+	dispatch       *dispatchInputs
+	digest         string
+	active         []string
+	claims         map[string]string
 }
 
 // claimsOf is the approved semantics this run hands out per row, as the trace's
@@ -585,6 +622,12 @@ func (r *reuseRun) reviewRefusal(group *priorGroup, l *runstate.Ledger) string {
 	if reasons := evidence.Mismatch(group.manifest, r.probe(group.manifest, r.policy), nil, true, false); len(reasons) > 0 {
 		return reasons[0]
 	}
+	// A policy input this run could not identify is not one it compared: the
+	// digests it did compute would equally match a prior policy that never
+	// named the unreadable file at all.
+	if len(r.policyProblems) > 0 {
+		return r.policyProblems[0]
+	}
 	current, _ := reviewGroupInputsFor(r.dispatch, group.rows, r.digest)
 	for _, row := range group.rows {
 		if !slices.Equal(current.Sources[row], group.sources[row]) {
@@ -592,7 +635,7 @@ func (r *reuseRun) reviewRefusal(group *priorGroup, l *runstate.Ledger) string {
 		}
 	}
 	for _, row := range group.rows {
-		if r.statusChanged(row) {
+		if r.statusChanged(group, row) {
 			return "status-changed:" + row
 		}
 	}
@@ -627,9 +670,13 @@ func (r *reuseRun) mutationDecisions(l *runstate.Ledger) ([]reuseDecision, error
 			decisions = append(decisions, decision)
 			continue
 		}
-		reference := r.reference(rec, []string{rec.ID}, context, basisNotApplicable, basisMatched)
-		adopted := reusedMutationInputs{mutationRowInputs: inputs, Manifest: context.manifest, Reuse: reference}
-		if err := r.adopt(l, runstate.KindMutationRow, rec, adopted); err != nil {
+		reference := r.reference(rec, []string{rec.ID}, context.group, basisNotApplicable, basisMatched)
+		// The adopted row keeps its review context's manifest, with the
+		// toolchain it was actually measured under in place of the one that
+		// reviewed it, so the next run judges the row on its own execution
+		// rather than on a review it may have inherited.
+		adopted := reusedMutationInputs{mutationRowInputs: inputs, Manifest: context.manifest(), Reuse: reference}
+		if err := r.adopt(l, runstate.KindMutationRow, rec, adopted, reference); err != nil {
 			return nil, err
 		}
 		decision.Reused, decision.Outcome, decision.Reference = true, rec.Outcome, reference
@@ -638,48 +685,94 @@ func (r *reuseRun) mutationDecisions(l *runstate.Ledger) ([]reuseDecision, error
 	return decisions, nil
 }
 
+// mutationContext is what a prior mutation row is judged against: the group
+// whose manifest is its review context, and the toolchain the row was actually
+// measured under, which is not always the one that reviewed it.
+type mutationContext struct {
+	group     *priorGroup
+	toolchain map[string]string
+}
+
+// manifest is the review context with the row's own executing toolchain in
+// place of the reviewing run's: everything else about the inputs is the
+// group's, but which toolchain ran the mutant is the row's own fact.
+func (c *mutationContext) manifest() *evidence.Manifest {
+	measured := *c.group.manifest
+	measured.ToolVersions = c.toolchain
+	return &measured
+}
+
 // mutationRefusal is why this run may not stand on one prior mutation row,
-// empty when it may, with the group whose manifest is the row's context.
+// empty when it may, with the context an adoption then rests on.
 func (r *reuseRun) mutationRefusal(
 	rec *runstate.Record, inputs mutationRowInputs, inputsErr error, l *runstate.Ledger,
-) (string, *priorGroup) {
+) (string, *mutationContext) {
 	if rec.Status != runstate.StatusCompleted {
 		return "prior-not-completed", nil
 	}
 	if reasons := runstate.Verify(rec); len(reasons) > 0 {
 		return reasons[0], nil
 	}
+	// Verify passes over a record with no artifacts at all: an outcome resting
+	// on no file is not evidence, whatever role it would have been kept under.
+	if _, _, ok := recordArtifact(rec); !ok {
+		return "artifact-missing:" + artifactEvidence, nil
+	}
 	// Mutation evidence follows its review group: a row nothing reviewed, or
 	// whose group's evidence no longer verifies, has no context to be judged
 	// against, and no context is a refusal rather than a judgement made anyway.
-	context := r.contextGroup(rec.ID)
-	if context == nil {
+	group := r.contextGroup(rec.ID)
+	if group == nil {
 		return "no-review-context", nil
 	}
 	if row := r.inactiveRow([]string{rec.ID}); row != "" {
-		return "row-inactive:" + row, context
+		return "row-inactive:" + row, nil
 	}
 	// An input identity this run cannot read is not one it can show unchanged.
 	bound, _ := r.dispatchRow(rec.ID)
 	if inputsErr != nil || inputs.Identity.Scope != bound.Scope || inputs.Identity.Name != bound.TestName {
-		return "identity-changed", context
+		return "identity-changed", nil
 	}
 	if r.changes.widened != "" {
-		return r.changes.widened, context
+		return r.changes.widened, nil
 	}
-	if reason := r.changes.isolated[context.rec.ID]; reason != "" {
-		return reason, context
+	if reason := r.changes.isolated[group.rec.ID]; reason != "" {
+		return reason, nil
+	}
+	toolchain, known := r.executingToolchain(rec)
+	if !known {
+		return "toolchain-unrecorded", nil
 	}
 	// A mutation row is judged on its own claim and on the toolchain that ran
 	// it; the critic policy that reviewed its group answers for the group.
-	reasons := evidence.Mismatch(context.manifest, r.probe(context.manifest, nil), []string{rec.ID}, false, true)
+	context := &mutationContext{group: group, toolchain: toolchain}
+	manifest := context.manifest()
+	reasons := evidence.Mismatch(manifest, r.probe(manifest, nil), []string{rec.ID}, false, true)
 	if len(reasons) > 0 {
-		return reasons[0], context
+		return reasons[0], nil
 	}
 	if runstate.Current(l, runstate.KindMutationRow, rec.ID) != nil {
-		return "already-recorded", context
+		return "already-recorded", nil
 	}
 	return "", context
+}
+
+// executingToolchain is the toolchain a prior mutation row was measured under.
+// A row this run's predecessor adopted from an earlier one carries it in its
+// own recorded manifest; a row that run measured itself was measured under the
+// toolchain its trace recorded. When neither can be established the row is not
+// judged at all: a mutant whose execution environment is unknown is not one a
+// later run can show unchanged, and the reviewing run's toolchain is not an
+// answer — an adopted review may have been made under a third one entirely.
+func (r *reuseRun) executingToolchain(rec *runstate.Record) (map[string]string, bool) {
+	var adopted reusedMutationInputs
+	if err := recordInputs(rec, &adopted); err == nil && adopted.Reuse != nil && adopted.Manifest != nil {
+		return adopted.Manifest.ToolVersions, true
+	}
+	if r.prior.dispatch != nil {
+		return r.prior.dispatch.ToolVersions, true
+	}
+	return nil, false
 }
 
 // contextGroup is the prior group whose manifest stands for a row: the one that
@@ -735,9 +828,17 @@ func (r *reuseRun) dispatchRow(row string) (dispatchRow, bool) {
 }
 
 // statusChanged reports whether this run's trace binds row differently than the
-// prior run's did.
-func (r *reuseRun) statusChanged(row string) bool {
-	before, recorded := r.prior.dispatch[row]
+// trace the group was judged against did. The comparison is made only against
+// that exact document — the prior run's current trace, when it verifies and its
+// digest is the one the group's evidence names — never against a later trace
+// the prior run repeated, which nobody reviewed under. A prior run whose run
+// directory has been cleaned, or which traced again, leaves the question
+// unasked; the claim, source and context comparisons still answer for the row.
+func (r *reuseRun) statusChanged(group *priorGroup, row string) bool {
+	if r.prior.dispatchDigest == "" || r.prior.dispatchDigest != group.dispatchDigest {
+		return false
+	}
+	before, recorded := r.prior.dispatchRows[row]
 	if !recorded {
 		return false
 	}
@@ -756,13 +857,18 @@ func (r *reuseRun) adoptReview(l *runstate.Ledger, group *priorGroup) (*evidence
 	}
 	reference := r.reference(group.rec, group.rows, group, basisMatched, basisNotApplicable)
 	inputs.Manifest, inputs.Reuse = group.manifest, reference
-	return reference, r.adopt(l, runstate.KindReviewGroup, group.rec, inputs)
+	return reference, r.adopt(l, runstate.KindReviewGroup, group.rec, inputs, reference)
 }
 
 // adopt writes one prior record as this run's: started and completed in the
 // same transaction, pointing at the original artifact, whose bytes Complete
-// digests again. No copy is made and nothing of the prior run is written.
-func (r *reuseRun) adopt(l *runstate.Ledger, kind runstate.Kind, rec *runstate.Record, inputs any) error {
+// digests again. No copy is made and nothing of the prior run is written. The
+// digest Complete arrived at must be the one the reference was built from —
+// the bytes this run verified — or the file moved while it was being adopted
+// and the whole transaction is abandoned.
+func (r *reuseRun) adopt(
+	l *runstate.Ledger, kind runstate.Kind, rec *runstate.Record, inputs any, reference *evidence.ReuseReference,
+) error {
 	if _, err := l.Start(kind, rec.ID, inputs, "", ""); err != nil {
 		return err
 	}
@@ -771,8 +877,16 @@ func (r *reuseRun) adopt(l *runstate.Ledger, kind runstate.Kind, rec *runstate.R
 		artifacts[role] = artifact.Path
 	}
 	detail := fmt.Sprintf("reused from %s seq %d", r.prior.runID, rec.Seq)
-	_, err := l.Complete(kind, rec.ID, rec.Outcome, artifacts, detail)
-	return err
+	completed, err := l.Complete(kind, rec.ID, rec.Outcome, artifacts, detail)
+	if err != nil {
+		return err
+	}
+	_, adopted, ok := recordArtifact(completed)
+	if !ok || adopted.SHA256 != reference.Artifact.SHA256 {
+		return fmt.Errorf("%s: %s/%s: %s changed while it was being adopted",
+			r.op, kind, rec.ID, reference.Artifact.Path)
+	}
+	return nil
 }
 
 // reference is the provenance an adopted record carries: which run, commit,
