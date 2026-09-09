@@ -144,8 +144,12 @@ digest to what its reference recorded), `reuse-identity-mismatch` (an adopted ar
 run/commit/source identity does not match its reference), `reused-row-repasted` (the parent
 also pasted a fresh answer for a row an adopted record already answers for),
 `reuse-not-admitted` (the parent pasted a reuse reference itself, rather than letting one
-reach the report through the run's ledger), and `ledger-invalid` (an adopted record's own
-captured inputs will not decode, so nothing about it can be told either way).
+reach the report through the run's ledger), and `ledger-invalid` (a record carrying a reuse
+reference whose captured inputs will not decode, so nothing about it can be told either way;
+a record with no reuse reference is the run's own work and finalize never decodes it). Adopted
+artifacts are copied into the run directory, verified there against their reference, and
+published from those verified copies. A run with no ledger reads nothing and creates nothing
+under the verifier's state root.
 
 ## What did not change
 

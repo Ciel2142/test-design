@@ -139,7 +139,8 @@ obligation.
 - `isolated` — a test file exactly one prior group's bundle names, and no other prior group's
   bundle or reads names.
 - `shared` — a production, build, dependency, data, or documentation change outside the
-  coverage directory, or a test file more than one prior context names.
+  coverage directory, or a test file more than one prior context names, or a test file that
+  appears in exactly one group's reads but in no group's bundle.
 - `unknown` — a test file no prior manifest names at all.
 
 Ownership is read from every prior group's recorded manifest, including a group that was
@@ -154,8 +155,15 @@ failed, and asking for it again is a `repeat`, carrying `repeat.reason`, exactly
 repeating any other completed obligation — reuse never erases a prior failure by silently
 re-asking it. `trace` and the live attempt are never reuse candidates: they always dispatch
 fresh against this run's own commit, whatever `reuse` adopted. A mutation row is compared
-against the toolchain of the run that actually executed it, never the toolchain of the review
-whose manifest it borrows as context.
+against the toolchain of the run that actually executed it — the trace the prior run recorded
+immediately before the row, not its latest — never the toolchain of the review whose manifest
+it borrows as context. A record the prior run itself adopted is judged against the manifest it
+carries from its original producer, and the reference it earns names that producer
+(`priorRunId`, `priorSeq`, artifact) while `basis.priorCommit` names the run it was compared
+against and the ledger detail names the run it was taken from.
+
+`reuse` reads the repository the way `trace` and `finalize` do: an uncommitted change refuses
+the whole call `source-not-reproducible` before any record is judged.
 
 `reuse` refuses per record, never the whole call. One line per reason:
 
@@ -168,6 +176,8 @@ whose manifest it borrows as context.
   document, or names a commit this repository does not have or cannot diff against HEAD.
 - `prior-not-completed` — the prior record never finished.
 - `legacy-no-manifest` — the record predates manifest capture; never reconstructed.
+- `record-unreadable` — the record's captured inputs will not decode; nothing about it can be
+  told, so it is neither legacy nor adoptable.
 - `artifact-missing:evidence`, `artifact-unreadable:evidence`,
   `artifact-digest-mismatch:evidence` — the prior artifact is missing, will not decode, or no
   longer digests to what the ledger recorded.
@@ -183,9 +193,10 @@ whose manifest it borrows as context.
   now, or reads differently.
 - `runner-changed`, `toolchain-changed` — the runner identity differs (review and mutation),
   or the toolchain does (mutation only).
-- `toolchain-unrecorded` — the mutation row's own executing toolchain cannot be established,
-  because neither the row's own recorded manifest nor the prior run's trace document says
-  what it was (mutation only).
+- `toolchain-unrecorded` — the mutation row's own executing toolchain cannot be established:
+  the row carries no adopted manifest, the trace record preceding it in the prior ledger is
+  missing or no longer verifies, or either that toolchain or this run's own is empty — two
+  failed version probes are not the same toolchain (mutation only).
 - `policy-unspecified`, `policy-changed` — this run named no `policy` for review, or the
   critic or its instructions differ from the prior review's (review only).
 - `policy-path-not-absolute:<path>`, `policy-unreadable:<path>` — this run's own
@@ -197,6 +208,9 @@ whose manifest it borrows as context.
   prior run's trace did; compared only when the prior run's own trace document is still on
   disk and still verifies, so a cleaned run directory or a repeated trace leaves the question
   unasked rather than refused (review only).
+- `identity-unrecorded` — a mutation row was completed without ever being prepared against a
+  bound test (a `record-attempt` with no `prepare-mutation`), so it has no identity to compare
+  (mutation only).
 - `identity-changed` — a mutation row's own test identity differs from what this run's trace
   now binds (mutation only).
 - `no-review-context` — no prior current review group both verifies and completely covers the
