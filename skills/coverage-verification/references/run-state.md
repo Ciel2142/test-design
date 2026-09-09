@@ -28,8 +28,8 @@ Four kinds, one current record per obligation:
 | Kind / ID | Captured at start | Retained at completion | Outcome vocabulary |
 |---|---|---|---|
 | `phase` / `trace` | `runDir` | `evidence` (trace-evidence.json), `dispatchInputs` (dispatch-inputs.json) | `ok` |
-| `review-group` / `<groupId>` | the group's rows, each row's source hashes (primary first, then contributors), the dispatch-inputs digest they came from | `evidence` (`review-<groupId>.json`) | `holds` (every verdict `HOLDS`), `blocked` (any other) |
-| `mutation-row` / `<rowId>` | the bound test's identity, the runner kind, the run dir, the worktree path | `evidence` (mutation-evidence.json, or `mutation-unappliable-<rowId>.json`), `attempt` (mutation-attempt.json, environmental only) | `caught`, `survived`, `unappliable`, `environmental` |
+| `review-group` / `<groupId>` | the group's rows, each row's source hashes (primary first, then contributors), the dispatch-inputs digest they came from | `evidence` (`review-<groupId>-<seq>.json`) | `holds` (every verdict `HOLDS`), `blocked` (any other) |
+| `mutation-row` / `<rowId>` | the bound test's identity, the runner kind, the run dir, the worktree path | `evidence` (mutation-evidence.json, or `mutation-unappliable-<rowId>-<seq>.json`), `attempt` (mutation-attempt.json, environmental only) | `caught`, `survived`, `unappliable`, `environmental` |
 | `live-attempt` / `live` | the run dir, worktree path, profile path, plan digest | `evidence` (live-evidence.json), `attempt` (live-attempt.json, unavailable only) | `pass`, `fail`, `inconclusive`, `unavailable` |
 
 A record's status is `started`, `completed`, or `superseded`. `Complete` never rewrites an
@@ -56,15 +56,22 @@ sectioned, not interleaved by ledger position, so a parent reads one layer at a 
    `id` and reason `uncovered: <rows>` naming every active row no current group claims — this
    entry closes the review section, and appears only once trace is complete;
 3. the live attempt, when the coverage source requires layer 3;
-4. mutation rows: every required row (high risk, active) the run already has a record for, in
-   ledger order, then every required row never started, in dispatch order.
+4. mutation rows: every mutation row the run opened whose record is started or no longer
+   stands, in ledger order — whatever its risk — then every required row (high risk, active)
+   never started, in dispatch order.
 
 Each entry's `reason` is one of `never-started`, `started-not-completed`, or the reason a
-completed record no longer stands (`stale`, `inputs-changed`, or a `Verify` failure such as
-`artifact-missing:<role>`). A completed record that fails artifact verification, has changed
-inputs, or is stale is reported with status `invalid`, the reason as the discriminator — but
-`records[]` keeps the record's own status of `completed`: the ledger records what happened,
-and what happened never changes; only whether it still counts can.
+completed record no longer stands: `stale`, `inputs-changed`, `inputs-unreadable` (the
+record's own captured inputs cannot be decoded), `dispatch-inputs-unreadable` (the trace
+phase's dispatch-inputs file cannot be read, which leaves the whole run at the trace), or a
+`Verify` failure such as `artifact-missing:<role>` or `artifact-digest-mismatch:<role>`. A
+completed record that fails artifact verification, has changed or unreadable inputs, or is
+stale is reported with status `invalid`, the reason as the discriminator — but `records[]`
+keeps the record's own status of `completed`: the ledger records what happened, and what
+happened never changes; only whether it still counts can. One more reason appears only in
+`mutation.rows[]`, never in `pending`: a started row whose `mutation-state.json` cannot be
+read carries `state-unreadable` there, while its `pending` entry stays
+`started-not-completed`.
 
 `review.uncovered` lists the active rows of the current dispatch inputs that no current group
 claims, in dispatch order — the order the trace phase produced them, not ledger order.
@@ -72,8 +79,10 @@ claims, in dispatch order — the order the trace phase produced them, not ledge
 `mutation.rows` lists every row the current dispatch requires (high risk, active) plus any
 other row a current ledger record exists for, whether or not the dispatch still names it as
 required — a row the run recorded once never drops out of the report. A row with no ledger
-record reports `status: "none"`. Only a required row can appear in `pending` — a
-bookkeeping-only record for a row that stopped being required never blocks a restart. A
+record reports `status: "none"`. Risk decides only what a run must do, never what it has
+already taken on: a row the run opened is owed until it is answered, so a started row, or
+one whose completion no longer stands, appears in `pending` whether or not the current
+dispatch inputs require it; only the rows never started are limited to the required ones. A
 started row's `worktreePath` is read back from `mutation-state.json` in the row's run dir, not
 from the record's own captured inputs: `recover-mutation` rewrites that file when it restores
 or recreates the worktree, so a parent re-dispatching the mutator gets the workspace that
@@ -115,8 +124,10 @@ dispatch, never partway through one.
   covers).
 - `completed` writes the group's evidence and records the outcome. Request: `groupId`,
   `status: "completed"`, `verdicts` (one `{rowId, verdict, reason}` per row of the group). The
-  written evidence (`review-<groupId>.json`) retains `rows`, `inputs` (the same input identity
-  captured at `started`) and `verdicts` — it carries no canary field at all; the canary's own
+  written evidence (`review-<groupId>-<seq>.json`, where `<seq>` is the started record's
+  position in the ledger, so a repeated group's completion never overwrites the evidence its
+  superseded record digested) retains `rows`, `inputs` (the same input identity captured at
+  `started`) and `verdicts` — it carries no canary field at all; the canary's own
   accounting stays in finalize's `layer2.batches[]`, never in the ledger's review record.
 
 Merged into the shared request body:
@@ -135,12 +146,22 @@ against leaves the group valid: `dispatch-inputs-changed` (at completion) and `r
 `inputs-changed` (at read time) fire only when the recorded sources or the dispatch-inputs
 digest actually differ, never merely because the phase ran again.
 
+Both calls run their checks and their write under the run's exclusive ledger lock, so parents
+working one run in parallel cannot each pass a check the other has already falsified: ten
+`started` calls naming one row in ten groups leave the row in exactly one of them, the rest
+refused `row-already-grouped`; two `completed` calls for one group leave one result, its
+evidence written and digested under the same lock, the other refused `duplicate-completion`
+without writing anything.
+
 ### Recording an unappliable row: `record-mutation`
 
 Use it once the mutator, or your own confirmation of its edit, says no site of a row's
 verification mutation applies as a code-level fault. The row must already be prepared for
-this run (`prepare-mutation` ran for it); the op writes `mutation-unappliable-<rowId>.json`,
-naming the prepared run dir and worktree, and completes the row with outcome `unappliable`.
+this run (`prepare-mutation` ran for it); the op writes
+`mutation-unappliable-<rowId>-<seq>.json` (`<seq>` the started record's ledger position),
+naming the prepared run dir and worktree, and completes the row with outcome `unappliable` —
+the write and the completion under one exclusive lock, so a second verdict for the row finds
+it completed and writes nothing.
 
 Merged into the shared request body — `rowId`, `outcome: "unappliable"`, `reason` (why no
 site applies, required, never blank):
@@ -156,9 +177,15 @@ the row's `interruptedSite` set — never on a healthy workspace. On one with no
 recover from it restores the worktree to the prepared commit anyway, which discards whatever
 the mutator's last applied-but-not-yet-evaluated edit put there.
 
-It restores an attached worktree in place, or prunes and recreates one that vanished, then
-requires an empty ignored-inclusive `git status` and HEAD at the prepared commit before it
-clears the interruption marker. Completed sites in the row's state are kept; the interrupted
+It restores an attached worktree in place; one whose path no longer exists it recreates,
+first forgetting that one worktree's registry entry (`git worktree remove --force` on the
+path alone — the repository's registry is shared with every other worktree of it, so nothing
+is pruned and another worktree whose directory happens to be absent at that moment, such as
+one on an unmounted volume, keeps its entry). Only a path that does not exist counts as
+vanished: a path that exists as something other than a directory, or that cannot be checked
+at all, is refused `restore-failed`, never replaced. Either way it then requires an empty
+ignored-inclusive `git status` and HEAD at the prepared commit before it clears the
+interruption marker. Completed sites in the row's state are kept; the interrupted
 site's own capture directory is left as evidence and is overwritten only by that site's next
 evaluation. A refused recovery (`restore-failed`, `recreate-failed`, `residue-remains`,
 `wrong-revision`) never rewrites the state file — the marker stays set, the row stays pending,
@@ -189,20 +216,22 @@ alongside the new one, so nothing about what actually happened is lost when it i
 
 ### Request field spelling
 
-The newer `record-review` (`verdicts[].rowId`) and `record-mutation` (`rowId`) requests and
-outputs spell the row identity `rowId`; `prepare-mutation`, `evaluate-mutation` and
-`record-attempt` requests still spell it `rowID`. Copy the field name from each op's own
-example rather than from a neighboring request — a `rowID` pasted into `record-mutation`, or a
-`rowId` pasted into `prepare-mutation`, is silently ignored, not refused.
+The canonical spelling of the row identity differs by op: `record-review`
+(`verdicts[].rowId`), `record-mutation` (`rowId`) and the `resume`/`recover-mutation` outputs
+spell it `rowId`; the `prepare-mutation`, `evaluate-mutation` and `record-attempt` requests
+spell it `rowID`. Copy the field name from each op's own example. The decoder matches a JSON
+key case-insensitively when no exact match exists, so a `rowID` pasted into `record-mutation`,
+or a `rowId` pasted into `prepare-mutation`, is accepted rather than ignored or refused — but
+the spelling each example shows is the one the op documents and the one its output uses.
 
 ### Refusals
 
 | Op | Code | Meaning |
 |---|---|---|
 | `trace` | `phase-completed` | The trace phase is already completed for this run and the request carried no `repeat.reason`; add one or use a new run ID |
-| `trace`, `record-review`, `prepare-mutation`, `evaluate-mutation`, `record-mutation`, `record-attempt`, `execute-live` | `ledger-identity-mismatch` | The ledger already belongs to a different repo root, commit, source path or source digest than this request presents — raised by `Start` or `Complete`; `resume` and `recover-mutation` call neither, so they never return it |
+| `trace`, `record-review`, `prepare-mutation`, `evaluate-mutation`, `record-mutation`, `record-attempt`, `execute-live` | `ledger-identity-mismatch` | The ledger already belongs to a different repo root, commit, source path or source digest than this request presents — raised by the ledger transaction every `Start`/`Complete` runs in, before any check inside it; `resume` and `recover-mutation` never write, so they never return it |
 | every ledger-touching op — `trace`, `record-review`, `prepare-mutation`, `evaluate-mutation`, `record-mutation`, `recover-mutation`, `record-attempt`, `execute-live`, `resume` | `ledger-open-failed` | The state dir could not be resolved, or it resolves inside the repository under verification — raised by `openLedger` itself, before anything is read |
-| every ledger-touching op — same list as above | `ledger-invalid` | The checkpoint could not be parsed, names a foreign schema version, or holds two current records for one obligation — raised wherever the checkpoint is loaded, whether through `loadLedgerFor` directly or inside a `Start`/`Complete` call |
+| every ledger-touching op — same list as above | `ledger-invalid` | The checkpoint could not be parsed, names a foreign schema version, or holds two current records for one obligation — raised wherever the checkpoint is loaded, whether for a read or at the start of a write transaction |
 | every ledger-touching op except `resume` and `recover-mutation`, which never write — `trace`, `record-review`, `prepare-mutation`, `evaluate-mutation`, `record-mutation`, `record-attempt`, `execute-live` | `ledger-write-failed` | The checkpoint could not be replaced after a `Start` or `Complete` transition; the prior checkpoint stands unchanged |
 | `record-review` | `missing-group-id` | `groupId` is required |
 | `record-review` | `invalid-group-id` | `groupId` must be a plain name of letters, digits, dot, dash or underscore |
@@ -210,11 +239,11 @@ example rather than from a neighboring request — a `rowID` pasted into `record
 | `record-review` | `missing-rows` | A started group needs at least one row |
 | `record-review` | `duplicate-row` | The same row appears twice in `rows` |
 | `record-review` | `unknown-row` | A row is not active in the coverage source, or not named by the trace's current dispatch inputs |
-| `record-review` | `row-already-grouped` | The row already belongs to another current group; supersede that group or group different rows |
+| `record-review` | `row-already-grouped` | The row already belongs to another current group; supersede that group or group different rows — decided under the same exclusive lock as the group's own `started`, so concurrent parents cannot both claim a row |
 | `record-review` | `trace-incomplete` | This run's trace phase has not completed, or its evidence no longer verifies; run trace first |
 | `record-review` | `review-group-completed` | The group is already completed for this run and the request carried no `repeat.reason` |
 | `record-review` | `review-group-not-started` | `completed` was called for a group that `started` was never called for |
-| `record-review` | `duplicate-completion` | The group is already completed; the first result stands |
+| `record-review` | `duplicate-completion` | The group is already completed; the first result stands — decided under the lock, so a second concurrent completion writes no evidence |
 | `record-review` | `missing-verdict` | A row of the group has no verdict in the completion |
 | `record-review` | `duplicate-verdict` | The same row appears twice in `verdicts` |
 | `record-review` | `verdict-outside-group` | A verdict names a row that is not one of the group's own |
@@ -232,12 +261,13 @@ example rather than from a neighboring request — a `rowID` pasted into `record
 | `recover-mutation` | `run-dir-not-found` | `runDir` does not exist |
 | `recover-mutation` | `state-load-failed` | `mutation-state.json` in `runDir` could not be read |
 | `recover-mutation` | `stale-evidence` | The prepared state's run, source or HEAD no longer matches the request; prepare again |
-| `recover-mutation` | `restore-failed` | The attached worktree could not be reset to the prepared commit |
-| `recover-mutation` | `recreate-failed` | A missing worktree could not be pruned and recreated |
+| `recover-mutation` | `restore-failed` | The attached worktree could not be reset to the prepared commit, or the worktree path exists as something other than a directory, or could not be checked at all |
+| `recover-mutation` | `recreate-failed` | A vanished worktree's own registry entry could not be forgotten, or a replacement could not be created |
 | `recover-mutation` | `residue-remains` | The restored worktree still carries ignored or untracked paths after reset |
 | `recover-mutation` | `wrong-revision` | The restored worktree's HEAD is not the prepared commit |
 | `record-attempt` | `mutation-row-completed` | Layer 4's row is already completed for this run |
 | `record-attempt`, `execute-live` | `live-attempt-completed` | The live attempt is already completed for this run and the request carried no `repeat.reason` |
+| `execute-live` | `stale-evidence` | HEAD is no longer the commit `prepare-live` prepared the workspace at; run `prepare-live` again — refused before the ledger is opened, the way `evaluate-mutation` and `recover-mutation` refuse it, so no record is created under a commit the evidence does not name |
 
 `evaluate-mutation`'s `lastSite` call both appends the site's evidence and completes the row
 in one call: if the ledger write fails after the evidence was already appended, the refusal is
