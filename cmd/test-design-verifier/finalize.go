@@ -376,7 +376,10 @@ func reusedInputs(op string, req *finalizeRequest) ([]report.Batch, []report.Mut
 		mutated  = map[string]bool{}
 	)
 	// A record carrying no reuse reference is this run's own work, which the
-	// parent pastes as it always has; only an adopted one is read here.
+	// parent pastes as it always has; only an adopted one is read here. A
+	// record whose captured shape cannot be decoded is neither: it is a
+	// checkpoint this run cannot read, and reading it as "not adopted" would
+	// drop its rows out of what the ledger is known to answer for.
 	for i := range ledger.Records {
 		rec := &ledger.Records[i]
 		if rec.Status != runstate.StatusCompleted {
@@ -385,7 +388,10 @@ func reusedInputs(op string, req *finalizeRequest) ([]report.Batch, []report.Mut
 		switch rec.Kind {
 		case runstate.KindReviewGroup:
 			var inputs reviewGroupInputs
-			if err := recordInputs(rec, &inputs); err != nil || inputs.Reuse == nil {
+			if err := recordInputs(rec, &inputs); err != nil {
+				return nil, nil, nil, unreadableRecordError(op, rec, err)
+			}
+			if inputs.Reuse == nil {
 				continue
 			}
 			ref := inputs.Reuse
@@ -413,10 +419,19 @@ func reusedInputs(op string, req *finalizeRequest) ([]report.Batch, []report.Mut
 			for _, row := range inputs.Rows {
 				reviewed[row] = true
 			}
+			// A verdict the artifact carries for a row outside the record's
+			// own list is still an answer this run holds, and still not one
+			// the parent may give again.
+			for _, v := range art.Verdicts {
+				reviewed[v.RowID] = true
+			}
 
 		case runstate.KindMutationRow:
 			var inputs reusedMutationInputs
-			if err := recordInputs(rec, &inputs); err != nil || inputs.Reuse == nil {
+			if err := recordInputs(rec, &inputs); err != nil {
+				return nil, nil, nil, unreadableRecordError(op, rec, err)
+			}
+			if inputs.Reuse == nil {
 				continue
 			}
 			entry, artifact, cliErr := reusedMutationEntry(op, rec, inputs.Reuse, transcript)
@@ -561,11 +576,30 @@ func loadUnappliableEvidence(path string) (*mutationUnappliableEvidence, error) 
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w: %v", path, report.ErrEvidenceUnreadable, err)
 	}
+	if !json.Valid(data) {
+		return nil, fmt.Errorf("%s: %w: invalid JSON", path, report.ErrEvidenceUnreadable)
+	}
+	// The envelope is checked before the body is trusted, the way every other
+	// evidence loader checks it.
+	if _, err := evidence.DecodeEnvelope(data); err != nil {
+		return nil, fmt.Errorf("%s: %w: %v", path, report.ErrEvidenceSchemaMismatch, err)
+	}
 	var doc mutationUnappliableEvidence
 	if err := json.Unmarshal(data, &doc); err != nil {
 		return nil, fmt.Errorf("%s: %w: %v", path, report.ErrEvidenceUnreadable, err)
 	}
 	return &doc, nil
+}
+
+// unreadableRecordError refuses a record of this run whose captured input
+// identity cannot be decoded. It is not "not adopted": nothing can be told
+// about a shape that will not decode, so the checkpoint is reported as
+// unreadable rather than passed over.
+func unreadableRecordError(op string, rec *runstate.Record, err error) *cliError {
+	return &cliError{
+		Code:    "ledger-invalid",
+		Message: fmt.Sprintf("%s: %s %s: %v", op, rec.Kind, rec.ID, err),
+	}
 }
 
 // batchRows names every row a batch speaks for: the rows it dispatched and the

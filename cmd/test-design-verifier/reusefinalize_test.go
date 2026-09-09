@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"test-design/internal/evidence"
 	"test-design/internal/report"
+	"test-design/internal/runstate"
 )
 
 // The proofs in this file drive the real ops — baseline, trace, record-review,
@@ -338,7 +340,8 @@ func TestFinalize_RefusesParentPastedEvidenceCarryingReuse(t *testing.T) {
 
 	t.Run("batch", func(t *testing.T) {
 		f := newFinalizeFixture(t)
-		f.body.Layer2.Batches[1].Reuse = pasted
+		named := slices.IndexFunc(f.body.Layer2.Batches, func(b report.Batch) bool { return b.BatchID == "b1" })
+		f.body.Layer2.Batches[named].Reuse = pasted
 		f.wantRefusal(report.CodeReuseNotAdmitted)
 	})
 
@@ -441,5 +444,97 @@ func TestFinalize_WithoutALedgerPublishesTheParentsBookkeepingAlone(t *testing.T
 			t.Errorf("transcripts = %+v, want no reused copy without a ledger", rep.Transcripts)
 			break
 		}
+	}
+}
+
+// readyLedgerPath is where this run's checkpoint lives, under the verifier's
+// own state root.
+func readyLedgerPath(t *testing.T, s *liveSubject, runID string) string {
+	t.Helper()
+	store, cliErr := openLedger("test", &verifyRequest{
+		SchemaVersion: evidence.SchemaVersion, RepoRoot: s.repo, CoverageSource: s.coverageSource, RunID: runID,
+	})
+	if cliErr != nil {
+		t.Fatalf("openLedger: %v", cliErr.Message)
+	}
+	return filepath.Join(store.Dir(), runstate.LedgerFile)
+}
+
+// readyBreakRecordInputs damages one field of the run's kind record's captured
+// inputs, leaving the checkpoint itself valid JSON and the record's reuse
+// reference in place: the record is still an adopted one, but the shape it
+// captured can no longer be read. It returns the checkpoint's original bytes so
+// the next case can put them back.
+func readyBreakRecordInputs(t *testing.T, s *liveSubject, runID string, kind runstate.Kind) []byte {
+	t.Helper()
+	// Each kind is damaged in a field only its own shape declares, so what
+	// fails is the decode of that record and nothing around it.
+	damage := map[runstate.Kind]func(map[string]any){
+		runstate.KindReviewGroup: func(inputs map[string]any) { inputs["rows"] = readyMarkerRow },
+		runstate.KindMutationRow: func(inputs map[string]any) { inputs["runnerKind"] = 7 },
+	}[kind]
+	if damage == nil {
+		t.Fatalf("readyBreakRecordInputs: no damage is defined for kind %s", kind)
+	}
+
+	path := readyLedgerPath(t, s, runID)
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read ledger: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(original, &doc); err != nil {
+		t.Fatalf("decode ledger: %v", err)
+	}
+	records, _ := doc["records"].([]any)
+	broken := 0
+	for _, entry := range records {
+		rec, _ := entry.(map[string]any)
+		if rec["kind"] != string(kind) {
+			continue
+		}
+		inputs, ok := rec["inputs"].(map[string]any)
+		if !ok {
+			continue
+		}
+		damage(inputs)
+		broken++
+	}
+	if broken == 0 {
+		t.Fatalf("ledger %s holds no %s record with captured inputs", path, kind)
+	}
+	data, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("encode ledger: %v", err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write ledger: %v", err)
+	}
+	return original
+}
+
+func readyRestoreLedger(t *testing.T, s *liveSubject, runID string, original []byte) {
+	t.Helper()
+	if err := os.WriteFile(readyLedgerPath(t, s, runID), original, 0o644); err != nil {
+		t.Fatalf("restore ledger: %v", err)
+	}
+}
+
+// TestFinalize_RefusesARecordWhoseCapturedInputsCannotBeRead keeps an
+// unreadable record from passing for an absent one. A record whose captured
+// shape cannot be decoded is not the same as a record that was never adopted:
+// skipping it would drop its rows from what the ledger is known to answer for,
+// and the parent could then paste an answer for a row that is already
+// answered. Finalize refuses instead, and publishes nothing.
+func TestFinalize_RefusesARecordWhoseCapturedInputsCannotBeRead(t *testing.T) {
+	s := readySubject(t, "not-applicable")
+	runID, tracePath := readyAdoptedRun(t, s, "rdy-unread", readyEnvironmentalVersionRow)
+
+	for _, kind := range []runstate.Kind{runstate.KindReviewGroup, runstate.KindMutationRow} {
+		t.Run(string(kind), func(t *testing.T) {
+			original := readyBreakRecordInputs(t, s, runID, kind)
+			t.Cleanup(func() { readyRestoreLedger(t, s, runID, original) })
+			readyWantRefusal(t, s, runID, tracePath, nil, nil, "ledger-invalid")
+		})
 	}
 }
