@@ -36,6 +36,26 @@ Withholding the diff would leave the critic unable to answer its own question, s
 this fail if the mutation were applied" is a claim about production code. Its honesty comes
 from having no edit tools, not from having no information.
 
+### The bundle and the manifest
+
+`record-review started` takes `policy`: the critic's name and the absolute paths of the
+instruction files the parent dispatches it with. It returns `bundle` — the whole test files
+the group's rows are pasted from, each with the rows it serves — captured from what is on
+disk at HEAD, never from a digest the parent supplies.
+
+The critic's own `reads:` line (see the agent's output format) is relayed at completion as
+`reads` on `record-review completed`. An explicitly empty list says the critic read nothing
+beyond its pasted bundle; leaving the field out says nobody recorded what it read at all —
+the difference between a manifest a later run can reuse and one it cannot.
+
+A manifest is incomplete for any of: `policy-unrecorded` (no `policy` given), `policy-path-
+not-absolute:<path>` or `policy-unreadable:<path>` (a bad instruction path), `head-moved` or
+`tree-dirty:<path>` (the repository moved under the group), `reads-unrecorded` (no `reads`
+relayed at completion), or `unidentifiable-read:<path>` (a read outside the repository,
+untracked at HEAD, or escaping it with `..`). None of this blocks the run: a review's verdict
+stands whatever its manifest says. The only consequence of an incomplete manifest is that the
+group cannot be adopted by a later `reuse`.
+
 ### The canary
 
 **Inject one canary per batch:** a test you already know is weak. A batch that verdicts
@@ -102,6 +122,70 @@ caught its canary; it inherits that batch's evidence and names it. Without this 
 recurses: the re-dispatch needs a canary, synthesizing one needs another re-dispatch, forever.
 Say which kind each dispatch is in the prompt, because `coverage-critic` is told a canary is
 present and would otherwise conclude a healthy lone row must be the weak one.
+
+### Reuse across runs
+
+Before dispatching any critic, run `test-design-verifier reuse` once — after `trace`, before
+the first batch — with `priorRunId` naming the run to stand on and the same `policy` this
+run's critics will dispatch under. Read its `review[]` and `mutation[]` decisions and its
+`changedPaths[]`; dispatch only the rows `resume` still lists `pending` — a record `reuse`
+adopted needs no critic, and one it refused is owed exactly like any other pending
+obligation.
+
+`changedPaths[]` classes every tracked path that differs since the prior commit:
+
+- `exempt` — the coverage source's own directory, where a run publishes its report and
+  transcripts.
+- `isolated` — a test file exactly one prior group's bundle names, and no other prior group's
+  bundle or reads names.
+- `shared` — a production, build, dependency, data, or documentation change outside the
+  coverage directory, or a test file more than one prior context names.
+- `unknown` — a test file no prior manifest names at all.
+
+A `shared` or `unknown` path refuses every prior review group and mutation row; an `isolated`
+one refuses only its own group and that group's mutation rows.
+
+An adopted record keeps the prior outcome, failure included: a failed group or row comes back
+failed, and asking for it again is a `repeat`, carrying `repeat.reason`, exactly like
+repeating any other completed obligation — reuse never erases a prior failure by silently
+re-asking it. `trace` and the live attempt are never reuse candidates: they always dispatch
+fresh against this run's own commit, whatever `reuse` adopted.
+
+`reuse` refuses per record, never the whole call. One line per reason:
+
+- `missing-prior-run-id`, `prior-run-is-current` — the request itself is malformed.
+- `trace-incomplete`, `stale-evidence` — this run has no completed, verified trace yet, or its
+  identity moved since.
+- `prior-ledger-missing`, `prior-ledger-invalid` — the named run has no ledger, or it will not
+  load.
+- `prior-source-mismatch`, `prior-commit-unreachable` — the prior run verified a different
+  document, or names a commit this repository does not have.
+- `prior-not-completed` — the prior record never finished.
+- `legacy-no-manifest` — the record predates manifest capture; never reconstructed.
+- `artifact-*` — the prior artifact is missing, unreadable, or no longer digests to what the
+  ledger recorded.
+- `manifest-version-unsupported` — the manifest's own version is not one this run reads.
+- `manifest-incomplete:<reason>` — the manifest recorded one of its own incompleteness
+  reasons.
+- `row-inactive:<row>` — the row is retired, renumbered, or absent from this run's trace.
+- `module-changed:<path>`, `unknown-ownership:<path>` — the `shared`/`unknown` widening above.
+- `isolated-change:<path>` — the group's own bundle changed.
+- `claim-missing:<row>`, `claim-changed:<row>` — the row's approved claim is unreadable now,
+  or reads differently.
+- `context-missing:<path>`, `context-changed:<path>` — a bundled or read file is unreadable
+  now, or reads differently.
+- `runner-changed`, `toolchain-changed` — the runner identity differs (review and mutation),
+  or the toolchain does (mutation only).
+- `policy-unspecified`, `policy-changed` — this request named no `policy` for review, or the
+  critic or its instructions differ (review only).
+- `sources-changed:<row>`, `status-changed:<row>` — this run's trace binds the row to
+  different sources, or a different status, than the prior run's did (review only).
+- `identity-changed` — a mutation row's own test identity differs from what this run's trace
+  now binds (mutation only).
+- `no-review-context` — no prior current review group both verifies and completely covers the
+  row (mutation only).
+- `already-recorded`, `row-already-grouped:<row>` — this run's own ledger already holds the
+  record, or the row under another group.
 
 ### Bookkeeping
 

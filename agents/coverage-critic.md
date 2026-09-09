@@ -73,6 +73,8 @@ SC-03 VACUOUS
 Every verdict needs the one-or-two-line reason naming which assertion flips, or why none
 does. A bare verdict is not usable.
 
+reads: <repo-relative paths you opened, comma-separated, or none>
+
 ## The canary
 
 **Only when your prompt says this batch carries a canary.** A dispatch can carry none

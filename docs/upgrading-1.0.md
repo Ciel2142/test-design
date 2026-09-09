@@ -64,8 +64,8 @@ A 0.5 coverage doc is refused by 1.0's parser until migrated. Three things chang
    mutation column third and `Expected` fifth. Move the cells; the text does not change.
 2. **A `## Verification` block is required.** It carries the runner configuration the
    executable needs (`runner-kind`, `runner-root`, `runner-command`, `report-globs`,
-   `baseline-evidence`, `baseline-sha256`, `final-command`, and `live-profile` when any
-   row is `smoke` or `e2e`). 0.5 had no machine-readable equivalent; the block is written
+   `baseline-evidence`, `baseline-sha256`, `final-command`, and `live-profile` when the live
+   decision is required). 0.5 had no machine-readable equivalent; the block is written
    from how the suite is actually run today.
 3. **Baseline is captured by the `baseline` op**, not by hand, and takes two commits — the
    first so the op has a committed source to snapshot, the second to record the SHA-256
@@ -117,6 +117,22 @@ to run and row identities. Regenerate old unbound evidence with a freshly approv
 run; do not fill missing fields from current HEAD or rename/re-stamp old evidence.
 The executable's `record-attempt` operation records actual agent/environment refusals;
 controllers no longer hand-write attempt envelopes.
+
+## 1.2 evidence reuse
+
+Version 1.2.0 retains schemaVersion `"1"` and every 1.1 evidence field. Review artifacts and
+their ledger records now carry `inputs.manifest`, itself versioned (`version "1"` today) and
+separate from `schemaVersion`: it is the manifest's own version that `reuse` checks, not the
+envelope's. A record written before this wave carries no `inputs.manifest` at all — it is
+legacy. `resume` reads a legacy record exactly as before; `reuse` refuses it
+`legacy-no-manifest` and never repairs, upgrades, or reconstructs one for it. Historical
+reports already published are unchanged; nothing about them is reinterpreted retroactively.
+
+`dispatch-inputs.json` gains `claimSha256` per row and top-level `runner` and `toolVersions`,
+the identity a later run's `reuse` compares against. Published reports gain `batches[].reuse`
+and `rows[].layer4.reuse` — present only on an adopted batch or row, carrying the prior run's
+identity and the basis it was judged on — and transcripts gain `reused-*` copies alongside the
+ones a fresh run writes. None of this changes what a run not asking for `reuse` produces.
 
 ## What did not change
 
