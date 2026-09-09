@@ -200,7 +200,7 @@ example rather than from a neighboring request — a `rowID` pasted into `record
 | Op | Code | Meaning |
 |---|---|---|
 | `trace` | `phase-completed` | The trace phase is already completed for this run and the request carried no `repeat.reason`; add one or use a new run ID |
-| `trace`, `resume` | `ledger-identity-mismatch` | The ledger already belongs to a different repo root, commit, source path or source digest than this request presents |
+| `trace`, `record-review`, `prepare-mutation`, `evaluate-mutation`, `record-mutation`, `record-attempt`, `execute-live` | `ledger-identity-mismatch` | The ledger already belongs to a different repo root, commit, source path or source digest than this request presents — raised by `Start` or `Complete`; `resume` and `recover-mutation` call neither, so they never return it |
 | `trace`, `resume` | `ledger-open-failed` | The state dir could not be resolved, or it resolves inside the repository under verification |
 | `trace`, `resume` | `ledger-invalid` | The checkpoint could not be parsed, names a foreign schema version, or holds two current records for one obligation |
 | `trace` | `ledger-write-failed` | The checkpoint could not be replaced; the prior checkpoint stands unchanged |
