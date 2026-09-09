@@ -15,6 +15,7 @@ import (
 
 	"test-design/internal/evidence"
 	"test-design/internal/live"
+	"test-design/internal/report"
 )
 
 // The proofs in this file drive the real pipeline — baseline, trace,
@@ -1155,4 +1156,1095 @@ func TestLiveTruth_OwnedCleanupAfterFailedPhase(t *testing.T) {
 		}
 		requireOwnedCleanup(t, execOut, ev, runID)
 	})
+}
+
+// The proofs below add two more subjects to the two above, each built for one
+// thing a run can get wrong once its business assertions are over. The
+// cleanup-accounting subject drives the profile's own cleanup commands into
+// every combination the tri-state distinguishes; the bounded-output subject
+// runs a walkthrough whose steps are cut short in each of the four ways a
+// command can fail to leave a result behind at all.
+
+// newLiveTruthRun mints a run identifier for a subject whose helper script
+// derives every path it touches from that identifier, and registers the removal
+// of the two roots such a script can own. Nothing of a run may outlive the test
+// under /tmp, including a root a variant deliberately leaves behind.
+func newLiveTruthRun(t *testing.T, prefix string) string {
+	t.Helper()
+	runID := liveRunID(prefix)
+	t.Cleanup(func() {
+		for _, root := range []string{phaseRunRoot(runID), phaseLogRoot(runID)} {
+			if err := os.RemoveAll(root); err != nil {
+				t.Logf("remove %s: %v", root, err)
+			}
+		}
+	})
+	return runID
+}
+
+// writeDirectives leaves what this variant asks of each phase under the run's
+// own log root, so a subject's committed command arrays stay the committed ones
+// whatever the run is meant to prove.
+func writeDirectives(t *testing.T, runID string, directives map[string]string) {
+	t.Helper()
+	logRoot := phaseLogRoot(runID)
+	if err := os.MkdirAll(logRoot, 0o700); err != nil {
+		t.Fatalf("create the log root for run %s: %v", runID, err)
+	}
+	for phase, asked := range directives {
+		path := filepath.Join(logRoot, phase+".directive")
+		if err := os.WriteFile(path, []byte(asked), 0o644); err != nil {
+			t.Fatalf("write the %s directive: %v", phase, err)
+		}
+	}
+}
+
+// liveReasonDetail returns the detail of the layer-3 reason carrying code, and
+// fails when finalize raised none. The detail is where a run's own failure is
+// named, so a reason whose text named nothing would leave a reviewer with a
+// code and no way to act on it.
+func liveReasonDetail(t *testing.T, reasons []report.Reason, code string) string {
+	t.Helper()
+	for _, r := range reasons {
+		if r.Layer == "3" && r.Code == code {
+			return r.Detail
+		}
+	}
+	t.Fatalf("reasons = %+v, want a layer-3 %q reason", reasons, code)
+	return ""
+}
+
+// unboundProbeExpectation is the plan's own text for the step that is meant to
+// fail with no row to carry the failure. It is what the evidence and finalize's
+// reason detail must repeat back: a listed failure a reviewer cannot identify
+// is no better than an unlisted one.
+const unboundProbeExpectation = "the walkthrough's own probe answers before the run is judged"
+
+// phaseUnboundPlan is the phase subject's plan with one extra step the subject
+// refuses and no row is bound to: appended to the walkthrough when inCleanup is
+// false, and standing alone in the plan's own cleanup section when it is true.
+func phaseUnboundPlan(t *testing.T, runID string, inCleanup bool) map[string]any {
+	t.Helper()
+	probe := map[string]any{
+		"expectation": unboundProbeExpectation,
+		"command":     []string{"python3", phaseScriptPath, "teardown", runID},
+		"predicates":  []map[string]string{{"form": "exit-code", "value": "0"}},
+	}
+	plan := phasePlan(runID, false)
+	if inCleanup {
+		plan["cleanup"] = []map[string]any{probe}
+		return plan
+	}
+	steps, ok := plan["steps"].([]map[string]any)
+	if !ok {
+		t.Fatalf("plan steps = %T, want the walkthrough step list the probe extends", plan["steps"])
+	}
+	plan["steps"] = append(steps, probe)
+	return plan
+}
+
+// covers: SC-15
+func TestLiveTruth_UnboundAssertionFailureBlocks(t *testing.T) {
+	requirePython3(t)
+
+	// Each placement of the failing step publishes a report, which dirties the
+	// subject repository, so each one gets a subject of its own.
+	for _, tc := range []struct {
+		name     string
+		prefix   string
+		cleanup  bool
+		expected liveStepFailure
+	}{
+		{
+			name:     "a walkthrough step no row is bound to fails and blocks the run",
+			prefix:   "lt-unbound-step",
+			expected: liveStepFailure{Phase: "step", Index: 2, Expectation: unboundProbeExpectation},
+		},
+		{
+			name:     "a plan cleanup step no row is bound to fails and blocks the run",
+			prefix:   "lt-unbound-cleanup",
+			cleanup:  true,
+			expected: liveStepFailure{Phase: "plan-cleanup", Index: 1, Expectation: unboundProbeExpectation},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			subject := newPhaseSubject(t, phasePatientTimeoutSeconds)
+			runID := newPhaseRun(t, subject, tc.prefix, map[string]string{"teardown": "fail"})
+
+			tr, _, execOut := runLivePipeline(t, subject, runID, phaseUnboundPlan(t, runID, tc.cleanup), nil)
+			ev := readLiveEvidence(t, execOut.EvidencePath)
+
+			want := []liveStepFailure{tc.expected}
+			if !reflect.DeepEqual(ev.UnboundFailures, want) {
+				t.Errorf("unboundFailures = %+v, want %+v", ev.UnboundFailures, want)
+			}
+			// The failure belongs to the step that failed and to nothing else:
+			// the row a passing step settled keeps the verdict it earned.
+			if got := rowVerdict(t, ev.RowVerdicts, phaseRow).Verdict; got != "LIVE-PASS" {
+				t.Errorf("live verdict for %s = %q, want LIVE-PASS", phaseRow, got)
+			}
+
+			code, stdout, stderr := runVerifyOp(t, "finalize",
+				liveFinalizeRequestJSON(t, subject, runID, tr.EvidencePath, execOut.EvidencePath))
+			if code != exitOK {
+				t.Fatalf("finalize exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+			}
+			out := decodeFinalizeOutput(t, stdout)
+			if out.Verdict != report.VerdictBlocked {
+				t.Fatalf("verdict = %q, want %q; reasons=%+v", out.Verdict, report.VerdictBlocked, out.Reasons)
+			}
+			requireReason(t, out.Reasons, "3", "", "live-unbound-assertion-failed")
+			wantDetail := fmt.Sprintf("%s[%d] %s", tc.expected.Phase, tc.expected.Index, tc.expected.Expectation)
+			if got := liveReasonDetail(t, out.Reasons, "live-unbound-assertion-failed"); !strings.Contains(got, wantDetail) {
+				t.Errorf("unbound-assertion detail = %q, want it to name %q", got, wantDetail)
+			}
+
+			// The published report is the record a reviewer receives: the same
+			// blocking reason, and beside it the row the run really did settle.
+			rep := readPublishedReport(t, subject.repo, out.JSONPath)
+			requireReason(t, rep.Reasons, "3", "", "live-unbound-assertion-failed")
+			if got := liveReasonDetail(t, rep.Reasons, "live-unbound-assertion-failed"); !strings.Contains(got, wantDetail) {
+				t.Errorf("published unbound-assertion detail = %q, want it to name %q", got, wantDetail)
+			}
+			if got := publishedRow(t, rep, phaseRow).Layer3; got != "LIVE-PASS" {
+				t.Errorf("published layer3 for %s = %q, want LIVE-PASS", phaseRow, got)
+			}
+		})
+	}
+
+	// Neither readiness phase can ever reach a row, so a command of theirs that
+	// completed and failed has unboundFailures as its only destination. Both
+	// variants read the reduced step too: the failure is listed because the
+	// command failed, not because it went missing.
+	gated := newPhaseSubject(t, phasePatientTimeoutSeconds)
+
+	t.Run("a start command that fails is listed with the expectation it broke", func(t *testing.T) {
+		runID := newPhaseRun(t, gated, "lt-unbound-start", map[string]string{"deploy": "fail"})
+		_, _, execOut := runLivePipeline(t, gated, runID, phasePlan(runID, false), nil)
+		ev := readLiveEvidence(t, execOut.EvidencePath)
+
+		if len(ev.StartSteps) != 1 || ev.StartSteps[0].Result != "fail" {
+			t.Fatalf("start steps = %+v, want the refused deploy recorded as a completed failure", ev.StartSteps)
+		}
+		want := []liveStepFailure{{Phase: "start", Index: 1, Expectation: "profile start command 1"}}
+		if !reflect.DeepEqual(ev.UnboundFailures, want) {
+			t.Errorf("unboundFailures = %+v, want %+v", ev.UnboundFailures, want)
+		}
+	})
+
+	t.Run("a health command that fails is listed with the expectation it broke", func(t *testing.T) {
+		runID := newPhaseRun(t, gated, "lt-unbound-health", map[string]string{"ready": "fail"})
+		_, _, execOut := runLivePipeline(t, gated, runID, phasePlan(runID, false), nil)
+		ev := readLiveEvidence(t, execOut.EvidencePath)
+
+		if len(ev.HealthSteps) != 1 || ev.HealthSteps[0].Result != "fail" {
+			t.Fatalf("health steps = %+v, want the refused readiness command recorded as a completed failure", ev.HealthSteps)
+		}
+		want := []liveStepFailure{{Phase: "health", Index: 1, Expectation: "profile health command 1"}}
+		if !reflect.DeepEqual(ev.UnboundFailures, want) {
+			t.Errorf("unboundFailures = %+v, want %+v", ev.UnboundFailures, want)
+		}
+	})
+}
+
+// The cleanup-accounting subject exists for the phase no assertion watches: the
+// profile's own cleanup commands. Its script can be asked to refuse, to outlive
+// the cleanup deadline, or to remove the wrong name and leave the run's root
+// standing, and the checker that always runs last reports what survived. What
+// the evidence must then say is not "cleanup passed" or "cleanup failed" but
+// which of three things happened: a command failed, a command never finished,
+// or every command finished and held.
+const (
+	sweepCoverageSource = "docs/superpowers/coverage/2026-09-07-cleanup-accounting-subject-coverage.md"
+	sweepProfilePath    = ".test-design/live-profiles/cleanup-accounting-local.json"
+	sweepScriptPath     = "scripts/sweep.py"
+
+	// The subject journeys one row, so the plan's single business step is what
+	// settles it and every cleanup outcome below is beside that verdict.
+	sweepRow = "SC-01"
+
+	// Cleanup gets an impatient deadline of its own, so a command held past
+	// it costs the run little; every other command keeps a patient one.
+	sweepTimeoutSeconds        = 20
+	sweepCleanupTimeoutSeconds = 2
+)
+
+// sweepScript is the subject's committed helper script, invoked by path under
+// python3 exactly as the profile declares it. Like the phase-logging subject's
+// script it derives both of the run's roots from the run identifier it is
+// handed and takes its instructions from directive files under the log root, so
+// no path this test owns ever reaches the profile, the plan or the evidence.
+const sweepScript = `#!/usr/bin/env python3
+"""The cleanup-accounting live subject.
+
+The remove phase releases the run's own root, and the absent phase that follows
+it reports whatever is still standing. A test asks a cleanup command to refuse,
+to outlive its deadline, or to remove a name that never existed by leaving a
+directive file for that phase under the log root.
+"""
+
+import os
+import shutil
+import sys
+import time
+
+# Longer than any deadline this profile sets, so a command asked to outlive one
+# is still running when the verifier gives up on it.
+STALL_SECONDS = 20
+
+
+def roots(run_id):
+    """Return the run root and the log root this run owns."""
+    base = "/tmp/test-design-livetruth-" + run_id
+    return base, base + "-log"
+
+
+def directive(log_root, phase):
+    """Return what the test asked of this phase, or pass when it asked nothing."""
+    try:
+        with open(os.path.join(log_root, phase + ".directive")) as handle:
+            return handle.read().strip()
+    except FileNotFoundError:
+        return "pass"
+
+
+def remove(run_root, asked):
+    """Release the run's own root the way this variant asks for it.
+
+    wrong-name takes a neighbouring name that never existed, so the run root
+    survives for the checker to find. Every other directive releases the root
+    first and only then refuses or stalls, so a cleanup command that fails to
+    complete still leaves a clean run behind and the checker reports on the
+    command's own failure rather than on residue the failure caused.
+    """
+    if asked == "wrong-name":
+        shutil.rmtree(run_root + "-absent", ignore_errors=True)
+        return 0
+    shutil.rmtree(run_root, ignore_errors=True)
+    if asked == "fail":
+        print("sweep-refused")
+        return 1
+    if asked == "stall":
+        time.sleep(STALL_SECONDS)
+    return 0
+
+
+def main(argv):
+    if len(argv) != 3:
+        print("usage: sweep.py <phase> <run-id>", file=sys.stderr)
+        return 2
+    phase, run_id = argv[1], argv[2]
+    run_root, log_root = roots(run_id)
+    asked = directive(log_root, phase)
+
+    if phase == "deploy":
+        os.makedirs(run_root, mode=0o700, exist_ok=True)
+        print("deployed")
+        return 0
+    if phase == "ready":
+        if not os.path.isdir(run_root):
+            print("not-ready")
+            return 1
+        print("ready")
+        return 0
+    if phase == "check":
+        if not os.path.isdir(run_root):
+            print("business-refused")
+            return 1
+        print("business-pass")
+        return 0
+    if phase == "remove":
+        return remove(run_root, asked)
+    if phase == "pause":
+        if asked == "stall":
+            time.sleep(STALL_SECONDS)
+        return 0
+    if phase == "absent":
+        # Silence is the proof of absence; anything still standing is named.
+        if os.path.isdir(run_root):
+            print("residue " + run_root)
+        if asked == "fail":
+            return 1
+        return 0
+    print("unknown phase " + phase, file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
+`
+
+const sweepGoMod = `module cleanuplive
+
+go 1.26
+`
+
+const sweepReleaseSource = `package release
+
+// Clean reports whether a run released everything it took: no cleanup command
+// refused, and the checker that ran last found nothing standing.
+func Clean(refusals, residue int) bool { return refusals == 0 && residue == 0 }
+`
+
+// sweepReleaseTestSource is the subject's own tagged test. Its tag cites the
+// subject document's SC-01, never a row of this repository: the text lives
+// inside a string literal here and only becomes a comment in the temporary
+// repository the builder writes.
+const sweepReleaseTestSource = `package release
+
+import "testing"
+
+// covers: SC-01
+func TestCleanNeedsBothNoRefusalAndNoResidue(t *testing.T) {
+	if !Clean(0, 0) {
+		t.Fatalf("Clean(0, 0) = false, want a run that refused nothing and left nothing to be clean")
+	}
+	if Clean(1, 0) {
+		t.Fatalf("Clean(1, 0) = true, want a refused cleanup command to count against the run")
+	}
+	if Clean(0, 1) {
+		t.Fatalf("Clean(0, 1) = true, want residue to count against the run")
+	}
+}
+`
+
+// sweepCoverageDoc declares the live decision required and journeys the one row
+// the walkthrough settles. BASELINE_COMMIT and BASELINE_SHA256 are pinned by
+// the shared subject builder.
+const sweepCoverageDoc = `# Coverage: cleanup accounting live subject
+
+Spec: docs/superpowers/specs/2026-09-07-cleanup-accounting-live-subject.md
+Baseline: BASELINE_COMMIT · 1 passed, 0 failed, 0 skipped
+
+## Verification
+
+- runner-kind: go
+- runner-root: .
+- runner-command: ["go", "test", "-count=1", "-json", "./..."]
+- report-globs: []
+- baseline-evidence: docs/superpowers/coverage/2026-09-07-cleanup-accounting-subject-baseline.json
+- baseline-sha256: BASELINE_SHA256
+- live-profile: .test-design/live-profiles/cleanup-accounting-local.json
+- final-command: ["/test-design:coverage-verification", "docs/superpowers/coverage/2026-09-07-cleanup-accounting-subject-coverage.md"]
+
+## Live decision
+
+- decision: required
+- reason: only a running deployment can show what its own cleanup commands released
+
+| Journey | Scenarios | Expected |
+|---|---|---|
+| J-1 | SC-01 | The business check runs against a deployment the run made, and the run's own cleanup commands report what they released |
+
+## Scenarios
+
+### Behavior: released after the check
+
+| ID | Behavior | Expected | Level | Verification mutation | Risk |
+|----|----------|----------|-------|------------------------|------|
+| SC-01 | the business check runs against the deployment the run made | the check reports business-pass | integration | the start phase is skipped so the check runs against nothing | med |
+`
+
+// sweepCleanupCommands renders the profile's cleanup array from the phases a
+// variant declares, in order. The configured last command is the one that
+// carries cleanupEvidence, which is why the absence checker is written last
+// wherever a variant wants its proof of removal to be the deciding one.
+func sweepCleanupCommands(phases []string) string {
+	entries := make([]string, len(phases))
+	for i, phase := range phases {
+		entries[i] = fmt.Sprintf(`["python3", %q, %q, "{run-id}"]`, sweepScriptPath, phase)
+	}
+	return "[" + strings.Join(entries, ", ") + "]"
+}
+
+// sweepProfileJSON is the subject's committed profile. Only its cleanup array
+// varies between variants, because the number and order of cleanup commands is
+// exactly what the tri-state is about; every other field, the removal evidence
+// included, is the same profile in each of them.
+func sweepProfileJSON(cleanupPhases []string) string {
+	return fmt.Sprintf(`{
+  "schemaVersion": %q,
+  "classification": "local",
+  "start": [["python3", "scripts/sweep.py", "deploy", "{run-id}"]],
+  "health": [["python3", "scripts/sweep.py", "ready", "{run-id}"]],
+  "walkthrough": [["python3", "scripts/sweep.py", "check", "{run-id}"]],
+  "cleanup": %s,
+  "cleanupEvidence": [
+    {"form": "exit-code", "value": "0"},
+    {"form": "not-matches", "stream": "stdout", "value": "residue"}
+  ],
+  "envAllowlist": ["PATH"],
+  "resourcePrefixes": ["/tmp/test-design-livetruth-{run-id}"],
+  "endpoints": [],
+  "timeoutSeconds": %d,
+  "cleanupTimeoutSeconds": %d,
+  "maxOutputBytes": 1048576
+}
+`, evidence.SchemaVersion, sweepCleanupCommands(cleanupPhases), sweepTimeoutSeconds, sweepCleanupTimeoutSeconds)
+}
+
+// newSweepSubject builds the cleanup-accounting subject and runs the real
+// baseline op over it. cleanupPhases are the phases the profile declares as its
+// cleanup commands, in order.
+func newSweepSubject(t *testing.T, cleanupPhases []string) *liveSubject {
+	t.Helper()
+	return newLiveSubject(t, sweepCoverageSource, sweepProfilePath, []map[string]string{{
+		"go.mod":                  sweepGoMod,
+		"release/release.go":      sweepReleaseSource,
+		"release/release_test.go": sweepReleaseTestSource,
+		sweepScriptPath:           sweepScript,
+		sweepProfilePath:          sweepProfileJSON(cleanupPhases),
+		sweepCoverageSource:       sweepCoverageDoc,
+	}}, nil)
+}
+
+// sweepPlan is the plan the live-runner would hand to execute-live for this
+// subject: one bound business check and no cleanup section of its own, so every
+// cleanup command the run makes is one the profile declared.
+func sweepPlan(runID string) map[string]any {
+	return map[string]any{
+		"schemaVersion": evidence.SchemaVersion,
+		"steps": []map[string]any{{
+			"expectation": "the deployment the run made answers the business check",
+			"command":     []string{"python3", sweepScriptPath, "check", runID},
+			"predicates": []map[string]string{
+				{"form": "exit-code", "value": "0"},
+				{"form": "matches", "stream": "stdout", "value": "business-pass"},
+			},
+			"scBindings": []string{sweepRow},
+		}},
+	}
+}
+
+// profileCleanupStep returns the reduced step of the profile's nth cleanup
+// command, located by the expectation the verifier gives it.
+func profileCleanupStep(t *testing.T, ev liveEvidence, n int) live.ReducedStep {
+	t.Helper()
+	return stepByExpectation(t, ev.CleanupSteps, fmt.Sprintf("profile cleanup command %d", n))
+}
+
+// requireCleanupState fails unless the two booleans read exactly this way in
+// both the op output and the evidence. They are a tri-state, so both are always
+// named together: "not failed" is not the same claim as "clean".
+func requireCleanupState(t *testing.T, out executeLiveOutput, ev liveEvidence, wantOK, wantFailed bool) {
+	t.Helper()
+	if out.CleanupOK != wantOK || out.CleanupFailed != wantFailed {
+		t.Errorf("op output cleanupOK = %v, cleanupFailed = %v, want %v/%v",
+			out.CleanupOK, out.CleanupFailed, wantOK, wantFailed)
+	}
+	if ev.CleanupOK != wantOK || ev.CleanupFailed != wantFailed {
+		t.Errorf("evidence cleanupOK = %v, cleanupFailed = %v, want %v/%v",
+			ev.CleanupOK, ev.CleanupFailed, wantOK, wantFailed)
+	}
+}
+
+// covers: SC-17
+func TestLiveTruth_EveryCleanupFailureRetained(t *testing.T) {
+	requirePython3(t)
+
+	t.Run("a cleanup command that refused is retained though the checker after it held", func(t *testing.T) {
+		subject := newSweepSubject(t, []string{"remove", "absent"})
+		runID := newLiveTruthRun(t, "lt-sweep-refused")
+		writeDirectives(t, runID, map[string]string{"remove": "fail"})
+
+		tr, _, execOut := runLivePipeline(t, subject, runID, sweepPlan(runID), nil)
+		ev := readLiveEvidence(t, execOut.EvidencePath)
+
+		if got := profileCleanupStep(t, ev, 1).Result; got != "fail" {
+			t.Errorf("profile cleanup command 1 result = %q, want fail", got)
+		}
+		// The checker really did hold: it exited zero and named nothing left
+		// standing, so nothing about the run itself is what withholds cleanupOK.
+		checker := profileCleanupStep(t, ev, 2)
+		if checker.Result != "pass" || checker.Decisive != "" {
+			t.Errorf("profile cleanup command 2 = %+v, want a passing step that named no residue", checker)
+		}
+		requireAbsent(t, "after execute-live returned", phaseRunRoot(runID))
+		requireCleanupState(t, execOut, ev, false, true)
+		if got := rowVerdict(t, ev.RowVerdicts, sweepRow).Verdict; got != "LIVE-PASS" {
+			t.Errorf("live verdict for %s = %q, want LIVE-PASS: a cleanup failure judges no row", sweepRow, got)
+		}
+
+		code, stdout, stderr := runVerifyOp(t, "finalize",
+			liveFinalizeRequestJSON(t, subject, runID, tr.EvidencePath, execOut.EvidencePath))
+		if code != exitOK {
+			t.Fatalf("finalize exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+		}
+		out := decodeFinalizeOutput(t, stdout)
+		// PARTIAL, not BLOCKED: a failed cleanup is the human's to accept after
+		// publication, and no row's verdict is touched by it.
+		if out.Verdict != report.VerdictPartial {
+			t.Fatalf("verdict = %q, want %q; reasons=%+v", out.Verdict, report.VerdictPartial, out.Reasons)
+		}
+		requireReason(t, out.Reasons, "3", "", "live-cleanup-failed")
+
+		rep := readPublishedReport(t, subject.repo, out.JSONPath)
+		requireReason(t, rep.Reasons, "3", "", "live-cleanup-failed")
+		if got := publishedRow(t, rep, sweepRow).Layer3; got != "LIVE-PASS" {
+			t.Errorf("published layer3 for %s = %q, want LIVE-PASS", sweepRow, got)
+		}
+	})
+
+	t.Run("a cleanup that left the run root standing fails through the removal predicate", func(t *testing.T) {
+		subject := newSweepSubject(t, []string{"remove", "absent"})
+		runID := newLiveTruthRun(t, "lt-sweep-residue")
+		writeDirectives(t, runID, map[string]string{"remove": "wrong-name"})
+
+		_, _, execOut := runLivePipeline(t, subject, runID, sweepPlan(runID), nil)
+		ev := readLiveEvidence(t, execOut.EvidencePath)
+
+		// Every cleanup command exited zero, so an exit status alone would have
+		// called this run clean; what refuses it is the profile author's own
+		// proof of removal, read off the checker's output.
+		if got := profileCleanupStep(t, ev, 1).Result; got != "pass" {
+			t.Errorf("profile cleanup command 1 result = %q, want pass: this variant's refusal is the residue, not an exit code", got)
+		}
+		checker := profileCleanupStep(t, ev, 2)
+		if checker.Result != "fail" || checker.ExitStatus != 0 {
+			t.Errorf("profile cleanup command 2 = %+v, want a step that exited zero and still failed its removal predicate", checker)
+		}
+		if got := checker.Decisive; !strings.Contains(got, "residue "+phaseRunRoot(runID)) {
+			t.Errorf("profile cleanup command 2 decisive output = %q, want it to name the surviving run root %s", got, phaseRunRoot(runID))
+		}
+		if _, err := os.Stat(phaseRunRoot(runID)); err != nil {
+			t.Errorf("stat %s: %v, want the run root this variant deliberately left standing", phaseRunRoot(runID), err)
+		}
+		requireCleanupState(t, execOut, ev, false, true)
+	})
+
+	t.Run("a cleanup command held past its own deadline leaves removal unproven rather than failed", func(t *testing.T) {
+		subject := newSweepSubject(t, []string{"remove", "absent"})
+		runID := newLiveTruthRun(t, "lt-sweep-held")
+		writeDirectives(t, runID, map[string]string{"remove": "stall"})
+
+		tr, _, execOut := runLivePipeline(t, subject, runID, sweepPlan(runID), nil)
+		ev := readLiveEvidence(t, execOut.EvidencePath)
+
+		// The held command has no reduced step to read a result off, and the
+		// checker after it held, so no completed command failed. Neither
+		// boolean may be set: the removal is unproven, not vindicated.
+		requireExecutionError(t, ev.ExecutionErrors, "cleanup[1]:", "subprocess timeout")
+		if got := profileCleanupStep(t, ev, 2).Result; got != "pass" {
+			t.Errorf("profile cleanup command 2 result = %q, want pass", got)
+		}
+		requireCleanupState(t, execOut, ev, false, false)
+
+		code, stdout, stderr := runVerifyOp(t, "finalize",
+			liveFinalizeRequestJSON(t, subject, runID, tr.EvidencePath, execOut.EvidencePath))
+		if code != exitOK {
+			t.Fatalf("finalize exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+		}
+		out := decodeFinalizeOutput(t, stdout)
+		if out.Verdict != report.VerdictPartial {
+			t.Fatalf("verdict = %q, want %q; reasons=%+v", out.Verdict, report.VerdictPartial, out.Reasons)
+		}
+		requireReason(t, out.Reasons, "3", "", "live-cleanup-missing")
+		requireReason(t, out.Reasons, "3", "", "live-execution-errors")
+
+		rep := readPublishedReport(t, subject.repo, out.JSONPath)
+		requireReason(t, rep.Reasons, "3", "", "live-cleanup-missing")
+		requireReason(t, rep.Reasons, "3", "", "live-execution-errors")
+	})
+
+	// The two precedence orders, run in both directions: a known failure before
+	// a non-completion, and a non-completion before a known failure. Neither
+	// masks the other, and neither is cleared by a command that succeeded.
+	t.Run("a refusal before a held command is retained", func(t *testing.T) {
+		subject := newSweepSubject(t, []string{"remove", "pause", "absent"})
+		runID := newLiveTruthRun(t, "lt-sweep-first")
+		writeDirectives(t, runID, map[string]string{"remove": "fail", "pause": "stall"})
+
+		_, _, execOut := runLivePipeline(t, subject, runID, sweepPlan(runID), nil)
+		ev := readLiveEvidence(t, execOut.EvidencePath)
+
+		if got := profileCleanupStep(t, ev, 1).Result; got != "fail" {
+			t.Errorf("profile cleanup command 1 result = %q, want fail", got)
+		}
+		requireExecutionError(t, ev.ExecutionErrors, "cleanup[2]:", "subprocess timeout")
+		if got := profileCleanupStep(t, ev, 3).Result; got != "pass" {
+			t.Errorf("profile cleanup command 3 result = %q, want pass", got)
+		}
+		requireCleanupState(t, execOut, ev, false, true)
+	})
+
+	t.Run("a refusal after a held command is retained", func(t *testing.T) {
+		subject := newSweepSubject(t, []string{"remove", "absent"})
+		runID := newLiveTruthRun(t, "lt-sweep-last")
+		writeDirectives(t, runID, map[string]string{"remove": "stall", "absent": "fail"})
+
+		_, _, execOut := runLivePipeline(t, subject, runID, sweepPlan(runID), nil)
+		ev := readLiveEvidence(t, execOut.EvidencePath)
+
+		requireExecutionError(t, ev.ExecutionErrors, "cleanup[1]:", "subprocess timeout")
+		if got := profileCleanupStep(t, ev, 2).Result; got != "fail" {
+			t.Errorf("profile cleanup command 2 result = %q, want fail", got)
+		}
+		requireCleanupState(t, execOut, ev, false, true)
+	})
+}
+
+// The bounded-output subject runs under limits tight enough to break its own
+// walkthrough: a one-second deadline, sixty-four bytes of output shared by both
+// of a command's streams, and a cleanup allowance of five seconds that belongs
+// to cleanup alone. Two of its steps complete under those limits and settle
+// their rows; the other four are cut short in each of the four ways a command
+// can fail to leave a result behind, and what they must not do is let the
+// output captured before the interruption stand in for a result.
+const (
+	incompleteCoverageSource = "docs/superpowers/coverage/2026-09-07-bounded-output-subject-coverage.md"
+	incompleteProfilePath    = ".test-design/live-profiles/bounded-output-local.json"
+	incompleteScriptPath     = "scripts/probe.py"
+
+	// The limits the walkthrough below is written against. The output budget is
+	// spent exactly by one step and exceeded by another; the deadline is
+	// outlived by a third; cleanup takes longer than the deadline and finishes
+	// anyway, which is what an allowance of its own means.
+	incompleteTimeoutSeconds        = 1
+	incompleteMaxOutputBytes        = 64
+	incompleteCleanupTimeoutSeconds = 5
+)
+
+// incompleteScript is the subject's committed helper script, invoked by path
+// under python3. Its mode is an argument rather than a directive file: a plan
+// step names the mode it needs, and the run root the script touches is derived
+// from the run identifier it is handed, so no path this test owns reaches the
+// profile, the plan or the evidence.
+const incompleteScript = `#!/usr/bin/env python3
+"""The bounded-output live subject.
+
+Each mode is one way a command can end: refusing with a status of its own,
+spending the whole output budget and no more, outliving the deadline, burying a
+success-shaped line past the budget, terminating the verifier and staying alive
+to be terminated in turn, or saying nothing at all.
+"""
+
+import os
+import shutil
+import signal
+import sys
+import time
+
+# Longer than any deadline this profile sets, so a command asked to outlive one
+# is still running when the verifier gives up on it, and a command that has
+# signalled the verifier is still running when the signal is observed.
+STALL_SECONDS = 20
+
+# The profile's output budget, shared by both streams. The exact-cap mode spends
+# it once and exactly; the flooding mode spends it many times over.
+CAP_BYTES = 64
+
+# Longer than an ordinary command's deadline and well inside the cleanup
+# allowance, so a cleanup that takes this long can only have run under an
+# allowance of its own.
+RELEASE_SECONDS = 1.2
+
+# The status the refusing mode reports: a completed command whose nonzero exit
+# is the result its predicate expects, not a failure of the run.
+REFUSED_STATUS = 3
+
+
+def run_root(run_id):
+    """Return the run root this run owns."""
+    return "/tmp/test-design-livetruth-" + run_id
+
+
+def spend_budget_exactly():
+    """Emit the whole budget and not one byte more, half on each stream."""
+    half = CAP_BYTES // 2
+    sys.stdout.write("ok".ljust(half, "."))
+    sys.stdout.flush()
+    sys.stderr.write("-" * half)
+    sys.stderr.flush()
+
+
+def flood():
+    """Emit a line shaped like success, then bury it past the budget."""
+    sys.stdout.write("ok\n")
+    sys.stdout.flush()
+    for _ in range(CAP_BYTES):
+        sys.stdout.write("o" * CAP_BYTES)
+        sys.stdout.flush()
+        sys.stderr.write("e" * CAP_BYTES)
+        sys.stderr.flush()
+
+
+def main(argv):
+    if len(argv) != 3:
+        print("usage: probe.py <mode> <run-id>", file=sys.stderr)
+        return 2
+    mode, run_id = argv[1], argv[2]
+    root = run_root(run_id)
+
+    if mode == "prepare":
+        os.makedirs(root, mode=0o700, exist_ok=True)
+        return 0
+    if mode == "refuse":
+        return REFUSED_STATUS
+    if mode == "cap":
+        spend_budget_exactly()
+        return 0
+    if mode == "linger":
+        time.sleep(STALL_SECONDS)
+        return 0
+    if mode == "flood":
+        flood()
+        return 0
+    if mode == "signal":
+        os.kill(os.getppid(), signal.SIGTERM)
+        time.sleep(STALL_SECONDS)
+        return 0
+    if mode == "quiet":
+        return 0
+    if mode == "release":
+        time.sleep(RELEASE_SECONDS)
+        shutil.rmtree(root, ignore_errors=True)
+        if os.path.exists(root):
+            print("residue")
+            return 1
+        print("absent")
+        return 0
+    print("unknown mode " + mode, file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
+`
+
+const incompleteGoMod = `module boundedlive
+
+go 1.26
+`
+
+const incompleteLimitSource = `package limit
+
+// Budget is the output allowance a live command is given: one budget its two
+// streams spend together.
+const Budget = 64
+
+// Refused is the status the subject reports when it declines an operation. It
+// is a result, not an interruption: a command that reports it ran to the end.
+const Refused = 3
+
+// WithinBudget reports whether the bytes a command emitted on both streams
+// together stayed inside the allowance.
+func WithinBudget(stdout, stderr int) bool { return stdout+stderr <= Budget }
+
+// Result is what a live command left behind: a status only when it completed,
+// and otherwise the reason it was cut short.
+type Result struct {
+	Completed bool
+	Status    int
+	Cause     string
+}
+
+// Judgeable reports whether an expectation may be judged against this result. A
+// command that was cut short left no proof of anything, however much of its
+// output was captured before it stopped.
+func Judgeable(r Result) bool { return r.Completed }
+`
+
+// incompleteLimitTestSource is the subject's own tagged tests, one per row. The
+// tags cite the subject document's rows, never a row of this repository: the
+// text lives inside a string literal here and only becomes comments in the
+// temporary repository the builder writes.
+const incompleteLimitTestSource = `package limit
+
+import "testing"
+
+// covers: SC-01
+func TestRefusedIsACompletedStatus(t *testing.T) {
+	if !Judgeable(Result{Completed: true, Status: Refused}) {
+		t.Fatalf("a completed refusal is not judgeable, want a command that ran to the end to be judged")
+	}
+	if Refused != 3 {
+		t.Fatalf("Refused = %d, want 3", Refused)
+	}
+}
+
+// covers: SC-02
+func TestSpendingTheWholeBudgetStaysWithinIt(t *testing.T) {
+	if !WithinBudget(32, 32) {
+		t.Fatalf("WithinBudget(32, 32) = false, want the exact allowance to be inside it")
+	}
+}
+
+// covers: SC-03
+func TestADeadlineLeavesNothingToJudge(t *testing.T) {
+	if Judgeable(Result{Cause: "deadline"}) {
+		t.Fatalf("a command cut short by its deadline is judgeable, want no result to judge")
+	}
+}
+
+// covers: SC-04
+func TestOneByteBeyondTheBudgetIsOutsideIt(t *testing.T) {
+	if WithinBudget(33, 32) {
+		t.Fatalf("WithinBudget(33, 32) = true, want one byte past the allowance to be outside it")
+	}
+}
+
+// covers: SC-05
+func TestATerminationLeavesNothingToJudge(t *testing.T) {
+	if Judgeable(Result{Cause: "terminated"}) {
+		t.Fatalf("a terminated command is judgeable, want no result to judge")
+	}
+}
+
+// covers: SC-06
+func TestAFailedCaptureLeavesNothingToJudge(t *testing.T) {
+	if Judgeable(Result{Cause: "capture"}) {
+		t.Fatalf("a command whose output could not be captured is judgeable, want no result to judge")
+	}
+}
+`
+
+// incompleteCoverageDoc journeys all six rows, so every one of them is a
+// layer-3 obligation the plan must bind and the run must settle.
+// BASELINE_COMMIT and BASELINE_SHA256 are pinned by the shared subject builder.
+const incompleteCoverageDoc = `# Coverage: bounded output live subject
+
+Spec: docs/superpowers/specs/2026-09-07-bounded-output-live-subject.md
+Baseline: BASELINE_COMMIT · 6 passed, 0 failed, 0 skipped
+
+## Verification
+
+- runner-kind: go
+- runner-root: .
+- runner-command: ["go", "test", "-count=1", "-json", "./..."]
+- report-globs: []
+- baseline-evidence: docs/superpowers/coverage/2026-09-07-bounded-output-subject-baseline.json
+- baseline-sha256: BASELINE_SHA256
+- live-profile: .test-design/live-profiles/bounded-output-local.json
+- final-command: ["/test-design:coverage-verification", "docs/superpowers/coverage/2026-09-07-bounded-output-subject-coverage.md"]
+
+## Live decision
+
+- decision: required
+- reason: only a running deployment can be interrupted, and only a real interruption shows what its captured output is worth
+
+| Journey | Scenarios | Expected |
+|---|---|---|
+| J-1 | SC-01, SC-02, SC-03, SC-04, SC-05, SC-06 | A command that ran to the end is judged by what it reported, and a command that was cut short is judged by nothing at all |
+
+## Scenarios
+
+### Behavior: judging a command by whether it finished
+
+| ID | Behavior | Expected | Level | Verification mutation | Risk |
+|----|----------|----------|-------|------------------------|------|
+| SC-01 | a command that refuses with a status of its own ran to the end | the refusal status is the result its expectation is judged against | integration | the refusal status is reported as an interruption | low |
+| SC-02 | a command spends the whole output allowance and stops | the command completes and its output is judged | integration | the allowance is treated as exceeded when it is spent exactly | med |
+| SC-03 | a command outlives its deadline | the command leaves no result to judge | integration | the deadline is reported as an ordinary completion | med |
+| SC-04 | a command emits more than its output allowance | the command leaves no result to judge, whatever it emitted first | integration | the captured prefix is judged as if the command had finished | med |
+| SC-05 | a command terminates the verifier and stays alive | the command leaves no result to judge | integration | the termination is reported as an ordinary completion | med |
+| SC-06 | a command's output cannot be captured at all | the command leaves no result to judge | integration | the capture failure is reported as an ordinary completion | med |
+`
+
+// incompleteProfileJSON is the subject's committed profile. Its limits are the
+// point of the subject, so they are spelled from the constants the walkthrough
+// is written against rather than left to the defaults.
+func incompleteProfileJSON() string {
+	return fmt.Sprintf(`{
+  "schemaVersion": %q,
+  "classification": "local",
+  "start": [["python3", "scripts/probe.py", "prepare", "{run-id}"]],
+  "health": [],
+  "walkthrough": [["python3", "scripts/probe.py", "quiet", "{run-id}"]],
+  "cleanup": [["python3", "scripts/probe.py", "release", "{run-id}"]],
+  "cleanupEvidence": [
+    {"form": "exit-code", "value": "0"},
+    {"form": "matches", "stream": "stdout", "value": "absent"}
+  ],
+  "envAllowlist": ["PATH"],
+  "resourcePrefixes": ["/tmp/test-design-livetruth-{run-id}"],
+  "endpoints": [],
+  "timeoutSeconds": %d,
+  "cleanupTimeoutSeconds": %d,
+  "maxOutputBytes": %d
+}
+`, evidence.SchemaVersion, incompleteTimeoutSeconds, incompleteCleanupTimeoutSeconds, incompleteMaxOutputBytes)
+}
+
+// newIncompleteSubject builds the bounded-output subject and runs the real
+// baseline op over it.
+func newIncompleteSubject(t *testing.T) *liveSubject {
+	t.Helper()
+	return newLiveSubject(t, incompleteCoverageSource, incompleteProfilePath, []map[string]string{{
+		"go.mod":                 incompleteGoMod,
+		"limit/limit.go":         incompleteLimitSource,
+		"limit/limit_test.go":    incompleteLimitTestSource,
+		incompleteScriptPath:     incompleteScript,
+		incompleteProfilePath:    incompleteProfileJSON(),
+		incompleteCoverageSource: incompleteCoverageDoc,
+	}}, nil)
+}
+
+// incompleteStep is one step of the bounded-output walkthrough: the mode the
+// helper script runs in, the row it binds, the predicate that would settle that
+// row, and the verdict the row must carry once the run is over.
+type incompleteStep struct {
+	mode        string
+	row         string
+	expectation string
+	predicate   map[string]string
+	verdict     string
+}
+
+// incompleteWalkthrough is the walkthrough in plan order, so a step's position
+// here is its index in the evidence and in the run directory. Step 6 is last
+// because its raw capture directory is made unwritable before the run starts,
+// and the directory is named after the step's own position.
+func incompleteWalkthrough() []incompleteStep {
+	return []incompleteStep{
+		{
+			mode:        "refuse",
+			row:         "SC-01",
+			expectation: "the command that refuses reports the status its caller expects",
+			predicate:   map[string]string{"form": "exit-code", "value": "3"},
+			verdict:     "LIVE-PASS",
+		},
+		{
+			mode:        "cap",
+			row:         "SC-02",
+			expectation: "the command that spends the whole output allowance still finishes",
+			predicate:   map[string]string{"form": "matches", "stream": "stdout", "value": "ok"},
+			verdict:     "LIVE-PASS",
+		},
+		{
+			// An exit status no completed run could report either, which
+			// is the point: even an expectation nothing could satisfy may
+			// not be settled against a command that produced no result to
+			// compare it with.
+			mode:        "linger",
+			row:         "SC-03",
+			expectation: "the command that outlives its deadline reports a status",
+			predicate:   map[string]string{"form": "exit-code", "value": "-1"},
+			verdict:     "LIVE-INCONCLUSIVE",
+		},
+		{
+			mode:        "flood",
+			row:         "SC-04",
+			expectation: "the command that floods its streams still reports success first",
+			predicate:   map[string]string{"form": "matches", "stream": "stdout", "value": "ok"},
+			verdict:     "LIVE-INCONCLUSIVE",
+		},
+		{
+			mode:        "signal",
+			row:         "SC-05",
+			expectation: "the command that terminates the verifier reports no error of its own",
+			predicate:   map[string]string{"form": "not-matches", "stream": "combined", "value": "ERROR"},
+			verdict:     "LIVE-INCONCLUSIVE",
+		},
+		{
+			mode:        "quiet",
+			row:         "SC-06",
+			expectation: "the command whose output cannot be captured reports success",
+			predicate:   map[string]string{"form": "exit-code", "value": "0"},
+			verdict:     "LIVE-INCONCLUSIVE",
+		},
+	}
+}
+
+// incompletePlan is the plan the live-runner would hand to execute-live for
+// this subject: one step per row, each bound to its own, so no row inherits
+// another's verdict and each interruption is answered for on its own.
+func incompletePlan(runID string) map[string]any {
+	walkthrough := incompleteWalkthrough()
+	steps := make([]map[string]any, 0, len(walkthrough))
+	for _, step := range walkthrough {
+		steps = append(steps, map[string]any{
+			"expectation": step.expectation,
+			"command":     []string{"python3", incompleteScriptPath, step.mode, runID},
+			"predicates":  []map[string]string{step.predicate},
+			"scBindings":  []string{step.row},
+		})
+	}
+	return map[string]any{"schemaVersion": evidence.SchemaVersion, "steps": steps}
+}
+
+// blockStepCapture makes the raw-capture directory of one step unwritable
+// before the run starts, which is the only way to reach the capture-error path
+// from outside the verifier: the files are created before any process is, so a
+// directory that refuses them stops the step before it begins. The mode is
+// restored in cleanup so the temporary root the test framework owns can still
+// be removed.
+func blockStepCapture(t *testing.T, index int) func(prepareLiveOutput) {
+	return func(prep prepareLiveOutput) {
+		dir := filepath.Join(prep.RunDir, fmt.Sprintf("step-%d", index))
+		if err := os.Mkdir(dir, 0o500); err != nil {
+			t.Fatalf("pre-create the unwritable capture directory %s: %v", dir, err)
+		}
+		t.Cleanup(func() {
+			if err := os.Chmod(dir, 0o700); err != nil {
+				t.Logf("restore %s: %v", dir, err)
+			}
+		})
+	}
+}
+
+// covers: SC-18
+func TestLiveTruth_IncompleteOutputIsNotProof(t *testing.T) {
+	requirePython3(t)
+	subject := newIncompleteSubject(t)
+	runID := newLiveTruthRun(t, "lt-incomplete")
+	walkthrough := incompleteWalkthrough()
+
+	tr, _, execOut := runLivePipeline(t, subject, runID, incompletePlan(runID), blockStepCapture(t, len(walkthrough)))
+	ev := readLiveEvidence(t, execOut.EvidencePath)
+
+	for i, step := range walkthrough {
+		if got := rowVerdict(t, ev.RowVerdicts, step.row).Verdict; got != step.verdict {
+			t.Errorf("live verdict for %s (step %d, mode %s) = %q, want %q", step.row, i+1, step.mode, got, step.verdict)
+		}
+	}
+
+	// Only the two commands that ran to the end left a reduced step behind. A
+	// third would mean an interrupted command had been reduced to a result.
+	if len(ev.Steps) != 2 {
+		t.Fatalf("walkthrough steps = %+v, want only the two commands that completed", ev.Steps)
+	}
+	for _, step := range ev.Steps {
+		if step.Result != "pass" {
+			t.Errorf("reduced step %+v, want the two completed commands to pass", step)
+		}
+	}
+	if got := ev.Steps[0].ExitStatus; got != 3 {
+		t.Errorf("the refusing step exited %d, want its own status 3 to be the result its predicate judged", got)
+	}
+	if got := ev.Steps[1].Decisive; !strings.Contains(got, "ok") {
+		t.Errorf("the exact-allowance step's decisive output = %q, want the match its predicate found", got)
+	}
+
+	// Each interruption is named for what it was, at the position it happened.
+	requireExecutionError(t, ev.ExecutionErrors, "step[3]:", "subprocess timeout")
+	requireExecutionError(t, ev.ExecutionErrors, "step[4]:", "live output limit exceeded")
+	requireExecutionError(t, ev.ExecutionErrors, "step[5]:", "subprocess interrupted")
+	requireExecutionError(t, ev.ExecutionErrors, "step[6]:", "create raw capture")
+
+	// Cleanup takes longer than an ordinary command's whole deadline and still
+	// finishes: the allowance it runs under is its own, not the walkthrough's.
+	requireAbsent(t, "after execute-live returned", phaseRunRoot(runID))
+	requireCleanupState(t, execOut, ev, true, false)
+
+	code, stdout, stderr := runVerifyOp(t, "finalize",
+		liveFinalizeRequestJSON(t, subject, runID, tr.EvidencePath, execOut.EvidencePath))
+	if code != exitOK {
+		t.Fatalf("finalize exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+	out := decodeFinalizeOutput(t, stdout)
+	if out.Verdict != report.VerdictBlocked {
+		t.Fatalf("verdict = %q, want %q; reasons=%+v", out.Verdict, report.VerdictBlocked, out.Reasons)
+	}
+	rep := readPublishedReport(t, subject.repo, out.JSONPath)
+	for _, step := range walkthrough {
+		if step.verdict == "LIVE-INCONCLUSIVE" {
+			requireReason(t, out.Reasons, "3", step.row, "LIVE-INCONCLUSIVE")
+			requireReason(t, rep.Reasons, "3", step.row, "LIVE-INCONCLUSIVE")
+		}
+		if got := publishedRow(t, rep, step.row).Layer3; got != step.verdict {
+			t.Errorf("published layer3 for %s = %q, want %q", step.row, got, step.verdict)
+		}
+	}
+	requireReason(t, out.Reasons, "3", "", "live-execution-errors")
+	requireReason(t, rep.Reasons, "3", "", "live-execution-errors")
 }
