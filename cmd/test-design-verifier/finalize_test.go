@@ -100,9 +100,9 @@ func newFinalizeFixtureFor(t *testing.T, repo, coverageSource string) *finalizeF
 		f.writeJSON(path, &report.MutationEvidence{
 			Envelope:      evidence.Envelope{SchemaVersion: evidence.SchemaVersion, VerifierVersion: evidence.VerifierVersion},
 			RunID:         f.runID,
-			RepoCommit: f.head,
-			Source: f.src.Path,
-			SourceSHA256: f.src.SHA256,
+			RepoCommit:    f.head,
+			Source:        f.src.Path,
+			SourceSHA256:  f.src.SHA256,
 			RowID:         row.ID,
 			Sites:         []report.MutationSiteOutcome{{Site: "orders/orders.go:12", Outcome: "caught"}},
 			SnapshotEqual: true,
@@ -163,7 +163,7 @@ func (f *finalizeFixture) writeLive(verdicts []report.LiveRowVerdict) string {
 		RunID:         f.runID,
 		Source:        f.src.Path,
 		SourceSHA256:  f.src.SHA256,
-		RepoCommit: f.head,
+		RepoCommit:    f.head,
 		RowVerdicts:   verdicts,
 		CleanupOK:     true,
 		SnapshotEqual: true,
@@ -175,13 +175,13 @@ func (f *finalizeFixture) writeLiveAttempt(profile, refusal string) string {
 	f.t.Helper()
 	path := filepath.Join(f.dir, "live-attempt.json")
 	f.writeJSON(path, &report.LiveAttempt{
-		Envelope: evidence.Envelope{SchemaVersion: evidence.SchemaVersion, VerifierVersion: evidence.VerifierVersion},
-		RunID:    f.runID,
-		RepoCommit: f.head,
-		Source: f.src.Path,
+		Envelope:     evidence.Envelope{SchemaVersion: evidence.SchemaVersion, VerifierVersion: evidence.VerifierVersion},
+		RunID:        f.runID,
+		RepoCommit:   f.head,
+		Source:       f.src.Path,
 		SourceSHA256: f.src.SHA256,
-		Profile:  profile,
-		Refusal:  refusal,
+		Profile:      profile,
+		Refusal:      refusal,
 	})
 	return path
 }
@@ -426,9 +426,9 @@ func TestFinalize_MutationEvidenceForAnotherRunRefused(t *testing.T) {
 	path := f.body.Layer4.Rows[0].EvidencePath
 	f.writeJSON(path, &report.MutationEvidence{
 		Envelope:      evidence.Envelope{SchemaVersion: evidence.SchemaVersion, VerifierVersion: evidence.VerifierVersion},
-		RepoCommit: f.head,
-		Source: f.src.Path,
-		SourceSHA256: f.src.SHA256,
+		RepoCommit:    f.head,
+		Source:        f.src.Path,
+		SourceSHA256:  f.src.SHA256,
 		RunID:         "some-other-run",
 		RowID:         f.body.Layer4.Rows[0].RowID,
 		Sites:         []report.MutationSiteOutcome{{Site: "orders/orders.go:12", Outcome: "caught"}},
@@ -722,7 +722,7 @@ func TestFinalize_MutationAttemptRequiresMatchingIdentity(t *testing.T) {
 			m := &f.body.Layer4.Rows[0]
 			attempt := &report.Attempt{
 				Envelope: f.trace.Envelope,
-				RunID: f.runID, RowID: m.RowID,
+				RunID:    f.runID, RowID: m.RowID,
 				RepoCommit: f.head, Source: f.src.Path, SourceSHA256: f.src.SHA256,
 				Refusal: "runner unavailable",
 			}

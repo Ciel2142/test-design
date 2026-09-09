@@ -956,3 +956,178 @@ func TestReuse_PreservesOriginalProvenanceInReport(t *testing.T) {
 		}
 	}
 }
+
+// TestFinalize_PublishesAdoptedArtifactsFromVerifiedStagedCopies closes the
+// window between the last digest check and the publish that reopens the
+// original paths: every adopted artifact is copied into the run directory, the
+// copy is what is verified against the reference, and the copy is what is
+// published, so the bytes the report names are the bytes that land.
+func TestFinalize_PublishesAdoptedArtifactsFromVerifiedStagedCopies(t *testing.T) {
+	s := readySubject(t, "not-applicable")
+	runID, tracePath := readyAdoptedRun(t, s, "rdy-stage", readyCaughtVersionRow)
+
+	var stdout strings.Builder
+	if cliErr := finalizeOp(readyFinalizeRequest(t, s, runID, tracePath, nil, nil), &stdout, nil); cliErr != nil {
+		t.Fatalf("finalizeOp refused %s: %s", cliErr.Code, cliErr.Message)
+	}
+	out := decodeFinalizeOutput(t, stdout.String())
+	rep := readPublishedReport(t, s.repo, out.JSONPath)
+
+	for _, name := range []string{
+		"reused-review-" + readyMarkerGroup + ".json",
+		"reused-review-" + readyVersionGroup + ".json",
+		"reused-mutation-" + readyVersionRow + ".json",
+	} {
+		published := readyTranscriptPath(s, runID, name)
+		ref := publishedTranscript(t, rep, published)
+		staged := filepath.Join(out.RunDir, "transcripts", runID, name)
+		sum, err := evidence.SHA256File(staged)
+		if err != nil {
+			t.Errorf("staged copy %s: %v, want finalize to publish from a copy it verified in its own run directory", staged, err)
+			continue
+		}
+		if sum != ref.SHA256 {
+			t.Errorf("staged copy %s digests to %s, want the reference digest %s the report names", staged, sum, ref.SHA256)
+		}
+	}
+	batch := readyBatch(t, rep, "reuse:"+readyMarkerGroup)
+	if batch.Reuse == nil {
+		t.Fatalf("batch %s carries no reuse reference", batch.BatchID)
+	}
+	if got := publishedTranscript(t, rep, readyTranscriptPath(s, runID, "reused-review-"+readyMarkerGroup+".json")); got.SHA256 != batch.Reuse.Artifact.SHA256 {
+		t.Errorf("transcript sha256 = %s, want the reference digest %s", got.SHA256, batch.Reuse.Artifact.SHA256)
+	}
+}
+
+// TestReuse_AReadoptedRecordKeepsItsOriginalProducer follows evidence across
+// three runs. The bytes were produced by the first; the second adopted them and
+// the third adopts them from the second. The third's reference must still name
+// the first as the producer — the artifact says so, and finalize holds the two
+// to each other — while its ledger says which run it took the record from.
+func TestReuse_AReadoptedRecordKeepsItsOriginalProducer(t *testing.T) {
+	s := readySubject(t, "not-applicable")
+	policy := reusePolicy(t)
+
+	runA := liveRunID("rdy-chain-a")
+	trA := readyTrace(t, s, runA)
+	readyGroups(t, s, runA, readDispatchInputs(t, trA.DispatchPath), policy)
+	readyCaughtVersionRow(t, s, runA)
+	stateA := readyResume(t, s, runA)
+	seqA := map[string]int{}
+	for _, want := range []struct {
+		kind runstate.Kind
+		id   string
+	}{
+		{runstate.KindReviewGroup, readyMarkerGroup},
+		{runstate.KindReviewGroup, readyVersionGroup},
+		{runstate.KindMutationRow, readyVersionRow},
+	} {
+		seqA[want.id] = ledgerRecord(t, stateA, want.kind, want.id).Seq
+	}
+
+	runB := liveRunID("rdy-chain-b")
+	readyTrace(t, s, runB)
+	for _, decision := range slices.Concat(readyReuse(t, s, runB, runA, policy).Review, readyReuse(t, s, runB, runA, policy).Mutation) {
+		if !decision.Reused && decision.Reason != "already-recorded" {
+			t.Fatalf("run B refused %s %s: %s", decision.Kind, decision.ID, decision.Reason)
+		}
+	}
+	stateB := readyResume(t, s, runB)
+
+	runC := liveRunID("rdy-chain-c")
+	trC := readyTrace(t, s, runC)
+	outC := readyReuse(t, s, runC, runB, policy)
+	for _, decision := range slices.Concat(outC.Review, outC.Mutation) {
+		if !decision.Reused {
+			t.Fatalf("run C refused %s %s: %s", decision.Kind, decision.ID, decision.Reason)
+		}
+		ref := decision.Reference
+		if ref.PriorRunID != runA || ref.PriorRepoCommit != stateA.Identity.RepoCommit ||
+			ref.PriorSourceSHA256 != stateA.Identity.SourceSHA256 || ref.PriorSeq != seqA[decision.ID] {
+			t.Errorf("%s %s reference = %+v, want the original producer %s at %s seq %d",
+				decision.Kind, decision.ID, ref, runA, stateA.Identity.RepoCommit, seqA[decision.ID])
+		}
+		if ref.Basis.PriorCommit != stateB.Identity.RepoCommit {
+			t.Errorf("%s %s basis priorCommit = %q, want the commit of the run it was compared against, %q",
+				decision.Kind, decision.ID, ref.Basis.PriorCommit, stateB.Identity.RepoCommit)
+		}
+		rec := ledgerRecord(t, readyResume(t, s, runC), decision.Kind, decision.ID)
+		want := fmt.Sprintf("reused from %s seq %d", runB, ledgerRecord(t, stateB, decision.Kind, decision.ID).Seq)
+		if rec.Detail != want {
+			t.Errorf("%s %s detail = %q, want %q", decision.Kind, decision.ID, rec.Detail, want)
+		}
+	}
+
+	out := readyFinalize(t, s, runC, trC.EvidencePath, nil, nil)
+	if out.Verdict != report.VerdictPass {
+		t.Fatalf("verdict = %q, want %s; reasons=%+v", out.Verdict, report.VerdictPass, out.Reasons)
+	}
+	rep := readPublishedReport(t, s.repo, out.JSONPath)
+	batch := readyBatch(t, rep, "reuse:"+readyMarkerGroup)
+	if batch.Reuse == nil || batch.Reuse.PriorRunID != runA || batch.RunID != runA {
+		t.Errorf("batch %s = run %q reuse %+v, want the producer %s", batch.BatchID, batch.RunID, batch.Reuse, runA)
+	}
+	if got := publishedRow(t, rep, readyVersionRow).Layer4.Reuse; got == nil || got.PriorRunID != runA {
+		t.Errorf("%s layer4 reuse = %+v, want the producer %s", readyVersionRow, got, runA)
+	}
+}
+
+// TestFinalize_ACorruptRecordThisRunDidNotAdoptLeavesTheNoReusePathUnchanged
+// keeps finalize's reading of the ledger to what it needs: whether a record was
+// adopted. A run's own fresh records are pasted by the parent as they always
+// were, so a shape finalize never needed to decode is not one it refuses over.
+func TestFinalize_ACorruptRecordThisRunDidNotAdoptLeavesTheNoReusePathUnchanged(t *testing.T) {
+	s := readySubject(t, "not-applicable")
+	runID := liveRunID("rdy-own-corrupt")
+	tr := readyTrace(t, s, runID)
+	readyGroups(t, s, runID, readDispatchInputs(t, tr.DispatchPath), reusePolicy(t))
+	readyCaughtVersionRow(t, s, runID)
+	artifact, ok := ledgerRecord(t, readyResume(t, s, runID), runstate.KindMutationRow, readyVersionRow).Artifacts[artifactEvidence]
+	if !ok {
+		t.Fatalf("%s retained no evidence artifact", readyVersionRow)
+	}
+
+	original := readyBreakRecordInputs(t, s, runID, runstate.KindReviewGroup)
+	t.Cleanup(func() { readyRestoreLedger(t, s, runID, original) })
+	readyBreakRecordInputs(t, s, runID, runstate.KindMutationRow)
+
+	out := readyFinalize(t, s, runID, tr.EvidencePath,
+		readyLayer2(t, s, runID, tr.EvidencePath),
+		[]report.MutationInput{{RowID: readyVersionRow, EvidencePath: artifact.Path}})
+	if out.Verdict != report.VerdictPass {
+		t.Fatalf("verdict = %q, want %s; reasons=%+v", out.Verdict, report.VerdictPass, out.Reasons)
+	}
+	rep := readPublishedReport(t, s.repo, out.JSONPath)
+	for _, batch := range rep.Batches {
+		if batch.Reuse != nil {
+			t.Errorf("batch %s carries a reuse reference, want none: this run adopted nothing", batch.BatchID)
+		}
+	}
+}
+
+// TestFinalize_WithoutALedgerCreatesNothingUnderTheStateRoot keeps a run that
+// never opened a ledger from acquiring one at finalize: adopted evidence is
+// read from a ledger that exists, and a missing one is answered from disk.
+func TestFinalize_WithoutALedgerCreatesNothingUnderTheStateRoot(t *testing.T) {
+	f := newFinalizeFixture(t)
+	stateRoot := os.Getenv(runstate.EnvStateDir)
+
+	exit, stdout, stderr := f.run()
+	if exit != exitOK {
+		t.Fatalf("finalize exit code = %d, want %d; stderr=%s", exit, exitOK, stderr)
+	}
+	if out := decodeFinalizeOutput(t, stdout); out.Verdict != report.VerdictPass {
+		t.Fatalf("verdict = %q, want %s; reasons=%+v", out.Verdict, report.VerdictPass, out.Reasons)
+	}
+	entries, err := os.ReadDir(stateRoot)
+	if err != nil {
+		t.Fatalf("read state root %s: %v", stateRoot, err)
+	}
+	if len(entries) != 0 {
+		names := make([]string, 0, len(entries))
+		for _, entry := range entries {
+			names = append(names, entry.Name())
+		}
+		t.Errorf("state root holds %v, want a ledgerless finalize to create nothing under it", names)
+	}
+}

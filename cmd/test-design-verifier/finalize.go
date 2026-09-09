@@ -22,6 +22,10 @@ import (
 
 const coverageSourceSuffix = "-coverage.md"
 
+// outcomeEnvironmental is the mutation-row outcome record-attempt closes a row
+// with when the environment, not the mutant, refused the measurement.
+const outcomeEnvironmental = "environmental"
+
 // The two refusals adopted evidence adds to finalize's vocabulary. The report
 // package owns the other two (reuse-not-admitted, reuse-identity-mismatch),
 // which it also raises for itself once the report is computed.
@@ -239,11 +243,10 @@ func finalizeOp(req *finalizeRequest, stdout io.Writer, between func()) *cliErro
 
 	// The adopted entries arrive already loaded and already hashed, so they
 	// join the parent's after the loading loop rather than passing through it
-	// a second time under this run's transcript names.
+	// a second time under this run's transcript names. Their transcripts are
+	// not published from where the prior run left them: they are staged into
+	// this run's directory and verified there, once the report is written.
 	in.Mutations = slices.Concat(in.Mutations, reusedRows)
-	for _, ref := range reusedCopies {
-		transcripts = append(transcripts, worktree.PublishFile{RepoRelPath: ref.RepoRelPath, SourcePath: ref.SourcePath})
-	}
 
 	rep, err := report.Compute(in)
 	if err != nil {
@@ -254,8 +257,11 @@ func finalizeOp(req *finalizeRequest, stdout io.Writer, between func()) *cliErro
 		return &cliError{Code: "compute-failed", Message: fmt.Sprintf("finalize: %v", err)}
 	}
 
-	sort.Slice(transcripts, func(i, j int) bool { return transcripts[i].RepoRelPath < transcripts[j].RepoRelPath })
-	rep.Transcripts = make([]report.TranscriptRef, 0, len(transcripts))
+	// The report names every transcript by the digest of the bytes that will
+	// be published: this run's own are hashed here, an adopted one is named by
+	// the digest its reuse reference recorded, which the staged copy is held
+	// to before anything is published.
+	rep.Transcripts = make([]report.TranscriptRef, 0, len(transcripts)+len(reusedCopies))
 	for _, tf := range transcripts {
 		sum, err := evidence.SHA256File(tf.SourcePath)
 		if err != nil {
@@ -263,6 +269,10 @@ func finalizeOp(req *finalizeRequest, stdout io.Writer, between func()) *cliErro
 		}
 		rep.Transcripts = append(rep.Transcripts, report.TranscriptRef{Path: tf.RepoRelPath, SHA256: sum})
 	}
+	for _, ref := range reusedCopies {
+		rep.Transcripts = append(rep.Transcripts, report.TranscriptRef{Path: ref.RepoRelPath, SHA256: ref.SHA256})
+	}
+	sort.Slice(rep.Transcripts, func(i, j int) bool { return rep.Transcripts[i].Path < rep.Transcripts[j].Path })
 	rep.Approval = req.Approval
 	rep.ToolVersions = map[string]string{"go": runtime.Version()}
 	rep.FinishedAt = time.Now().UTC().Format(time.RFC3339)
@@ -297,14 +307,16 @@ func finalizeOp(req *finalizeRequest, stdout io.Writer, between func()) *cliErro
 		between()
 	}
 	// Everything between the ledger read and this line is time in which a
-	// prior run's artifact could have changed under the report that quotes it,
-	// so every adopted source is re-hashed against its reference once more
-	// with nothing yet published.
-	for _, ref := range reusedCopies {
-		if err := report.VerifyEvidenceDigest(ref.SourcePath, ref.SHA256); err != nil {
-			return reusedArtifactError("finalize", ref.SourcePath, err)
-		}
+	// prior run's artifact could have changed under the report that quotes it.
+	// Each adopted artifact is copied into this run's directory, the copy is
+	// held to the reference digest, and the copy is what is published: the
+	// bytes verified are the bytes that land, and a change to the original
+	// after this point reaches nothing.
+	staged, cliErr := stageReusedArtifacts("finalize", runDir, req.RunID, reusedCopies)
+	if cliErr != nil {
+		return cliErr
 	}
+	files = append(files, staged...)
 	if _, err := ctrl.Publish(before, files); err != nil {
 		code := "publish-failed"
 		// Publish reports the concurrent-change refusal by message alone.
@@ -332,6 +344,37 @@ func finalizeOp(req *finalizeRequest, stdout io.Writer, between func()) *cliErro
 // digest the reuse reference recorded for those bytes.
 type transcriptCopy struct{ SourcePath, RepoRelPath, SHA256 string }
 
+// stageReusedArtifacts copies every adopted artifact into
+// <runDir>/transcripts/<runID>/ under the name it is published as, and holds
+// each copy to the digest its reference recorded. What comes back publishes
+// from the copies. A copy that does not digest to the reference is the
+// original having changed since the ledger was read, and nothing is published.
+func stageReusedArtifacts(op, runDir, runID string, copies []transcriptCopy) ([]worktree.PublishFile, *cliError) {
+	if len(copies) == 0 {
+		return nil, nil
+	}
+	dir := filepath.Join(runDir, "transcripts", runID)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, &cliError{Code: "run-dir-failed", Message: fmt.Sprintf("%s: %v", op, err)}
+	}
+	staged := make([]worktree.PublishFile, 0, len(copies))
+	for _, ref := range copies {
+		data, err := os.ReadFile(ref.SourcePath)
+		if err != nil {
+			return nil, reusedArtifactError(op, ref.SourcePath, fmt.Errorf("%s: %w: %v", ref.SourcePath, report.ErrEvidenceUnreadable, err))
+		}
+		target := filepath.Join(dir, filepath.Base(filepath.FromSlash(ref.RepoRelPath)))
+		if err := os.WriteFile(target, data, 0o644); err != nil {
+			return nil, &cliError{Code: "run-dir-failed", Message: fmt.Sprintf("%s: stage %s: %v", op, ref.RepoRelPath, err)}
+		}
+		if err := report.VerifyEvidenceDigest(target, ref.SHA256); err != nil {
+			return nil, reusedArtifactError(op, ref.SourcePath, err)
+		}
+		staged = append(staged, worktree.PublishFile{RepoRelPath: ref.RepoRelPath, SourcePath: target})
+	}
+	return staged, nil
+}
+
 // reusedInputs collects the run's adopted records — the completed review-group
 // and mutation-row records of this run's own ledger whose inputs carry a reuse
 // reference — as report inputs. Each one's original artifact is re-hashed
@@ -355,8 +398,15 @@ func reusedInputs(op string, req *finalizeRequest) ([]report.Batch, []report.Mut
 	if cliErr != nil {
 		return nil, nil, nil, cliErr
 	}
-	store, cliErr := openLedger(op, &req.verifyRequest)
+	// A run with no ledger adopted nothing, and is told so from what is on
+	// disk: finalize creates no ledger directory for a run that never opened
+	// one.
+	dir, cliErr := locateLedgerDir(op, &req.verifyRequest)
 	if cliErr != nil {
+		return nil, nil, nil, cliErr
+	}
+	store, cliErr := openExistingLedger(op, dir)
+	if cliErr != nil || store == nil {
 		return nil, nil, nil, cliErr
 	}
 	ledger, cliErr := loadLedgerFor(op, runstate.KindReviewGroup, store)
@@ -376,13 +426,21 @@ func reusedInputs(op string, req *finalizeRequest) ([]report.Batch, []report.Mut
 		mutated  = map[string]bool{}
 	)
 	// A record carrying no reuse reference is this run's own work, which the
-	// parent pastes as it always has; only an adopted one is read here. A
-	// record whose captured shape cannot be decoded is neither: it is a
-	// checkpoint this run cannot read, and reading it as "not adopted" would
-	// drop its rows out of what the ledger is known to answer for.
+	// parent pastes as it always has, and finalize reads nothing more of it;
+	// only an adopted one is read here. An adopted record whose captured shape
+	// cannot be decoded is neither: it is a checkpoint this run cannot read,
+	// and reading it as "not adopted" would drop its rows out of what the
+	// ledger is known to answer for.
 	for i := range ledger.Records {
 		rec := &ledger.Records[i]
 		if rec.Status != runstate.StatusCompleted {
+			continue
+		}
+		carries, err := recordCarriesReuse(rec)
+		if err != nil {
+			return nil, nil, nil, unreadableRecordError(op, rec, err)
+		}
+		if !carries {
 			continue
 		}
 		switch rec.Kind {
@@ -467,6 +525,22 @@ func reusedInputs(op string, req *finalizeRequest) ([]report.Batch, []report.Mut
 	return batches, rows, copies, nil
 }
 
+// recordCarriesReuse reports whether a record's captured inputs name a reuse
+// reference, reading nothing else of them: the one question finalize asks of
+// a record before deciding whether the record is its business at all. Every
+// op writes inputs this decode accepts, so a decode that fails is a reuse
+// field nothing can read — an adopted record in all but name — and is
+// reported rather than passed over as this run's own work.
+func recordCarriesReuse(rec *runstate.Record) (bool, error) {
+	var carried struct {
+		Reuse *evidence.ReuseReference `json:"reuse"`
+	}
+	if err := recordInputs(rec, &carried); err != nil {
+		return false, err
+	}
+	return carried.Reuse != nil, nil
+}
+
 // reusedMutationEntry is one adopted mutation row as the report reads it. The
 // record's outcome decides which document its artifact is: mutation evidence
 // for a row that ran, the unappliable document for one that could not be
@@ -488,12 +562,12 @@ func reusedMutationEntry(
 		}
 		entry.Outcome, entry.Reason = outcomeUnappliable, doc.Reason
 		name, runID, commit, sourceSHA = "reused-mutation-unappliable-", doc.RunID, doc.RepoCommit, doc.SourceSHA256
-	case "environmental":
+	case outcomeEnvironmental:
 		attempt, err := report.LoadAttempt(ref.Artifact.Path)
 		if err != nil {
 			return report.MutationInput{}, transcriptCopy{}, reusedArtifactError(op, ref.Artifact.Path, err)
 		}
-		entry.Outcome, entry.AttemptEvidencePath, entry.Attempt = "environmental", ref.Artifact.Path, attempt
+		entry.Outcome, entry.AttemptEvidencePath, entry.Attempt = outcomeEnvironmental, ref.Artifact.Path, attempt
 		name, runID, commit, sourceSHA = "reused-mutation-attempt-", attempt.RunID, attempt.RepoCommit, attempt.SourceSHA256
 	default:
 		ev, err := report.LoadMutation(ref.Artifact.Path)
@@ -591,10 +665,10 @@ func loadUnappliableEvidence(path string) (*mutationUnappliableEvidence, error) 
 	return &doc, nil
 }
 
-// unreadableRecordError refuses a record of this run whose captured input
-// identity cannot be decoded. It is not "not adopted": nothing can be told
-// about a shape that will not decode, so the checkpoint is reported as
-// unreadable rather than passed over.
+// unreadableRecordError refuses an adopted record of this run whose captured
+// input identity cannot be decoded. It is not "not adopted": the record names
+// a reuse reference, so nothing can be told about what it answers for, and the
+// checkpoint is reported as unreadable rather than passed over.
 func unreadableRecordError(op string, rec *runstate.Record, err error) *cliError {
 	return &cliError{
 		Code:    "ledger-invalid",
