@@ -102,3 +102,15 @@ func reservePath(dir, prefix string) (string, error) {
 	}
 	return tmp, nil
 }
+
+// Prune drops the admin entries of worktrees whose directories no longer
+// exist, so an interrupted run's wreckage does not accumulate in the
+// verifier's own registry and a replacement worktree can be created in its
+// place. It touches the registry alone: the original repository's HEAD, index
+// and working tree are untouched.
+func (c *Controller) Prune() error {
+	if _, err := c.runGit("worktree", "prune"); err != nil {
+		return fmt.Errorf("prune worktrees of %s: %w", c.repoRoot, err)
+	}
+	return nil
+}

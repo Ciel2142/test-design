@@ -348,3 +348,51 @@ func TestQuarantineMoveFailureReturnsOriginalPathWithNamedError(t *testing.T) {
 		t.Errorf("Quarantine error = %v, want it to name %q", err, w.Path)
 	}
 }
+
+func TestPruneDropsAVanishedWorktreeSoCreateRegistersAFreshOne(t *testing.T) {
+	repo := newTestRepo(t)
+	ctrl, err := NewController(repo)
+	if err != nil {
+		t.Fatalf("NewController: %v", err)
+	}
+	before, err := ctrl.TakeSnapshot()
+	if err != nil {
+		t.Fatalf("TakeSnapshot before: %v", err)
+	}
+	gone, err := ctrl.Create("HEAD")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := os.RemoveAll(gone.Path); err != nil {
+		t.Fatalf("RemoveAll: %v", err)
+	}
+	if listed := mustGit(t, repo, "worktree", "list", "--porcelain"); !strings.Contains(listed, gone.Path) {
+		t.Fatalf("worktree list = %q, want the vanished worktree still registered before the prune", listed)
+	}
+
+	if err := ctrl.Prune(); err != nil {
+		t.Fatalf("Prune: %v", err)
+	}
+	if listed := mustGit(t, repo, "worktree", "list", "--porcelain"); strings.Contains(listed, gone.Path) {
+		t.Errorf("worktree list = %q, want the vanished worktree's admin entry dropped", listed)
+	}
+
+	fresh, err := ctrl.Create("HEAD")
+	if err != nil {
+		t.Fatalf("Create after Prune: %v", err)
+	}
+	if fresh.Path == gone.Path {
+		t.Fatalf("Create reused the vanished path %q, want a fresh one", fresh.Path)
+	}
+	if _, err := ctrl.Attach(fresh.Path); err != nil {
+		t.Errorf("Attach(%q) after Prune+Create: %v", fresh.Path, err)
+	}
+
+	after, err := ctrl.TakeSnapshot()
+	if err != nil {
+		t.Fatalf("TakeSnapshot after: %v", err)
+	}
+	if equal, differing := Compare(before, after); !equal {
+		t.Errorf("Compare() equal = false after Prune, want true; differing = %v", differing)
+	}
+}

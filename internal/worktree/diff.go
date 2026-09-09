@@ -70,3 +70,58 @@ func (c *Controller) RestoreTracked(w *Worktree) error {
 	}
 	return nil
 }
+
+var (
+	// ErrResidue is wrapped into RestoreAll's error when the ignored-inclusive
+	// status is still non-empty after the restoration ran.
+	ErrResidue = errors.New("worktree residue remains")
+	// ErrWrongRevision is wrapped into RestoreAll's error when the restored
+	// worktree's HEAD is not the commit it was prepared at.
+	ErrWrongRevision = errors.New("worktree is not at the expected revision")
+)
+
+// RestoreAll returns w to the pristine checkout of commit: it resets the index
+// and working tree to HEAD and removes every untracked path, ignored ones
+// included. It then proves the result rather than trusting it. `git clean`'s
+// own exit status is not that proof — it is nonzero for a path it merely warned
+// about as much as for one it truly left behind — so what survived is read from
+// the ignored-inclusive status afterwards, which names every remaining path
+// (ErrResidue); the revision is read from rev-parse (ErrWrongRevision). Every
+// command runs inside w, so the original repository's HEAD, index, working tree
+// and reflog are untouched.
+func (c *Controller) RestoreAll(w *Worktree, commit string) error {
+	if _, err := runGit(w.Path, "reset", "--hard", "HEAD"); err != nil {
+		return fmt.Errorf("restore all %s: %w", w.Path, err)
+	}
+	_, _ = runGit(w.Path, "clean", "-fdx")
+
+	status, err := runGit(w.Path, "--no-optional-locks", "status", "--porcelain=v1", "--ignored", "--untracked-files=all")
+	if err != nil {
+		return fmt.Errorf("restore all %s: %w", w.Path, err)
+	}
+	if residue := statusPaths(status); len(residue) > 0 {
+		return fmt.Errorf("restore all %s: %w: %s", w.Path, ErrResidue, strings.Join(residue, ", "))
+	}
+
+	head, err := runGit(w.Path, "rev-parse", "HEAD")
+	if err != nil {
+		return fmt.Errorf("restore all %s: %w", w.Path, err)
+	}
+	if got := strings.TrimSpace(head); got != commit {
+		return fmt.Errorf("restore all %s: %w: HEAD is %s, want %s", w.Path, ErrWrongRevision, got, commit)
+	}
+	return nil
+}
+
+// statusPaths names every path a porcelain=v1 status reports, whatever its
+// status letters: after a restoration any line at all is residue.
+func statusPaths(porcelain string) []string {
+	var paths []string
+	for line := range strings.SplitSeq(porcelain, "\n") {
+		if len(line) < 4 {
+			continue
+		}
+		paths = append(paths, unquotePorcelainPath(line[3:]))
+	}
+	return paths
+}
