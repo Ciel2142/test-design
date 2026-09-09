@@ -290,6 +290,21 @@ func TestManifestIncompleteSerializesAsEmptyArrayNeverNull(t *testing.T) {
 	}
 }
 
+func TestRunnerIdentityCommandAndReportGlobsSerializeAsEmptyArrayNeverNull(t *testing.T) {
+	r := RunnerIdentity{Kind: "go-test", Root: "/repo"} // Command and ReportGlobs left nil
+	raw := writeAndRead(t, "runner.json", r)
+
+	if strings.Contains(raw, `"command": null`) || strings.Contains(raw, `"reportGlobs": null`) {
+		t.Errorf("RunnerIdentity nil slices serialized as null:\n%s", raw)
+	}
+	if !strings.Contains(raw, `"command": []`) {
+		t.Errorf("RunnerIdentity.Command did not serialize as []:\n%s", raw)
+	}
+	if !strings.Contains(raw, `"reportGlobs": []`) {
+		t.Errorf("RunnerIdentity.ReportGlobs did not serialize as []:\n%s", raw)
+	}
+}
+
 func TestManifestContextPathsSortedUnion(t *testing.T) {
 	m := &Manifest{
 		Bundle: FileDigest{"b/one.go": "d1", "common.go": "d2"},

@@ -106,6 +106,20 @@ type RunnerIdentity struct {
 	ReportGlobs []string `json:"reportGlobs"`
 }
 
+// MarshalJSON normalizes nil Command and ReportGlobs to empty arrays before
+// encoding so neither field is ever emitted as null.
+func (r RunnerIdentity) MarshalJSON() ([]byte, error) {
+	type alias RunnerIdentity
+	a := alias(r)
+	if a.Command == nil {
+		a.Command = []string{}
+	}
+	if a.ReportGlobs == nil {
+		a.ReportGlobs = []string{}
+	}
+	return canonicalJSON(a)
+}
+
 // runnerEqual reports whether a and b describe the same runner. Command and
 // ReportGlobs are compared as sequences (nil and empty are equal).
 func runnerEqual(a, b RunnerIdentity) bool {
@@ -176,7 +190,9 @@ func (m Manifest) MarshalJSON() ([]byte, error) {
 	return canonicalJSON(a)
 }
 
-// ContextPaths returns the sorted union of Bundle and Reads keys.
+// ContextPaths returns the sorted union of Bundle and Reads keys. It takes a
+// pointer receiver (unlike MarshalJSON's value receiver) only because it has
+// no need to copy the manifest to compute a read-only view.
 func (m *Manifest) ContextPaths() []string {
 	seen := make(map[string]struct{}, len(m.Bundle)+len(m.Reads))
 	for k := range m.Bundle {
@@ -264,6 +280,8 @@ func Mismatch(prior *Manifest, now Probe, rows []string, wantPolicy, wantToolcha
 
 	var missingPaths, changedPaths []string
 	for _, p := range prior.ContextPaths() {
+		// A path present in both Bundle and Reads (expected to be rare) is
+		// judged against its Bundle digest; the Reads value is not consulted.
 		want, ok := prior.Bundle[p]
 		if !ok {
 			want = prior.Reads[p]
