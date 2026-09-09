@@ -142,6 +142,10 @@ obligation.
   coverage directory, or a test file more than one prior context names.
 - `unknown` — a test file no prior manifest names at all.
 
+Ownership is read from every prior group's recorded manifest, including a group that was
+started but never completed or whose artifact no longer verifies: a change to a file such a
+group was handed is still attributed to it, even though the group itself cannot be adopted.
+
 A `shared` or `unknown` path refuses every prior review group and mutation row; an `isolated`
 one refuses only its own group and that group's mutation rows.
 
@@ -149,7 +153,9 @@ An adopted record keeps the prior outcome, failure included: a failed group or r
 failed, and asking for it again is a `repeat`, carrying `repeat.reason`, exactly like
 repeating any other completed obligation — reuse never erases a prior failure by silently
 re-asking it. `trace` and the live attempt are never reuse candidates: they always dispatch
-fresh against this run's own commit, whatever `reuse` adopted.
+fresh against this run's own commit, whatever `reuse` adopted. A mutation row is compared
+against the toolchain of the run that actually executed it, never the toolchain of the review
+whose manifest it borrows as context.
 
 `reuse` refuses per record, never the whole call. One line per reason:
 
@@ -159,11 +165,12 @@ fresh against this run's own commit, whatever `reuse` adopted.
 - `prior-ledger-missing`, `prior-ledger-invalid` — the named run has no ledger, or it will not
   load.
 - `prior-source-mismatch`, `prior-commit-unreachable` — the prior run verified a different
-  document, or names a commit this repository does not have.
+  document, or names a commit this repository does not have or cannot diff against HEAD.
 - `prior-not-completed` — the prior record never finished.
 - `legacy-no-manifest` — the record predates manifest capture; never reconstructed.
-- `artifact-*` — the prior artifact is missing, unreadable, or no longer digests to what the
-  ledger recorded.
+- `artifact-missing:evidence`, `artifact-unreadable:evidence`,
+  `artifact-digest-mismatch:evidence` — the prior artifact is missing, will not decode, or no
+  longer digests to what the ledger recorded.
 - `manifest-version-unsupported` — the manifest's own version is not one this run reads.
 - `manifest-incomplete:<reason>` — the manifest recorded one of its own incompleteness
   reasons.
@@ -176,10 +183,20 @@ fresh against this run's own commit, whatever `reuse` adopted.
   now, or reads differently.
 - `runner-changed`, `toolchain-changed` — the runner identity differs (review and mutation),
   or the toolchain does (mutation only).
-- `policy-unspecified`, `policy-changed` — this request named no `policy` for review, or the
-  critic or its instructions differ (review only).
-- `sources-changed:<row>`, `status-changed:<row>` — this run's trace binds the row to
-  different sources, or a different status, than the prior run's did (review only).
+- `toolchain-unrecorded` — the mutation row's own executing toolchain cannot be established,
+  because neither the row's own recorded manifest nor the prior run's trace document says
+  what it was (mutation only).
+- `policy-unspecified`, `policy-changed` — this run named no `policy` for review, or the
+  critic or its instructions differ from the prior review's (review only).
+- `policy-path-not-absolute:<path>`, `policy-unreadable:<path>` — this run's own
+  `policy.instructions` names a relative or unreadable file, so nothing could be compared
+  against it (review only).
+- `sources-changed:<row>` — this run's trace binds the row to different per-row sources than
+  the group was judged against (review only).
+- `status-changed:<row>` — this run's trace binds the row to a different status than the
+  prior run's trace did; compared only when the prior run's own trace document is still on
+  disk and still verifies, so a cleaned run directory or a repeated trace leaves the question
+  unasked rather than refused (review only).
 - `identity-changed` — a mutation row's own test identity differs from what this run's trace
   now binds (mutation only).
 - `no-review-context` — no prior current review group both verifies and completely covers the

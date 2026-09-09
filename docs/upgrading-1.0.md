@@ -131,8 +131,21 @@ reports already published are unchanged; nothing about them is reinterpreted ret
 `dispatch-inputs.json` gains `claimSha256` per row and top-level `runner` and `toolVersions`,
 the identity a later run's `reuse` compares against. Published reports gain `batches[].reuse`
 and `rows[].layer4.reuse` — present only on an adopted batch or row, carrying the prior run's
-identity and the basis it was judged on — and transcripts gain `reused-*` copies alongside the
-ones a fresh run writes. None of this changes what a run not asking for `reuse` produces.
+identity and the basis it was judged on — and transcripts gain copies of adopted artifacts
+alongside the ones a fresh run writes, named `reused-review-<groupId>.json`,
+`reused-mutation-<rowId>.json`, `reused-mutation-attempt-<rowId>.json`, and
+`reused-mutation-unappliable-<rowId>.json`. None of this changes what a run not asking for
+`reuse` produces.
+
+`finalize` re-verifies every adopted artifact's bytes against its reuse reference once more
+immediately before publishing, and refuses rather than publish anything when an adopted
+record does not hold up: `reused-artifact-changed` (an adopted artifact's bytes no longer
+digest to what its reference recorded), `reuse-identity-mismatch` (an adopted artifact's own
+run/commit/source identity does not match its reference), `reused-row-repasted` (the parent
+also pasted a fresh answer for a row an adopted record already answers for),
+`reuse-not-admitted` (the parent pasted a reuse reference itself, rather than letting one
+reach the report through the run's ledger), and `ledger-invalid` (an adopted record's own
+captured inputs will not decode, so nothing about it can be told either way).
 
 ## What did not change
 
