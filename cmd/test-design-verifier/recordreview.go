@@ -295,16 +295,32 @@ func reviewGroupInputsFor(dispatch *dispatchInputs, rows []string, digest string
 		if !ok {
 			return reviewGroupInputs{}, false
 		}
+		// The primary source comes first, then every contributor's that is not
+		// already listed: the dispatch document repeats the primary among the
+		// contributors, and a list that carried it twice would describe a set of
+		// sources no critic was handed.
 		hashes := []string{}
-		if row.TestSourceSHA256 != "" {
-			hashes = append(hashes, row.TestSourceSHA256)
-		}
-		for _, contributor := range row.Contributors {
-			hashes = append(hashes, contributor.TestSourceSHA256)
+		listed := map[string]bool{}
+		for _, hash := range append([]string{row.TestSourceSHA256}, contributorHashes(row)...) {
+			if hash == "" || listed[hash] {
+				continue
+			}
+			listed[hash] = true
+			hashes = append(hashes, hash)
 		}
 		inputs.Sources[id] = hashes
 	}
 	return inputs, true
+}
+
+// contributorHashes names the source of every bound site crediting a row, in
+// the order the dispatch document lists them.
+func contributorHashes(row dispatchRow) []string {
+	hashes := make([]string, 0, len(row.Contributors))
+	for _, contributor := range row.Contributors {
+		hashes = append(hashes, contributor.TestSourceSHA256)
+	}
+	return hashes
 }
 
 // currentDispatch reads the dispatch inputs of the run's current trace record.

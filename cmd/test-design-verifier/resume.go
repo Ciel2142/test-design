@@ -20,7 +20,8 @@ import (
 // The status an obligation carries when the run has no record of it at all,
 // and the reasons resume names for work it is still owed.
 const (
-	statusNone = "none"
+	statusNone    = "none"
+	statusInvalid = "invalid"
 
 	reasonTraceIncomplete    = "trace-incomplete"
 	reasonNeverStarted       = "never-started"
@@ -199,20 +200,20 @@ func buildResume(req *verifyRequest, src *coverage.Source, repoCommit, ledgerDir
 	traceRec := runstate.Current(ledger, runstate.KindPhase, tracePhaseID)
 	if traceRec != nil {
 		var inputs phaseInputs
-		inputsErr := recordInputs(traceRec, &inputs)
+		// A record whose own inputs cannot be read is a damaged checkpoint, not
+		// work to resume from; it says so rather than reporting a phase that
+		// ran nowhere.
+		reason := invalidReason(traceRec)
+		if err := recordInputs(traceRec, &inputs); err != nil && reason == "" {
+			reason = reasonInputsUnreadable
+		}
 		out.Trace = resumePhase{
-			Status:       string(traceRec.Status),
+			Status:       reportedStatus(traceRec, reason),
 			Outcome:      traceRec.Outcome,
 			EvidencePath: traceRec.Artifacts[artifactEvidence].Path,
 			DispatchPath: traceRec.Artifacts[artifactDispatchInputs].Path,
 			RunDir:       inputs.RunDir,
-			Reason:       invalidReason(traceRec),
-		}
-		// A record whose own inputs cannot be read is a damaged checkpoint, not
-		// work to resume from; it says so rather than reporting a phase that
-		// ran nowhere.
-		if inputsErr != nil && out.Trace.Reason == "" {
-			out.Trace.Reason = reasonInputsUnreadable
+			Reason:       reason,
 		}
 	}
 
@@ -227,6 +228,7 @@ func buildResume(req *verifyRequest, src *coverage.Source, repoCommit, ledgerDir
 		if err != nil {
 			traceComplete = false
 			out.Trace.Reason = reasonDispatchUnreadable
+			out.Trace.Status = reportedStatus(traceRec, out.Trace.Reason)
 		} else {
 			dispatch = payload
 		}
@@ -234,11 +236,11 @@ func buildResume(req *verifyRequest, src *coverage.Source, repoCommit, ledgerDir
 
 	liveRec := runstate.Current(ledger, runstate.KindLiveAttempt, liveAttemptID)
 	if liveRec != nil {
-		out.Live.Status = string(liveRec.Status)
+		out.Live.Reason = invalidReason(liveRec)
+		out.Live.Status = reportedStatus(liveRec, out.Live.Reason)
 		out.Live.Outcome = liveRec.Outcome
 		out.Live.EvidencePath = recordEvidencePath(liveRec)
 		out.Live.RecoveryRequired = liveRec.Status == runstate.StatusStarted
-		out.Live.Reason = invalidReason(liveRec)
 	}
 
 	if !traceComplete {
@@ -260,7 +262,7 @@ func buildResume(req *verifyRequest, src *coverage.Source, repoCommit, ledgerDir
 	required, rowRecords := resumeMutationRows(ledger, dispatch, invalidReason, &out)
 	out.Mutation.Complete = mutationComplete(required, rowRecords, invalidReason)
 
-	out.Pending = pendingObligations(ledger, out, required, rowRecords, groupInvalid, invalidReason)
+	out.Pending = pendingObligations(ledger, out, required, rowRecords)
 	out.Counts = countRecords(ledger, invalidReason, groupInvalid, len(out.Pending))
 	return out
 }
@@ -310,26 +312,26 @@ func resumeGroups(
 			continue
 		}
 		var recorded reviewGroupInputs
-		inputsErr := recordInputs(rec, &recorded)
-		group := resumeGroup{
-			ID:           rec.ID,
-			Rows:         recorded.Rows,
-			Status:       string(rec.Status),
-			Outcome:      rec.Outcome,
-			EvidencePath: rec.Artifacts[artifactEvidence].Path,
-			Reason:       invalidReason(rec),
-		}
-		if group.Rows == nil {
-			group.Rows = []string{}
-		}
-		if inputsErr != nil && group.Reason == "" {
-			group.Reason = reasonInputsUnreadable
+		reason := invalidReason(rec)
+		if err := recordInputs(rec, &recorded); err != nil && reason == "" {
+			reason = reasonInputsUnreadable
 		}
 		if current, ok := reviewGroupInputsFor(dispatch, recorded.Rows, currentDigest); !ok || !groupInputsMatch(recorded, current) {
 			groupInvalid[rec.ID] = reasonInputsChanged
-			if group.Reason == "" {
-				group.Reason = reasonInputsChanged
+			if reason == "" {
+				reason = reasonInputsChanged
 			}
+		}
+		group := resumeGroup{
+			ID:           rec.ID,
+			Rows:         recorded.Rows,
+			Status:       reportedStatus(rec, reason),
+			Outcome:      rec.Outcome,
+			EvidencePath: rec.Artifacts[artifactEvidence].Path,
+			Reason:       reason,
+		}
+		if group.Rows == nil {
+			group.Rows = []string{}
 		}
 		out.Review.Groups = append(out.Review.Groups, group)
 		for _, row := range recorded.Rows {
@@ -349,6 +351,18 @@ func uncoveredRows(dispatch *dispatchInputs, grouped map[string]string) []string
 		}
 	}
 	return uncovered
+}
+
+// reportedStatus is the status an obligation is reported under. A completed
+// record that no longer stands — its artifacts changed, its inputs did, or the
+// run moved off the commit it was made on — is invalid, with the reason as the
+// discriminator. The record itself keeps saying completed: the ledger records
+// what happened, and what happened does not change.
+func reportedStatus(rec *runstate.Record, reason string) string {
+	if rec.Status == runstate.StatusCompleted && reason != "" {
+		return statusInvalid
+	}
+	return string(rec.Status)
 }
 
 func everyGroupSettled(groups []resumeGroup) bool {
@@ -414,16 +428,15 @@ func mutationRowReport(rowID string, rec *runstate.Record, invalidReason func(*r
 		return row
 	}
 	var inputs mutationRowInputs
-	inputsErr := recordInputs(rec, &inputs)
-	row.Status = string(rec.Status)
+	row.Reason = invalidReason(rec)
+	if err := recordInputs(rec, &inputs); err != nil && row.Reason == "" {
+		row.Reason = reasonInputsUnreadable
+	}
+	row.Status = reportedStatus(rec, row.Reason)
 	row.Outcome = rec.Outcome
 	row.EvidencePath = recordEvidencePath(rec)
 	row.RunDir = inputs.RunDir
 	row.WorktreePath = inputs.WorktreePath
-	row.Reason = invalidReason(rec)
-	if inputsErr != nil && row.Reason == "" {
-		row.Reason = reasonInputsUnreadable
-	}
 
 	if rec.Status == runstate.StatusStarted && inputs.RunDir != "" {
 		sites, interrupted, err := mutationProgress(inputs.RunDir)
@@ -492,62 +505,66 @@ func recordEvidencePath(rec *runstate.Record) string {
 	return rec.Artifacts[artifactAttempt].Path
 }
 
-// pendingObligations lists what the run still owes: first the obligations it
-// already opened, in ledger order, then the ones it never opened, in dispatch
-// row order. A completed failure is never pending — it is an answer, not a gap.
+// pendingObligations lists what the run still owes, sectioned by layer so a
+// parent reads it top to bottom: the review groups the run opened and then the
+// rows no group claims, the live layer, then the mutation rows the run opened
+// followed by the ones it never did. Within a section the obligations the
+// ledger already holds come in ledger order and the untouched ones in dispatch
+// row order. Interleaving the whole ledger by position would hand the parent a
+// list that jumps between layers. A completed failure is never pending — it is
+// an answer, not a gap.
 func pendingObligations(
 	ledger *runstate.Ledger,
 	out resumeOutput,
 	required []string,
 	rowRecords map[string]*runstate.Record,
-	groupInvalid map[string]string,
-	invalidReason func(*runstate.Record) string,
 ) []resumePending {
 	requiredRow := make(map[string]bool, len(required))
 	for _, id := range required {
 		requiredRow[id] = true
 	}
+	groupReason := make(map[string]string, len(out.Review.Groups))
+	for _, group := range out.Review.Groups {
+		groupReason[group.ID] = group.Reason
+	}
+	rowReason := make(map[string]string, len(out.Mutation.Rows))
+	for _, row := range out.Mutation.Rows {
+		rowReason[row.RowID] = row.Reason
+	}
 
 	pending := []resumePending{}
-	for i := range ledger.Records {
-		rec := &ledger.Records[i]
-		if rec.Status == runstate.StatusSuperseded || rec.Kind == runstate.KindPhase {
-			continue
-		}
-		switch rec.Kind {
-		case runstate.KindMutationRow:
-			if !requiredRow[rec.ID] {
-				continue
-			}
-		case runstate.KindLiveAttempt:
-			if !out.Live.Required {
-				continue
-			}
-		}
-		if rec.Status == runstate.StatusStarted {
-			pending = append(pending, resumePending{Kind: rec.Kind, ID: rec.ID, Reason: reasonNotCompleted})
-			continue
-		}
-		if runstate.IsFailedOutcome(rec.Kind, rec.Outcome) {
-			continue
-		}
-		reason := invalidReason(rec)
-		if reason == "" && rec.Kind == runstate.KindReviewGroup {
-			reason = groupInvalid[rec.ID]
-		}
-		if reason != "" {
+	add := func(rec *runstate.Record, reported string) {
+		if reason := obligationPendingReason(rec, reported); reason != "" {
 			pending = append(pending, resumePending{Kind: rec.Kind, ID: rec.ID, Reason: reason})
 		}
 	}
 
+	for i := range ledger.Records {
+		rec := &ledger.Records[i]
+		if rec.Kind == runstate.KindReviewGroup && rec.Status != runstate.StatusSuperseded {
+			add(rec, groupReason[rec.ID])
+		}
+	}
 	if len(out.Review.Uncovered) > 0 {
 		pending = append(pending, resumePending{
 			Kind:   runstate.KindReviewGroup,
 			Reason: "uncovered: " + strings.Join(out.Review.Uncovered, ", "),
 		})
 	}
-	if out.Live.Required && runstate.Current(ledger, runstate.KindLiveAttempt, liveAttemptID) == nil {
-		pending = append(pending, resumePending{Kind: runstate.KindLiveAttempt, ID: liveAttemptID, Reason: reasonNeverStarted})
+
+	if out.Live.Required {
+		if rec := runstate.Current(ledger, runstate.KindLiveAttempt, liveAttemptID); rec == nil {
+			pending = append(pending, resumePending{Kind: runstate.KindLiveAttempt, ID: liveAttemptID, Reason: reasonNeverStarted})
+		} else {
+			add(rec, out.Live.Reason)
+		}
+	}
+
+	for i := range ledger.Records {
+		rec := &ledger.Records[i]
+		if rec.Kind == runstate.KindMutationRow && rec.Status != runstate.StatusSuperseded && requiredRow[rec.ID] {
+			add(rec, rowReason[rec.ID])
+		}
 	}
 	for _, id := range required {
 		if rowRecords[id] == nil {
@@ -555,6 +572,19 @@ func pendingObligations(
 		}
 	}
 	return pending
+}
+
+// obligationPendingReason names why a record's obligation is still owed, empty
+// when it is not. reported is the reason resume already published for it, which
+// is what makes the pending entry and the layer's own report agree.
+func obligationPendingReason(rec *runstate.Record, reported string) string {
+	if rec.Status == runstate.StatusStarted {
+		return reasonNotCompleted
+	}
+	if runstate.IsFailedOutcome(rec.Kind, rec.Outcome) {
+		return ""
+	}
+	return reported
 }
 
 // countRecords tallies the ledger: what is open, what is answered, what failed,

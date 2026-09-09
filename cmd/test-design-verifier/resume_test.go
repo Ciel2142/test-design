@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
 
 	"test-design/internal/runstate"
@@ -178,4 +180,117 @@ func TestResume_AfterTraceReportsThePhaseAndTheRowsItOwes(t *testing.T) {
 	if (out.Counts != resumeCounts{Completed: 1, Pending: 3}) {
 		t.Errorf("counts = %+v, want one completed record and three pending obligations", out.Counts)
 	}
+}
+
+// TestResume_PendingIsSectionedByLayer locks the order a parent works through:
+// pending is read top to bottom, so it is sectioned by layer — the review
+// groups the run opened, then the rows no group claims, then the mutation rows
+// it opened, then the ones it never did. Interleaving them by ledger position
+// would hand the parent a list that jumps between layers.
+func TestResume_PendingIsSectionedByLayer(t *testing.T) {
+	repo := fixtureRepo(t)
+	const runID = "resume-pending-sections"
+
+	code, _, stderr := runVerifyOp(t, "trace", verifyRequestJSON(t, repo, runID))
+	if code != exitOK {
+		t.Fatalf("trace exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+	runRecordReview(t, repo, runID, map[string]any{
+		"groupId": "A", "status": "started", "rows": []string{"SC-01", "SC-02"},
+	})
+	prepared := mutationRowInputs{RunnerKind: "go", RunDir: t.TempDir()}
+	startLedgerRecord(t, repo, runID, runstate.KindMutationRow, "SC-10", prepared)
+
+	out := runResume(t, repo, runID)
+
+	want := []resumePending{
+		{Kind: runstate.KindReviewGroup, ID: "A", Reason: "started-not-completed"},
+		{Kind: runstate.KindReviewGroup, ID: "", Reason: "uncovered: " + strings.Join(out.Review.Uncovered, ", ")},
+		{Kind: runstate.KindMutationRow, ID: "SC-10", Reason: "started-not-completed"},
+		{Kind: runstate.KindMutationRow, ID: "SC-07", Reason: "never-started"},
+	}
+	if !reflect.DeepEqual(out.Pending, want) {
+		t.Errorf("pending = %+v, want %+v", out.Pending, want)
+	}
+	if (out.Counts != resumeCounts{Started: 2, Completed: 1, Pending: 4}) {
+		t.Errorf("counts = %+v, want two started obligations, the completed trace and four pending", out.Counts)
+	}
+	row := resumeRow(t, out, "SC-10")
+	if row.Status != "started" {
+		t.Errorf("SC-10 status = %q, want started", row.Status)
+	}
+	if row.Reason != "state-unreadable" {
+		t.Errorf("SC-10 reason = %q, want state-unreadable: the prepared run dir holds no state document", row.Reason)
+	}
+}
+
+// TestResume_ATamperedGroupArtifactIsInvalid keeps completed work from standing
+// on evidence that changed under it. The group's record still says completed —
+// the ledger records what happened — but resume reports the obligation invalid,
+// names the artifact that no longer matches, and offers it again.
+func TestResume_ATamperedGroupArtifactIsInvalid(t *testing.T) {
+	repo := fixtureRepo(t)
+	const runID = "resume-tampered-group"
+
+	code, _, stderr := runVerifyOp(t, "trace", verifyRequestJSON(t, repo, runID))
+	if code != exitOK {
+		t.Fatalf("trace exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+	runRecordReview(t, repo, runID, map[string]any{
+		"groupId": "A", "status": "started", "rows": []string{"SC-01", "SC-02"},
+	})
+	completed := runRecordReview(t, repo, runID, map[string]any{
+		"groupId": "A", "status": "completed",
+		"verdicts": []map[string]string{
+			{"rowId": "SC-01", "verdict": "HOLDS"}, {"rowId": "SC-02", "verdict": "HOLDS"},
+		},
+	})
+
+	out := runResume(t, repo, runID)
+	if group := resumeGroupFor(t, out, "A"); group.Status != "completed" || group.Reason != "" {
+		t.Fatalf("group A = %+v, want a valid completed group before the artifact is touched", group)
+	}
+
+	data, err := os.ReadFile(completed.EvidencePath)
+	if err != nil {
+		t.Fatalf("read %s: %v", completed.EvidencePath, err)
+	}
+	if err := os.WriteFile(completed.EvidencePath, append(data, ' '), 0o644); err != nil {
+		t.Fatalf("write %s: %v", completed.EvidencePath, err)
+	}
+
+	out = runResume(t, repo, runID)
+	group := resumeGroupFor(t, out, "A")
+	if group.Status != "invalid" {
+		t.Errorf("group A status = %q, want invalid", group.Status)
+	}
+	if group.Reason != "artifact-digest-mismatch:evidence" {
+		t.Errorf("group A reason = %q, want artifact-digest-mismatch:evidence", group.Reason)
+	}
+	if out.Counts.Invalid != 1 {
+		t.Errorf("counts.invalid = %d, want 1", out.Counts.Invalid)
+	}
+	if rec := ledgerRecord(t, out, runstate.KindReviewGroup, "A"); rec.Status != runstate.StatusCompleted {
+		t.Errorf("record status = %q, want the ledger to keep %q: what happened does not change", rec.Status, runstate.StatusCompleted)
+	}
+	if !slices.Contains(out.Pending, (resumePending{
+		Kind: runstate.KindReviewGroup, ID: "A", Reason: "artifact-digest-mismatch:evidence",
+	})) {
+		t.Errorf("pending = %+v, want group A offered again", out.Pending)
+	}
+	if out.Review.Complete {
+		t.Error("review.complete = true, want false while a group rests on changed evidence")
+	}
+}
+
+// resumeGroupFor returns the review group resume reported for id.
+func resumeGroupFor(t *testing.T, out resumeOutput, id string) resumeGroup {
+	t.Helper()
+	for _, group := range out.Review.Groups {
+		if group.ID == id {
+			return group
+		}
+	}
+	t.Fatalf("no group %s in %+v", id, out.Review.Groups)
+	return resumeGroup{}
 }

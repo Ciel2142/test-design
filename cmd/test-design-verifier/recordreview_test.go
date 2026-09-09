@@ -191,23 +191,42 @@ func TestRecordReview_GroupLifecycle(t *testing.T) {
 		if want := []string{"SC-01", "SC-02"}; !reflect.DeepEqual(doc.Rows, want) {
 			t.Errorf("rows = %v, want %v", doc.Rows, want)
 		}
-		wantSources := map[string][]string{}
+		// A row's sources are the hashes the dispatch document names for it,
+		// the primary first and none of them twice. The document lists the
+		// primary again among the contributors, so an identity built by
+		// concatenation would record it twice and describe a set of sources no
+		// critic was ever handed.
+		if len(doc.Inputs.Sources) != len(doc.Rows) {
+			t.Errorf("inputs.sources = %v, want one entry per group row %v", doc.Inputs.Sources, doc.Rows)
+		}
 		for _, id := range doc.Rows {
+			got := doc.Inputs.Sources[id]
 			row := dispatchRowFor(t, payload, id)
-			hashes := []string{}
+			distinct := map[string]bool{}
 			if row.TestSourceSHA256 != "" {
-				hashes = append(hashes, row.TestSourceSHA256)
+				distinct[row.TestSourceSHA256] = true
 			}
 			for _, c := range row.Contributors {
-				hashes = append(hashes, c.TestSourceSHA256)
+				if c.TestSourceSHA256 != "" {
+					distinct[c.TestSourceSHA256] = true
+				}
 			}
-			wantSources[id] = hashes
-		}
-		if !reflect.DeepEqual(doc.Inputs.Sources, wantSources) {
-			t.Errorf("inputs.sources = %v, want the dispatch inputs' hashes %v", doc.Inputs.Sources, wantSources)
-		}
-		if got := doc.Inputs.Sources["SC-01"]; len(got) == 0 || got[0] != dispatchRowFor(t, payload, "SC-01").TestSourceSHA256 {
-			t.Errorf("inputs.sources[SC-01] = %v, want the primary source first", got)
+			if len(got) == 0 || got[0] != row.TestSourceSHA256 {
+				t.Errorf("inputs.sources[%s] = %v, want the primary source %s first", id, got, row.TestSourceSHA256)
+			}
+			seen := map[string]bool{}
+			for _, hash := range got {
+				if seen[hash] {
+					t.Errorf("inputs.sources[%s] = %v, want %s listed once", id, got, hash)
+				}
+				if !distinct[hash] {
+					t.Errorf("inputs.sources[%s] = %v, want only hashes the dispatch document names for %s", id, got, id)
+				}
+				seen[hash] = true
+			}
+			if len(seen) != len(distinct) {
+				t.Errorf("inputs.sources[%s] = %v, want every distinct source the dispatch document names (%d)", id, got, len(distinct))
+			}
 		}
 		digest, err := evidence.SHA256File(tr.DispatchPath)
 		if err != nil {
