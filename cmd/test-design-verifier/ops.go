@@ -69,6 +69,10 @@ var ops = map[string]opSpec{
 		newFlags: newResumeFlags,
 		handler:  resumeHandler,
 	},
+	"reuse": {
+		newFlags: newReuseFlags,
+		handler:  reuseHandler,
+	},
 }
 
 func newNextIDFlags() *flag.FlagSet {
