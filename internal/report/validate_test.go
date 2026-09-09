@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"test-design/internal/coverage"
+	"test-design/internal/evidence"
 )
 
 func baseSource() *coverage.Source {
@@ -678,4 +679,94 @@ func TestValidateCanaryUnavailableCannotInheritOrCarryCanary(t *testing.T) {
 			wantRefusal(t, Validate(in), CodeCanaryBookkeeping)
 		})
 	}
+}
+
+// priorReuseRef is the provenance an adopted record carries: the prior run's
+// identity, not this run's.
+func priorReuseRef(outcome string) *evidence.ReuseReference {
+	return &evidence.ReuseReference{
+		PriorRunID:        "run-0",
+		PriorRepoCommit:   "head-0",
+		PriorSourceSHA256: "sha-source-0",
+		PriorSeq:          3,
+		Outcome:           outcome,
+		Artifact:          evidence.FileRef{Path: "runs/run-0/review-g1-3.json", SHA256: "digest-0"},
+		Basis: evidence.ReuseBasis{
+			PriorCommit:  "head-0",
+			ClaimRows:    []string{"SC-03"},
+			ContextFiles: 2,
+			Policy:       "matched",
+			Toolchain:    "matched",
+		},
+	}
+}
+
+// adoptedBatch is what reuse appends: the prior run's runId, no canary, no
+// inheritance, no canaryUnavailableReason.
+func adoptedBatch() Batch {
+	return Batch{
+		BatchID:  "reuse:g1",
+		RunID:    "run-0",
+		Rows:     []string{"SC-03"},
+		Verdicts: []CriticVerdict{{RowID: "SC-03", Verdict: "HOLDS"}},
+		Reuse:    priorReuseRef("HOLDS"),
+	}
+}
+
+func reusedBatchInputs() *Inputs {
+	in := baseInputs()
+	in.Batches[2] = adoptedBatch()
+	return in
+}
+
+func reusedMutationInputs() *Inputs {
+	in := baseInputs()
+	in.Mutations[0].Reuse = priorReuseRef("caught")
+	in.Mutations[0].Evidence.RunID = "run-0"
+	in.Mutations[0].Evidence.RepoCommit = "head-0"
+	in.Mutations[0].Evidence.SourceSHA256 = "sha-source-0"
+	return in
+}
+
+func TestValidateReusedBatchKeepsPriorRunIDAndSkipsCanaryBookkeeping(t *testing.T) {
+	if err := Validate(reusedBatchInputs()); err != nil {
+		t.Fatalf("Validate over an adopted batch: %v", err)
+	}
+}
+
+func TestValidateReusedBatchRunIDDiffersFromReference(t *testing.T) {
+	in := reusedBatchInputs()
+	in.Batches[2].RunID = "run-9"
+	wantRefusal(t, Validate(in), CodeReuseIdentityMismatch)
+}
+
+func TestValidateNonReusedBatchStillNeedsCanaryBookkeeping(t *testing.T) {
+	in := reusedBatchInputs()
+	in.Batches[2].RunID = "run-1"
+	in.Batches[2].Reuse = nil
+	wantRefusal(t, Validate(in), CodeCanaryBookkeeping)
+}
+
+func TestValidateNonReusedBatchWithForeignRunIDIsStale(t *testing.T) {
+	in := reusedBatchInputs()
+	in.Batches[2].Reuse = nil
+	wantRefusal(t, Validate(in), CodeStaleEvidence)
+}
+
+func TestValidateReusedMutationEntryKeepsPriorIdentity(t *testing.T) {
+	if err := Validate(reusedMutationInputs()); err != nil {
+		t.Fatalf("Validate over an adopted mutation entry: %v", err)
+	}
+}
+
+func TestValidateReusedMutationEntryIdentityDiffersFromReference(t *testing.T) {
+	in := reusedMutationInputs()
+	in.Mutations[0].Evidence.RepoCommit = "head-9"
+	wantRefusal(t, Validate(in), CodeReuseIdentityMismatch)
+}
+
+func TestValidateNonReusedMutationEntryWithForeignIdentityIsStale(t *testing.T) {
+	in := reusedMutationInputs()
+	in.Mutations[0].Reuse = nil
+	wantRefusal(t, Validate(in), CodeStaleEvidence)
 }

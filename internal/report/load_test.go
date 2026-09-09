@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"test-design/internal/evidence"
 )
 
 func TestLoadTraceValidDocument(t *testing.T) {
@@ -241,5 +243,82 @@ func TestLoadEvidenceRequiresProvenance(t *testing.T) {
 				})
 			}
 		})
+	}
+}
+
+func reviewFixtureDigest(t *testing.T, path string) string {
+	t.Helper()
+	sum, err := evidence.SHA256File(path)
+	if err != nil {
+		t.Fatalf("SHA256File %s: %v", path, err)
+	}
+	return sum
+}
+
+func TestLoadReviewArtifactValidDocument(t *testing.T) {
+	path := filepath.Join("testdata", "review-valid.json")
+	art, err := LoadReviewArtifact(path, reviewFixtureDigest(t, path))
+	if err != nil {
+		t.Fatalf("LoadReviewArtifact: %v", err)
+	}
+	if art.RunID != "run-2026-08-31-0001" {
+		t.Errorf("RunID = %q", art.RunID)
+	}
+	if art.RepoCommit != "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678" {
+		t.Errorf("RepoCommit = %q", art.RepoCommit)
+	}
+	if art.SourceSHA256 != "9f2b6c1e4a7d8f0351c6a9e2d4b7f8091a2c3d4e5f60718293a4b5c6d7e8f901" {
+		t.Errorf("SourceSHA256 = %q", art.SourceSHA256)
+	}
+	if art.GroupID != "order-create" {
+		t.Errorf("GroupID = %q", art.GroupID)
+	}
+	if len(art.Rows) != 2 || art.Rows[0] != "SC-01" {
+		t.Errorf("Rows = %v", art.Rows)
+	}
+	if len(art.Verdicts) != 2 || art.Verdicts[0].Verdict != "HOLDS" || art.Verdicts[1].RowID != "SC-02" {
+		t.Errorf("Verdicts = %+v", art.Verdicts)
+	}
+}
+
+func TestLoadReviewArtifactDigestMismatchRefuses(t *testing.T) {
+	path := filepath.Join("testdata", "review-valid.json")
+	_, err := LoadReviewArtifact(path, "0000000000000000000000000000000000000000000000000000000000000000")
+	if !errors.Is(err, ErrEvidenceDigestMismatch) {
+		t.Fatalf("LoadReviewArtifact digest mismatch: err = %v, want ErrEvidenceDigestMismatch", err)
+	}
+}
+
+func TestLoadReviewArtifactMissingFileReturnsUnreadable(t *testing.T) {
+	_, err := LoadReviewArtifact(filepath.Join("testdata", "review-does-not-exist.json"), "0000000000000000000000000000000000000000000000000000000000000000")
+	if !errors.Is(err, ErrEvidenceUnreadable) {
+		t.Fatalf("LoadReviewArtifact missing file: err = %v, want ErrEvidenceUnreadable", err)
+	}
+	if errors.Is(err, ErrEvidenceDigestMismatch) {
+		t.Errorf("LoadReviewArtifact missing file also reported a digest mismatch: %v", err)
+	}
+}
+
+func TestLoadReviewArtifactMissingGroupIDNamesField(t *testing.T) {
+	path := filepath.Join("testdata", "review-missing-groupid.json")
+	_, err := LoadReviewArtifact(path, reviewFixtureDigest(t, path))
+	var fieldErr *FieldMissingError
+	if !errors.As(err, &fieldErr) {
+		t.Fatalf("LoadReviewArtifact missing groupId: err = %v, want *FieldMissingError", err)
+	}
+	if fieldErr.Field != "groupId" {
+		t.Errorf("Field = %q, want %q", fieldErr.Field, "groupId")
+	}
+}
+
+func TestLoadReviewArtifactNoVerdictsNamesField(t *testing.T) {
+	path := filepath.Join("testdata", "review-no-verdicts.json")
+	_, err := LoadReviewArtifact(path, reviewFixtureDigest(t, path))
+	var fieldErr *FieldMissingError
+	if !errors.As(err, &fieldErr) {
+		t.Fatalf("LoadReviewArtifact with no verdicts: err = %v, want *FieldMissingError", err)
+	}
+	if fieldErr.Field != "verdicts" {
+		t.Errorf("Field = %q, want %q", fieldErr.Field, "verdicts")
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"test-design/internal/coverage"
+	"test-design/internal/evidence"
 	"test-design/internal/live"
 )
 
@@ -27,6 +28,12 @@ const (
 	CodeInvalidMutationOutcome  = "invalid-mutation-outcome"
 	CodeInvalidVerdict          = "invalid-verdict"
 	CodeLiveDecisionIncomplete  = "live-decision-incomplete"
+	// CodeReuseNotAdmitted refuses a parent-pasted batch or layer-4 row that
+	// carries a reuse reference: only reuse itself may adopt a prior record.
+	CodeReuseNotAdmitted = "reuse-not-admitted"
+	// CodeReuseIdentityMismatch refuses an adopted record whose own identity
+	// differs from the prior identity its reuse reference names.
+	CodeReuseIdentityMismatch = "reuse-identity-mismatch"
 )
 
 type RefusalError struct {
@@ -100,11 +107,28 @@ func validateStaleness(in *Inputs) error {
 		}
 	}
 	for _, b := range in.Batches {
+		if b.Reuse != nil {
+			// An adopted batch keeps the prior run's identity; it is measured
+			// against its reuse reference, never against this run.
+			if b.RunID != b.Reuse.PriorRunID {
+				return refuse(CodeReuseIdentityMismatch, "batch %s runId %q does not match its reuse reference prior run %q", b.BatchID, b.RunID, b.Reuse.PriorRunID)
+			}
+			continue
+		}
 		if b.RunID != in.RunID {
 			return refuse(CodeStaleEvidence, "batch %s runId %q does not match request runId %q", b.BatchID, b.RunID, in.RunID)
 		}
 	}
 	for _, m := range in.Mutations {
+		if m.Reuse != nil {
+			if err := matchesReuse(m, m.Reuse); err != nil {
+				return err
+			}
+			if ev := m.Attempt; ev != nil && ev.RowID != m.RowID {
+				return refuse(CodeMutationRowMismatch, "row %s mutation attempt names row %s", m.RowID, ev.RowID)
+			}
+			continue
+		}
 		if ev := m.Evidence; ev != nil {
 			if err := matches("mutation", ev.RunID, ev.RepoCommit, ev.Source, ev.SourceSHA256); err != nil {
 				return err
@@ -117,6 +141,30 @@ func validateStaleness(in *Inputs) error {
 			if ev.RowID != m.RowID {
 				return refuse(CodeMutationRowMismatch, "row %s mutation attempt names row %s", m.RowID, ev.RowID)
 			}
+		}
+	}
+	return nil
+}
+
+// matchesReuse checks an adopted layer-4 entry's loaded evidence against the
+// prior identity its reuse reference names, not against this run's trace.
+func matchesReuse(m MutationInput, ref *evidence.ReuseReference) error {
+	check := func(kind, runID, commit, sha string) error {
+		if runID != ref.PriorRunID || commit != ref.PriorRepoCommit || sha != ref.PriorSourceSHA256 {
+			return refuse(CodeReuseIdentityMismatch,
+				"row %s reused %s identity (run %q, commit %q, source %q) does not match its reuse reference (run %q, commit %q, source %q)",
+				m.RowID, kind, runID, commit, sha, ref.PriorRunID, ref.PriorRepoCommit, ref.PriorSourceSHA256)
+		}
+		return nil
+	}
+	if ev := m.Evidence; ev != nil {
+		if err := check("mutation", ev.RunID, ev.RepoCommit, ev.SourceSHA256); err != nil {
+			return err
+		}
+	}
+	if ev := m.Attempt; ev != nil {
+		if err := check("mutation attempt", ev.RunID, ev.RepoCommit, ev.SourceSHA256); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -218,6 +266,11 @@ func validateLayer2(in *Inputs, active []coverage.Row, gaps map[string]bool) err
 	}
 
 	for _, b := range in.Batches {
+		if b.Reuse != nil {
+			// The prior run's review record carries no canary fields; an
+			// adopted batch inherits its catch from the run it came from.
+			continue
+		}
 		if err := validateCanaryBookkeeping(b, byID, voided); err != nil {
 			return err
 		}

@@ -442,6 +442,11 @@ func deriveLayer4(rs *reasonSet, in *Inputs, active []coverage.Row, gaps map[str
 			rs.add(sevBlocked, layer4, row.ID, "invalid-verdict",
 				"the row is layer-4 applicable but its entry carries no loaded evidence and no outcome")
 		}
+		if m.Reuse != nil {
+			ref := refs[row.ID]
+			ref.Reuse = m.Reuse
+			refs[row.ID] = ref
+		}
 	}
 
 	sum.Status = layerStatus(rs, layer4, len(applicable), sum.NA)
@@ -509,6 +514,7 @@ func deriveBatches(batches []Batch) []BatchReport {
 			CanaryUnavailableReason: b.CanaryUnavailableReason,
 			Voided:                  voided[b.BatchID],
 			Verdicts:                b.Verdicts,
+			Reuse:                   b.Reuse,
 		}
 		if b.Canary != nil {
 			canary := *b.Canary

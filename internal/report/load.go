@@ -12,6 +12,7 @@ import (
 var (
 	ErrEvidenceUnreadable     = errors.New("evidence unreadable")
 	ErrEvidenceSchemaMismatch = errors.New("evidence schema mismatch")
+	ErrEvidenceDigestMismatch = errors.New("evidence digest mismatch")
 )
 
 type FieldMissingError struct {
@@ -142,4 +143,45 @@ func requireIdentity(path, commit, source, sha string) error {
 		return &FieldMissingError{Path: path, Field: "sourceSha256"}
 	}
 	return nil
+}
+
+// VerifyEvidenceDigest re-hashes path and compares it to wantSHA256, wrapping
+// evidence.VerifyFile into this package's error vocabulary:
+// ErrEvidenceDigestMismatch when the bytes changed, ErrEvidenceUnreadable when
+// the file is missing or unreadable.
+func VerifyEvidenceDigest(path, wantSHA256 string) error {
+	err := evidence.VerifyFile(path, wantSHA256)
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, evidence.ErrDigestMismatch):
+		return fmt.Errorf("%s: %w", path, ErrEvidenceDigestMismatch)
+	default:
+		return fmt.Errorf("%s: %w: %v", path, ErrEvidenceUnreadable, err)
+	}
+}
+
+// LoadReviewArtifact verifies path against wantSHA256 before reading it, then
+// decodes the retained review document and requires the identity fields, a
+// groupId and at least one verdict.
+func LoadReviewArtifact(path, wantSHA256 string) (*ReviewArtifact, error) {
+	if err := VerifyEvidenceDigest(path, wantSHA256); err != nil {
+		return nil, err
+	}
+	var art ReviewArtifact
+	if err := decodeEvidence(path, &art); err != nil {
+		return nil, err
+	}
+	switch {
+	case art.RunID == "":
+		return nil, &FieldMissingError{Path: path, Field: "runId"}
+	case art.GroupID == "":
+		return nil, &FieldMissingError{Path: path, Field: "groupId"}
+	case len(art.Verdicts) == 0:
+		return nil, &FieldMissingError{Path: path, Field: "verdicts"}
+	}
+	if err := requireIdentity(path, art.RepoCommit, art.Source, art.SourceSHA256); err != nil {
+		return nil, err
+	}
+	return &art, nil
 }

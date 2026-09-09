@@ -158,6 +158,19 @@ type CriticVerdict struct {
 	Reason  string `json:"reason"`
 }
 
+// ReviewArtifact is the retained review-<groupId>-<seq>.json document a
+// prior run left behind; a reusing run decodes it after verifying its digest.
+type ReviewArtifact struct {
+	evidence.Envelope
+	RunID        string          `json:"runId"`
+	RepoCommit   string          `json:"repoCommit"`
+	Source       string          `json:"source"`
+	SourceSHA256 string          `json:"sourceSha256"`
+	GroupID      string          `json:"groupId"`
+	Rows         []string        `json:"rows"`
+	Verdicts     []CriticVerdict `json:"verdicts"`
+}
+
 type Batch struct {
 	BatchID                 string          `json:"batchId"`
 	DispatchID              string          `json:"dispatchId"`
@@ -168,6 +181,9 @@ type Batch struct {
 	CanaryUnavailableReason string          `json:"canaryUnavailableReason,omitempty"`
 	Voided                  bool            `json:"voided,omitempty"`
 	Verdicts                []CriticVerdict `json:"verdicts"`
+	// Reuse is set when this batch was adopted from an earlier run; it names
+	// that run's identity, sequence number, outcome and retained artifact.
+	Reuse *evidence.ReuseReference `json:"reuse,omitempty"`
 }
 
 type MutationInput struct {
@@ -178,6 +194,8 @@ type MutationInput struct {
 	AttemptEvidencePath string            `json:"attemptEvidencePath,omitempty"`
 	Evidence            *MutationEvidence `json:"-"`
 	Attempt             *Attempt          `json:"-"`
+	// Reuse is set when this entry was adopted from an earlier run.
+	Reuse *evidence.ReuseReference `json:"reuse,omitempty"`
 }
 
 type Inputs struct {
@@ -213,8 +231,9 @@ type CriticRef struct {
 }
 
 type MutationRef struct {
-	Status string   `json:"status"`
-	Sites  []string `json:"sites,omitempty"`
+	Status string                   `json:"status"`
+	Sites  []string                 `json:"sites,omitempty"`
+	Reuse  *evidence.ReuseReference `json:"reuse,omitempty"`
 }
 
 type RowReport struct {
@@ -228,15 +247,16 @@ type RowReport struct {
 }
 
 type BatchReport struct {
-	BatchID                 string          `json:"batchId"`
-	DispatchID              string          `json:"dispatchId"`
-	RunID                   string          `json:"runId"`
-	Rows                    []string        `json:"rows"`
-	Canary                  *Canary         `json:"canary,omitempty"`
-	InheritsFrom            string          `json:"inheritsFrom,omitempty"`
-	CanaryUnavailableReason string          `json:"canaryUnavailableReason,omitempty"`
-	Voided                  bool            `json:"voided"`
-	Verdicts                []CriticVerdict `json:"verdicts"`
+	BatchID                 string                   `json:"batchId"`
+	DispatchID              string                   `json:"dispatchId"`
+	RunID                   string                   `json:"runId"`
+	Rows                    []string                 `json:"rows"`
+	Canary                  *Canary                  `json:"canary,omitempty"`
+	InheritsFrom            string                   `json:"inheritsFrom,omitempty"`
+	CanaryUnavailableReason string                   `json:"canaryUnavailableReason,omitempty"`
+	Voided                  bool                     `json:"voided"`
+	Verdicts                []CriticVerdict          `json:"verdicts"`
+	Reuse                   *evidence.ReuseReference `json:"reuse,omitempty"`
 }
 
 type TranscriptRef struct {

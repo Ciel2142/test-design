@@ -1086,3 +1086,66 @@ func TestDeriveLayer1PrefersRedOverGapAcrossContributors(t *testing.T) {
 		t.Errorf("reason detail = %q, want it to name the failing contributor", rs.list[0].Detail)
 	}
 }
+
+func TestComputeCopiesReuseIntoBatchReportAndMutationRef(t *testing.T) {
+	in := greenInputs()
+	batchRef := &evidence.ReuseReference{
+		PriorRunID:        "run-0",
+		PriorRepoCommit:   "head-0",
+		PriorSourceSHA256: "sha-source-0",
+		PriorSeq:          2,
+		Outcome:           "HOLDS",
+		Artifact:          evidence.FileRef{Path: "runs/run-0/review-g1-2.json", SHA256: "digest-review"},
+		Basis:             evidence.ReuseBasis{PriorCommit: "head-0", ClaimRows: []string{"SC-02", "SC-03"}, ContextFiles: 3, Policy: "matched", Toolchain: "matched"},
+	}
+	in.Batches[2] = Batch{
+		BatchID: "reuse:g1",
+		RunID:   "run-0",
+		Rows:    []string{"SC-02", "SC-03"},
+		Verdicts: []CriticVerdict{
+			{RowID: "SC-02", Verdict: "HOLDS"},
+			{RowID: "SC-03", Verdict: "HOLDS"},
+		},
+		Reuse: batchRef,
+	}
+	mutationRef := &evidence.ReuseReference{
+		PriorRunID:        "run-0",
+		PriorRepoCommit:   "head-0",
+		PriorSourceSHA256: "sha-source-0",
+		PriorSeq:          5,
+		Outcome:           "caught",
+		Artifact:          evidence.FileRef{Path: "runs/run-0/mutation-SC-02.json", SHA256: "digest-mutation"},
+		Basis:             evidence.ReuseBasis{PriorCommit: "head-0", ClaimRows: []string{"SC-02"}, ContextFiles: 1, Policy: "not-applicable", Toolchain: "matched"},
+	}
+	in.Mutations[0].Reuse = mutationRef
+	in.Mutations[0].Evidence.RunID = "run-0"
+	in.Mutations[0].Evidence.RepoCommit = "head-0"
+	in.Mutations[0].Evidence.SourceSHA256 = "sha-source-0"
+
+	rep := mustCompute(t, in)
+
+	var adopted *BatchReport
+	for i := range rep.Batches {
+		if rep.Batches[i].BatchID == "reuse:g1" {
+			adopted = &rep.Batches[i]
+		}
+	}
+	if adopted == nil {
+		t.Fatalf("Batches = %+v, want the adopted batch reuse:g1", rep.Batches)
+	}
+	if !reflect.DeepEqual(adopted.Reuse, batchRef) {
+		t.Errorf("adopted batch Reuse = %+v, want %+v", adopted.Reuse, batchRef)
+	}
+	for _, b := range rep.Batches {
+		if b.BatchID != "reuse:g1" && b.Reuse != nil {
+			t.Errorf("batch %s Reuse = %+v, want nil", b.BatchID, b.Reuse)
+		}
+	}
+
+	if got := rowOf(t, rep, "SC-02").Layer4; !reflect.DeepEqual(got.Reuse, mutationRef) {
+		t.Errorf("SC-02 Layer4 Reuse = %+v, want %+v", got.Reuse, mutationRef)
+	}
+	if got := rowOf(t, rep, "SC-03").Layer4; got.Reuse != nil {
+		t.Errorf("SC-03 Layer4 Reuse = %+v, want nil", got.Reuse)
+	}
+}
