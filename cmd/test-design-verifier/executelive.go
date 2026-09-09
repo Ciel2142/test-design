@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -13,6 +15,7 @@ import (
 	"test-design/internal/coverage"
 	"test-design/internal/evidence"
 	"test-design/internal/live"
+	"test-design/internal/runstate"
 	"test-design/internal/worktree"
 )
 
@@ -57,6 +60,16 @@ type liveRawArtifact struct {
 	SHA256 string `json:"sha256"`
 }
 
+// liveRecovery is the record of an attempt that found a prior attempt for this
+// run: the profile's own cleanup commands, run as recovery before anything is
+// started, and whether they proved removal. It is absent from a first attempt,
+// which has nothing to recover.
+type liveRecovery struct {
+	Performed bool               `json:"performed"`
+	OK        bool               `json:"ok"`
+	Steps     []live.ReducedStep `json:"steps"`
+}
+
 type liveEvidence struct {
 	evidence.Envelope
 	RunID           string             `json:"runId"`
@@ -78,7 +91,8 @@ type liveEvidence struct {
 	FinishedAt      string             `json:"finishedAt"`
 	// stamped only after the compare; blocked run leaves evidence behind and
 	// finalize must not read it as a good run
-	SnapshotEqual bool `json:"snapshotEqual"`
+	SnapshotEqual bool          `json:"snapshotEqual"`
+	Recovery      *liveRecovery `json:"recovery,omitempty"`
 }
 
 type executeLiveOutput struct {
@@ -89,6 +103,7 @@ type executeLiveOutput struct {
 	CleanupOK       bool              `json:"cleanupOK"`
 	CleanupFailed   bool              `json:"cleanupFailed"`
 	UnboundFailures []liveStepFailure `json:"unboundFailures"`
+	Recovery        *liveRecovery     `json:"recovery,omitempty"`
 }
 
 func decodeExecuteLiveRequest(op string, requestBody []byte) (*executeLiveRequest, *cliError) {
@@ -190,6 +205,40 @@ func executeLiveOp(req *executeLiveRequest, stdout io.Writer, between func()) (o
 		return &cliError{Code: planRefusalCode(err), Message: fmt.Sprintf("execute-live: %v", err)}
 	}
 
+	// The attempt is opened once the plan is known to be runnable and before
+	// any environment is: a run whose live layer is already answered is refused
+	// here, where nothing has been started to recover from. The run identity is
+	// the prepared state's, not the request's — the run directory names which
+	// run this attempt belongs to.
+	const kind = runstate.KindLiveAttempt
+	ledgerReq := req.verifyRequest
+	ledgerReq.RunID = st.RunID
+	repoCommit, cliErr := headCommit("execute-live", req.RepoRoot)
+	if cliErr != nil {
+		return cliErr
+	}
+	store, cliErr := openLedger("execute-live", &ledgerReq)
+	if cliErr != nil {
+		return cliErr
+	}
+	ledger, cliErr := loadLedgerFor("execute-live", kind, store)
+	if cliErr != nil {
+		return cliErr
+	}
+	prev := runstate.Current(ledger, kind, liveAttemptID)
+	if prev != nil && prev.Status == runstate.StatusCompleted && repeatReason(&ledgerReq) == "" {
+		return completedRecordRefusal("execute-live", kind, liveAttemptID)
+	}
+	identity := ledgerIdentity(&ledgerReq, req.RepoRoot, repoCommit, src)
+	if _, err := store.Start(identity, kind, liveAttemptID, liveAttemptInputs{
+		RunDir:       req.RunDir,
+		WorktreePath: st.WorktreePath,
+		ProfilePath:  st.ProfilePath,
+		PlanSHA256:   sha256Bytes(planData),
+	}, "", repeatReason(&ledgerReq)); err != nil {
+		return ledgerError("execute-live", kind, err)
+	}
+
 	ctrl, err := worktree.NewController(req.RepoRoot)
 	if err != nil {
 		return &cliError{Code: "controller-failed", Message: fmt.Sprintf("execute-live: %v", err)}
@@ -212,6 +261,9 @@ func executeLiveOp(req *executeLiveRequest, stdout io.Writer, between func()) (o
 	}()
 
 	run := newLiveRun(req.RunDir, wt.Path, &descriptor)
+	// Any prior record — started, or completed and now repeated — means this
+	// run already owned live resources once.
+	run.recover = prev != nil
 	run.execute(pl)
 
 	ev := liveEvidence{
@@ -233,6 +285,7 @@ func executeLiveOp(req *executeLiveRequest, stdout io.Writer, between func()) (o
 		RawArtifacts:    run.rawArtifacts,
 		StartedAt:       run.startedAt,
 		FinishedAt:      run.finishedAt,
+		Recovery:        run.recovery(),
 	}
 	evidencePath := filepath.Join(req.RunDir, liveEvidenceFile)
 	if err := evidence.WriteJSON(evidencePath, &ev); err != nil {
@@ -269,6 +322,16 @@ func executeLiveOp(req *executeLiveRequest, stdout io.Writer, between func()) (o
 		return &cliError{Code: "evidence-write-failed", Message: fmt.Sprintf("execute-live: stamp snapshot equality: %v", err)}
 	}
 
+	// The attempt is closed only once the repository has been proved untouched:
+	// an attempt that changed its own subject is not an answer, and leaving the
+	// record started is what tells a resumed run to recover before repeating.
+	if _, err := store.Complete(identity, kind, liveAttemptID, liveAttemptOutcome(&ev),
+		map[string]string{artifactEvidence: evidencePath}, ""); err != nil {
+		cliErr := ledgerError("execute-live", kind, err)
+		cliErr.Message = fmt.Sprintf("%s; the evidence stands at %s", cliErr.Message, evidencePath)
+		return cliErr
+	}
+
 	out := executeLiveOutput{
 		Envelope:        ev.Envelope,
 		RunID:           ev.RunID,
@@ -277,6 +340,7 @@ func executeLiveOp(req *executeLiveRequest, stdout io.Writer, between func()) (o
 		CleanupOK:       ev.CleanupOK,
 		CleanupFailed:   ev.CleanupFailed,
 		UnboundFailures: ev.UnboundFailures,
+		Recovery:        ev.Recovery,
 	}
 	return writeStdout(stdout, out)
 }
@@ -293,6 +357,35 @@ func planRefusalCode(err error) string {
 		return "plan-invalid"
 	}
 	return token
+}
+
+// liveAttemptOutcome is the one word the run's ledger keeps for this attempt.
+// A row that failed outranks everything: the layer has an answer and it is a
+// bad one. Short of that, anything the attempt could not prove — an unjudged
+// row, an unproven removal, a failure no row carries, a command that never
+// completed — leaves the attempt inconclusive rather than passing.
+func liveAttemptOutcome(ev *liveEvidence) string {
+	inconclusive := false
+	for _, v := range ev.RowVerdicts {
+		switch v.Verdict {
+		case verdictFail:
+			return "fail"
+		case verdictInconclusive:
+			inconclusive = true
+		}
+	}
+	if inconclusive || !ev.CleanupOK || len(ev.UnboundFailures) > 0 || len(ev.ExecutionErrors) > 0 {
+		return "inconclusive"
+	}
+	return "pass"
+}
+
+// sha256Bytes digests the plan document as the op received it, which is what
+// the attempt's input identity pins: a repeated attempt against a rewritten
+// plan is a different attempt, and the record says so.
+func sha256Bytes(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }
 
 // layer1GapRows reads the trace run's evidence: a row named by a gap or
@@ -354,6 +447,13 @@ type liveRun struct {
 	cleanupFailed bool
 	startedAt     string
 	finishedAt    string
+
+	// recover is set when this run's ledger already held an attempt for the
+	// run, in any state; recoveryFailed and recoverySteps are what the
+	// recovery it then performs left behind.
+	recover        bool
+	recoveryFailed bool
+	recoverySteps  []live.ReducedStep
 }
 
 func newLiveRun(runDir, workDir string, descriptor *live.Profile) *liveRun {
@@ -376,9 +476,32 @@ func newLiveRun(runDir, workDir string, descriptor *live.Profile) *liveRun {
 	}
 }
 
+// recoveryExecutionError is the one entry a failed recovery adds to
+// executionErrors. The per-command causes are recorded beside it; this names
+// the decision the run made because of them.
+const recoveryExecutionError = "recovery: owned cleanup did not prove removal before a fresh start"
+
 func (r *liveRun) execute(pl *live.Plan) {
 	r.startedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	defer func() { r.finishedAt = time.Now().UTC().Format(time.RFC3339Nano) }()
+
+	// A run that follows an earlier attempt for the same run ID runs the
+	// profile's own cleanup as recovery first: the resources the interrupted
+	// attempt owns are exactly the ones those commands remove, and a fresh
+	// start over a half-live environment would judge rows against something
+	// nobody designed. Unless the recovery proves removal the attempt stops
+	// here, with nothing started and every row left unjudged.
+	if r.recover {
+		steps, completedAll, failed := r.runCleanupCommands("recovery")
+		r.recoverySteps = steps
+		if !r.provedRemoval(completedAll, failed) {
+			r.recoveryFailed = true
+			r.cleanupFailed = failed
+			r.cleanupOK = false
+			r.executionErrors = append(r.executionErrors, recoveryExecutionError)
+			return
+		}
+	}
 
 	for i, argv := range r.descriptor.Start {
 		step := live.Step{
@@ -482,19 +605,21 @@ func (r *liveRun) runPlanStep(phase string, index int, step live.Step, applyVerd
 	return reduced
 }
 
-// runProfileCleanup runs every cleanup command the descriptor declares, each
-// under the implicit exit-code 0 and the configured last one under
-// cleanupEvidence as well, so cleanupOK is the profile author's own proof that
-// the run left nothing behind. The two booleans are a tri-state: a known
-// failure of any command outranks a command that never completed, which in turn
-// keeps cleanupOK from claiming a clean run. Neither set means the removal is
-// simply unproven, and the cause is in executionErrors.
-func (r *liveRun) runProfileCleanup() {
+// runCleanupCommands runs every cleanup command the descriptor declares under
+// phase — "cleanup" for the end-of-run removal, "recovery" for the same
+// commands run first by a restarted attempt. Each carries the implicit
+// exit-code 0 and the configured last one carries cleanupEvidence as well, so
+// what the caller reads back is the profile author's own proof that nothing was
+// left behind. completedAll is false when any command never completed and
+// failed is true when any that did failed its predicates; the caller turns that
+// pair into its own tri-state.
+func (r *liveRun) runCleanupCommands(phase string) (steps []live.ReducedStep, completedAll, failed bool) {
+	steps = []live.ReducedStep{}
+	completedAll = true
 	last := len(r.descriptor.Cleanup) - 1
-	completed := true
 	for i, argv := range r.descriptor.Cleanup {
 		step := live.Step{
-			Expectation: fmt.Sprintf("profile cleanup command %d", i+1),
+			Expectation: fmt.Sprintf("profile %s command %d", phase, i+1),
 			Command:     argv,
 			Predicates:  exitZeroPredicates(),
 		}
@@ -503,18 +628,36 @@ func (r *liveRun) runProfileCleanup() {
 			// proof the profile author chose rather than the implicit exit.
 			step.Predicates = append(append([]live.Predicate{}, r.descriptor.CleanupEvidence...), step.Predicates...)
 		}
-		res, reduced, _ := r.exec("cleanup", i+1, step)
-		r.cleanupSteps = appendReduced(r.cleanupSteps, reduced)
+		res, reduced, _ := r.exec(phase, i+1, step)
+		steps = appendReduced(steps, reduced)
 		if res == nil {
-			completed = false
+			completedAll = false
 			continue
 		}
 		if pass, _ := live.EvaluatePredicates(step.Predicates, res); !pass {
-			r.cleanupFailed = true
+			failed = true
 		}
 	}
-	// A profile that declares no cleanup at all proves no removal either.
-	r.cleanupOK = !r.cleanupFailed && completed && len(r.descriptor.Cleanup) > 0
+	return steps, completedAll, failed
+}
+
+// provedRemoval is the one rule both cleanup phases are judged by: every
+// declared command completed with exit 0, the configured last one also met
+// cleanupEvidence, and the profile declared a cleanup at all — one that
+// declares none proves no removal either.
+func (r *liveRun) provedRemoval(completedAll, failed bool) bool {
+	return completedAll && !failed && len(r.descriptor.Cleanup) > 0
+}
+
+// runProfileCleanup runs the end-of-run cleanup and records its tri-state: a
+// known failure of any command outranks a command that never completed, which
+// in turn keeps cleanupOK from claiming a clean run. Neither set means the
+// removal is simply unproven, and the cause is in executionErrors.
+func (r *liveRun) runProfileCleanup() {
+	steps, completedAll, failed := r.runCleanupCommands("cleanup")
+	r.cleanupSteps = append(r.cleanupSteps, steps...)
+	r.cleanupFailed = failed
+	r.cleanupOK = r.provedRemoval(completedAll, failed)
 }
 
 // withheldExpectation stands in for planner text the redaction barrier refuses.
@@ -547,7 +690,9 @@ func (r *liveRun) exec(phase string, index int, step live.Step) (res *live.StepR
 		return nil, nil, false
 	}
 
-	cleanup := phase == "cleanup" || phase == "plan-cleanup"
+	// Recovery is the profile's cleanup under another name; it gets the same
+	// independent deadline the end-of-run cleanup does.
+	cleanup := phase == "cleanup" || phase == "plan-cleanup" || phase == "recovery"
 	res, err := live.ExecuteStep(step, r.env, r.workDir, dir, r.descriptor.Limits(cleanup))
 	if res != nil {
 		r.recordRaw(res)
@@ -608,6 +753,15 @@ func (r *liveRun) rowVerdicts(applicable []coverage.Row, gaps map[string]bool) [
 		})
 	}
 	return out
+}
+
+// recovery is the run's recovery record, nil when the run had no prior attempt
+// to recover from and so performed none.
+func (r *liveRun) recovery() *liveRecovery {
+	if !r.recover {
+		return nil
+	}
+	return &liveRecovery{Performed: true, OK: !r.recoveryFailed, Steps: r.recoverySteps}
 }
 
 func appendReduced(steps []live.ReducedStep, reduced *live.ReducedStep) []live.ReducedStep {

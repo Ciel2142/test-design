@@ -6,9 +6,11 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
+	"test-design/internal/coverage"
 	"test-design/internal/live"
 )
 
@@ -1424,4 +1426,401 @@ func TestExecuteLive_UnboundFailuresAlwaysPresent(t *testing.T) {
 		t.Fatalf("read evidence: %v", err)
 	}
 	requireEmptyArrayField(t, "live-evidence.json", data, "unboundFailures")
+}
+
+// recoveryPhaseLog is the file every phase of the recovery profile appends its
+// own name to. The commands name it relatively, so the run's own working
+// directory decides where it lands and no absolute path reaches a transcript
+// for the redaction barrier to withhold.
+const recoveryPhaseLog = "phases.log"
+
+// appendPhaseCommand is a command that records that it ran, and nothing else.
+func appendPhaseCommand(name string) []string {
+	return []string{"/bin/sh", "-c", "echo " + name + " >> " + recoveryPhaseLog}
+}
+
+// recoveryProfile builds a profile whose start, health and cleanup commands
+// each append their own name to the phase log, so the order the phases really
+// ran in is observable from outside the run. cleanup is the argv list the
+// profile declares; recovery and the end-of-run cleanup both execute exactly it.
+func recoveryProfile(cleanup [][]string) *live.Profile {
+	return &live.Profile{
+		CleanupTimeoutSeconds: 10,
+		Start:                 [][]string{appendPhaseCommand("start")},
+		Health:                [][]string{appendPhaseCommand("health")},
+		Cleanup:               cleanup,
+		CleanupEvidence:       []live.Predicate{{Form: "matches", Stream: "stdout", Value: "removed=true"}},
+	}
+}
+
+// recoveryPlan is one bound walkthrough step that appends its own name to the
+// phase log, so a plan step that ran leaves a line and one that never ran
+// leaves none.
+func recoveryPlan() *live.Plan {
+	return &live.Plan{Steps: []live.Step{{
+		Expectation: "the bound step meets its expectation",
+		Command:     appendPhaseCommand("step"),
+		Predicates:  []live.Predicate{{Form: "exit-code", Value: "0"}},
+		SCBindings:  []string{"SC-1"},
+	}}}
+}
+
+// readRecoveryLog reads the phase log the recovery profile's commands append
+// to. A missing file is no lines: nothing ran.
+func readRecoveryLog(t *testing.T, path string) []string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		t.Fatalf("read phase log %s: %v", path, err)
+	}
+	var lines []string
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.TrimSpace(line) != "" {
+			lines = append(lines, strings.TrimSpace(line))
+		}
+	}
+	return lines
+}
+
+// TestLiveRunRecoveryPrecedesTheFirstStart locks what a restarted attempt does
+// before it starts anything: it runs the profile's own cleanup commands as
+// recovery, and it only starts a fresh environment once those proved removal.
+// The phase log is the proof of order — the profile's commands write it
+// themselves, so the assertion reads what really ran rather than what the run
+// says it ran.
+func TestLiveRunRecoveryPrecedesTheFirstStart(t *testing.T) {
+	t.Run("recovery proves removal and the run proceeds", func(t *testing.T) {
+		workDir := t.TempDir()
+		logPath := filepath.Join(workDir, recoveryPhaseLog)
+		profile := recoveryProfile([][]string{
+			{"/bin/sh", "-c", "echo cleanup >> " + recoveryPhaseLog + "; echo removed=true"},
+		})
+		run := newLiveRun(t.TempDir(), workDir, profile)
+		run.recover = true
+		run.execute(recoveryPlan())
+
+		if run.recoveryFailed {
+			t.Fatalf("recoveryFailed = true, want the recovery that proved removal to stand; steps=%+v errors=%v",
+				run.recoverySteps, run.executionErrors)
+		}
+		if len(run.recoverySteps) != 1 {
+			t.Fatalf("recovery steps = %+v, want one step per profile cleanup command", run.recoverySteps)
+		}
+		if got := run.recoverySteps[0].Expectation; got != "profile recovery command 1" {
+			t.Errorf("recovery expectation = %q, want %q", got, "profile recovery command 1")
+		}
+		if got := run.recoverySteps[0].Result; got != "pass" {
+			t.Errorf("recovery result = %q, want pass", got)
+		}
+		want := []string{"cleanup", "start", "health", "step", "cleanup"}
+		if got := readRecoveryLog(t, logPath); !reflect.DeepEqual(got, want) {
+			t.Errorf("phase log = %v, want %v: recovery runs before the first start command and the end-of-run cleanup runs again after", got, want)
+		}
+		if !run.cleanupOK || run.cleanupFailed {
+			t.Errorf("cleanupOK = %v, cleanupFailed = %v, want true/false from the end-of-run cleanup",
+				run.cleanupOK, run.cleanupFailed)
+		}
+		if run.verdicts["SC-1"] != verdictPass {
+			t.Errorf("verdict for SC-1 = %q, want %q: a recovered run judges its rows normally",
+				run.verdicts["SC-1"], verdictPass)
+		}
+		if len(run.cleanupSteps) != 1 {
+			t.Errorf("cleanup steps = %+v, want only the end-of-run cleanup: recovery keeps its own steps", run.cleanupSteps)
+		}
+		if len(run.executionErrors) != 0 {
+			t.Errorf("executionErrors = %v, want none", run.executionErrors)
+		}
+	})
+
+	t.Run("a failing recovery command stops the attempt before it starts", func(t *testing.T) {
+		workDir := t.TempDir()
+		logPath := filepath.Join(workDir, recoveryPhaseLog)
+		profile := recoveryProfile([][]string{
+			{"/bin/sh", "-c", "echo cleanup >> " + recoveryPhaseLog + "; exit 1"},
+		})
+		run := newLiveRun(t.TempDir(), workDir, profile)
+		run.recover = true
+		run.execute(recoveryPlan())
+
+		if !run.recoveryFailed {
+			t.Fatalf("recoveryFailed = false, want a cleanup that exited nonzero to stop the attempt")
+		}
+		if len(run.recoverySteps) != 1 || run.recoverySteps[0].Result != "fail" {
+			t.Fatalf("recovery steps = %+v, want the failed command recorded with result fail", run.recoverySteps)
+		}
+		if got := run.recoverySteps[0].Expectation; got != "profile recovery command 1" {
+			t.Errorf("recovery expectation = %q, want %q", got, "profile recovery command 1")
+		}
+		if got := readRecoveryLog(t, logPath); !reflect.DeepEqual(got, []string{"cleanup"}) {
+			t.Errorf("phase log = %v, want exactly [cleanup]: no start, health, plan or plan-cleanup command may run", got)
+		}
+		if len(run.startSteps) != 0 || len(run.healthSteps) != 0 || len(run.steps) != 0 || len(run.cleanupSteps) != 0 {
+			t.Errorf("start=%+v health=%+v steps=%+v cleanup=%+v, want all empty after a failed recovery",
+				run.startSteps, run.healthSteps, run.steps, run.cleanupSteps)
+		}
+		if !run.cleanupFailed || run.cleanupOK {
+			t.Errorf("cleanupFailed = %v, cleanupOK = %v, want true/false from the recovery tri-state",
+				run.cleanupFailed, run.cleanupOK)
+		}
+		wantErrors := []string{"recovery: owned cleanup did not prove removal before a fresh start"}
+		if !reflect.DeepEqual(run.executionErrors, wantErrors) {
+			t.Errorf("executionErrors = %v, want %v", run.executionErrors, wantErrors)
+		}
+		for _, v := range run.rowVerdicts([]coverage.Row{{ID: "SC-1"}, {ID: "SC-2"}}, nil) {
+			if v.Verdict != verdictInconclusive {
+				t.Errorf("verdict for %s = %q, want %q: nothing ran to judge it",
+					v.RowID, v.Verdict, verdictInconclusive)
+			}
+		}
+	})
+
+	t.Run("a recovery command held past the cleanup deadline stops the attempt", func(t *testing.T) {
+		workDir := t.TempDir()
+		logPath := filepath.Join(workDir, recoveryPhaseLog)
+		profile := recoveryProfile([][]string{{"/bin/sh", "-c", "sleep 20"}})
+		profile.CleanupTimeoutSeconds = 1
+		run := newLiveRun(t.TempDir(), workDir, profile)
+		run.recover = true
+		run.execute(recoveryPlan())
+
+		if !run.recoveryFailed {
+			t.Fatalf("recoveryFailed = false, want a cleanup that never completed to stop the attempt")
+		}
+		if run.cleanupOK || run.cleanupFailed {
+			t.Errorf("cleanupOK = %v, cleanupFailed = %v, want neither set: removal is unproven, not known to have failed",
+				run.cleanupOK, run.cleanupFailed)
+		}
+		if len(run.recoverySteps) != 0 {
+			t.Errorf("recovery steps = %+v, want none for a command that never completed", run.recoverySteps)
+		}
+		if len(run.executionErrors) != 2 {
+			t.Fatalf("executionErrors = %v, want the deadline and the recovery decision", run.executionErrors)
+		}
+		if !strings.HasPrefix(run.executionErrors[0], "recovery[1]: ") ||
+			!strings.Contains(run.executionErrors[0], "subprocess timeout") {
+			t.Errorf("executionErrors[0] = %q, want the deadline named against recovery[1]", run.executionErrors[0])
+		}
+		if got, want := run.executionErrors[1], "recovery: owned cleanup did not prove removal before a fresh start"; got != want {
+			t.Errorf("executionErrors[1] = %q, want %q", got, want)
+		}
+		if got := readRecoveryLog(t, logPath); got != nil {
+			t.Errorf("phase log = %v, want no lines: nothing after the recovery may run", got)
+		}
+	})
+
+	t.Run("without a prior attempt nothing recovers", func(t *testing.T) {
+		workDir := t.TempDir()
+		logPath := filepath.Join(workDir, recoveryPhaseLog)
+		profile := recoveryProfile([][]string{
+			{"/bin/sh", "-c", "echo cleanup >> " + recoveryPhaseLog + "; echo removed=true"},
+		})
+		run := newLiveRun(t.TempDir(), workDir, profile)
+		run.execute(recoveryPlan())
+
+		if run.recoveryFailed || len(run.recoverySteps) != 0 {
+			t.Errorf("recoveryFailed = %v, recovery steps = %+v, want a first attempt to recover nothing",
+				run.recoveryFailed, run.recoverySteps)
+		}
+		want := []string{"start", "health", "step", "cleanup"}
+		if got := readRecoveryLog(t, logPath); !reflect.DeepEqual(got, want) {
+			t.Errorf("phase log = %v, want %v", got, want)
+		}
+	})
+}
+
+// executeLiveRepeatRequestJSON is the execute-live request with the caller's
+// deliberate repetition of an attempt the run already completed.
+func executeLiveRepeatRequestJSON(t *testing.T, repo, runDir, planPath, tracePath, reason string) string {
+	t.Helper()
+	body, err := json.Marshal(map[string]any{
+		"schemaVersion":  "1",
+		"repoRoot":       repo,
+		"coverageSource": liveFixtureCoverageSource,
+		"runDir":         runDir,
+		"plan":           planPath,
+		"traceEvidence":  tracePath,
+		"repeat":         map[string]string{"reason": reason},
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	return string(body)
+}
+
+// TestExecuteLive_CompletedAttemptRefusedUntilRepeated locks the run-level
+// obligation: one run ID buys one live attempt. A second execute-live is
+// refused by name before it starts anything, and a caller who repeats it with a
+// reason gets a run that recovers the previous attempt's resources first.
+func TestExecuteLive_CompletedAttemptRefusedUntilRepeated(t *testing.T) {
+	repo := liveFixtureRepo(t)
+	tracePath := writeGapTraceEvidence(t, "SC-13")
+	planPath := filepath.Join(repo, filepath.FromSlash(liveFixturePlanPath))
+
+	first := preparedLive(t, repo, "live-restart")
+	code, stdout, stderr := runVerifyOp(t, "execute-live",
+		executeLiveRequestJSON(t, repo, first.RunDir, planPath, tracePath))
+	if code != exitOK {
+		t.Fatalf("first execute-live exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+	var out executeLiveOutput
+	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
+		t.Fatalf("stdout did not decode: %v\nstdout=%s", err, stdout)
+	}
+	if out.Recovery != nil {
+		t.Errorf("recovery = %+v, want it omitted: a first attempt has nothing to recover", out.Recovery)
+	}
+
+	// The prepared workspace of the first attempt is gone with it, so the
+	// repeated attempt is prepared afresh the way an operator would.
+	second := preparedLive(t, repo, "live-restart")
+	code, stdout, stderr = runVerifyOp(t, "execute-live",
+		executeLiveRequestJSON(t, repo, second.RunDir, planPath, tracePath))
+	if code != exitError {
+		t.Fatalf("second execute-live exit code = %d, want %d; stdout=%s", code, exitError, stdout)
+	}
+	if got := decodeCLIError(t, stderr); got.Code != "live-attempt-completed" {
+		t.Errorf("error code = %q, want live-attempt-completed", got.Code)
+	}
+	if _, err := os.Stat(filepath.Join(second.RunDir, liveEvidenceFile)); !os.IsNotExist(err) {
+		t.Error("live-evidence.json exists, want no run behind a refused attempt")
+	}
+
+	code, stdout, stderr = runVerifyOp(t, "execute-live",
+		executeLiveRepeatRequestJSON(t, repo, second.RunDir, planPath, tracePath, "the first attempt was interrupted"))
+	if code != exitOK {
+		t.Fatalf("repeated execute-live exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+	var repeated executeLiveOutput
+	if err := json.Unmarshal([]byte(stdout), &repeated); err != nil {
+		t.Fatalf("stdout did not decode: %v\nstdout=%s", err, stdout)
+	}
+	if repeated.Recovery == nil {
+		t.Fatalf("recovery = nil, want a repeated attempt to report the recovery it performed")
+	}
+	if !repeated.Recovery.Performed || !repeated.Recovery.OK {
+		t.Errorf("recovery = %+v, want performed and ok", repeated.Recovery)
+	}
+	if len(repeated.Recovery.Steps) != 2 {
+		t.Fatalf("recovery steps = %+v, want one per profile cleanup command", repeated.Recovery.Steps)
+	}
+	if got := repeated.Recovery.Steps[0].Expectation; got != "profile recovery command 1" {
+		t.Errorf("recovery expectation = %q, want %q", got, "profile recovery command 1")
+	}
+	ev := readLiveEvidence(t, repeated.EvidencePath)
+	if ev.Recovery == nil || !ev.Recovery.OK || len(ev.Recovery.Steps) != 2 {
+		t.Errorf("evidence recovery = %+v, want the same record the output carries", ev.Recovery)
+	}
+	if !ev.CleanupOK {
+		t.Errorf("evidence cleanupOK = false, want the repeated run's own cleanup to have proved removal; cleanup=%+v",
+			ev.CleanupSteps)
+	}
+}
+
+// allPassingLivePlan binds every applicable fixture row to a step the profile's
+// declared walkthrough allows and that meets its expectation, so the attempt
+// has nothing failing and nothing unproven left to report.
+func allPassingLivePlan(t *testing.T) string {
+	t.Helper()
+	return writePlanFile(t, map[string]any{
+		"schemaVersion": "1",
+		"steps": []map[string]any{{
+			"expectation": "every applicable row reaches the ready marker",
+			"command":     []string{"echo", "live-fixture-ready"},
+			"predicates": []map[string]string{
+				{"form": "exit-code", "value": "0"},
+				{"form": "matches", "stream": "stdout", "value": "live-fixture-ready"},
+			},
+			"scBindings": []string{"SC-11", "SC-12", "SC-13"},
+		}},
+	})
+}
+
+// TestExecuteLive_ResumeReportsTheCompletedAttempt locks what the run's ledger
+// holds once an attempt returns: the attempt is completed, its outcome is the
+// one the row verdicts and the cleanup imply, and the evidence it points at
+// still verifies. resume is the reader, so the assertion is the answer a
+// resumed run would actually get.
+func TestExecuteLive_ResumeReportsTheCompletedAttempt(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		runID       string
+		profile     map[string]any
+		plan        func(t *testing.T, repo string) string
+		wantOutcome string
+	}{
+		{
+			name:  "a failing row completes the attempt fail",
+			runID: "live-outcome-fail",
+			plan: func(t *testing.T, repo string) string {
+				return filepath.Join(repo, filepath.FromSlash(liveFixturePlanPath))
+			},
+			wantOutcome: "fail",
+		},
+		{
+			name:  "a walkthrough that meets every expectation completes the attempt pass",
+			runID: "live-outcome-pass",
+			plan: func(t *testing.T, repo string) string {
+				return allPassingLivePlan(t)
+			},
+			wantOutcome: "pass",
+		},
+		{
+			name:    "a start that never came up completes the attempt inconclusive",
+			runID:   "live-outcome-inconclusive",
+			profile: map[string]any{"start": [][]string{{"false"}}},
+			plan: func(t *testing.T, repo string) string {
+				return allPassingLivePlan(t)
+			},
+			wantOutcome: "inconclusive",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := liveFixtureRepo(t)
+			if tc.profile != nil {
+				commitLiveProfileOverride(t, repo, tc.profile)
+			}
+			prep := preparedLive(t, repo, tc.runID)
+			tracePath := writeGapTraceEvidence(t, "SC-13")
+
+			code, stdout, stderr := runVerifyOp(t, "execute-live",
+				executeLiveRequestJSON(t, repo, prep.RunDir, tc.plan(t, repo), tracePath))
+			if code != exitOK {
+				t.Fatalf("execute-live exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+			}
+			var out executeLiveOutput
+			if err := json.Unmarshal([]byte(stdout), &out); err != nil {
+				t.Fatalf("stdout did not decode: %v\nstdout=%s", err, stdout)
+			}
+
+			code, stdout, stderr = runVerifyOp(t, "resume",
+				liveFixturePrepareRequestJSON(t, repo, tc.runID))
+			if code != exitOK {
+				t.Fatalf("resume exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+			}
+			var res resumeOutput
+			if err := json.Unmarshal([]byte(stdout), &res); err != nil {
+				t.Fatalf("resume stdout did not decode: %v\nstdout=%s", err, stdout)
+			}
+			if res.Live.Status != "completed" {
+				t.Errorf("resume live status = %q, want completed (reason %q)", res.Live.Status, res.Live.Reason)
+			}
+			if res.Live.Outcome != tc.wantOutcome {
+				t.Errorf("resume live outcome = %q, want %q; rowVerdicts=%+v cleanupOK=%v",
+					res.Live.Outcome, tc.wantOutcome, out.RowVerdicts, out.CleanupOK)
+			}
+			if res.Live.EvidencePath != out.EvidencePath {
+				t.Errorf("resume live evidencePath = %q, want the evidence the attempt wrote %q",
+					res.Live.EvidencePath, out.EvidencePath)
+			}
+			if res.Live.Reason != "" {
+				t.Errorf("resume live reason = %q, want none: the retained evidence still verifies", res.Live.Reason)
+			}
+			if res.Live.RecoveryRequired {
+				t.Error("resume live recoveryRequired = true, want false for an attempt that completed")
+			}
+		})
+	}
 }
