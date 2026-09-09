@@ -2,6 +2,7 @@ package main
 
 import (
 	"maps"
+	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -167,6 +168,35 @@ func TestManifest_CaptureNamesEveryInputItCouldNotIdentify(t *testing.T) {
 		requireIncomplete(t, m, "head-moved")
 	})
 
+	t.Run("a file the critic would be handed cannot be digested", func(t *testing.T) {
+		// trackedAt-style existence is not enough: a path git carries can be a
+		// tree, and a file can vanish between the trace and the review. Either
+		// way there is no digest to record, and recording an error string in
+		// place of one would let a later run match that same string.
+		row := dispatchRowFor(t, dispatch, "SC-01")
+		path := filepath.Join(repo, filepath.FromSlash(row.File))
+		if err := os.Remove(path); err != nil {
+			t.Fatalf("remove %s: %v", row.File, err)
+		}
+		if err := os.Mkdir(path, 0o755); err != nil {
+			t.Fatalf("replace %s with a directory: %v", row.File, err)
+		}
+		t.Cleanup(func() {
+			if err := os.Remove(path); err != nil {
+				t.Fatalf("remove the directory standing in for %s: %v", row.File, err)
+			}
+			mustGit(t, repo, "checkout", "--", row.File)
+		})
+		policy := &reviewPolicy{Critic: "coverage-critic", Instructions: []string{good}}
+
+		m := captureReviewManifest(repo, identity, &dispatch, rows, policy)
+
+		requireIncomplete(t, m, "unidentifiable-read:"+row.File)
+		if got, listed := m.Bundle[row.File]; listed {
+			t.Errorf("bundle[%s] = %q, want the path left out rather than an error stored where a digest belongs", row.File, got)
+		}
+	})
+
 	t.Run("a dirty tree", func(t *testing.T) {
 		writeRepoFile(t, repo, "orders/scratch.txt", "uncommitted\n")
 		t.Cleanup(func() { mustGit(t, repo, "clean", "-qfd") })
@@ -237,7 +267,9 @@ func TestManifest_CompletionJudgesTheReadsTheCriticClaims(t *testing.T) {
 		writeRepoFile(t, filepath.Dir(outside), "notes.md", "outside\n")
 		writeRepoFile(t, repo, "orders/untracked.go", "package orders\n")
 		t.Cleanup(func() { mustGit(t, repo, "clean", "-qfd") })
-		reads := []string{outside, "../elsewhere/notes.md", "orders/untracked.go"}
+		// "orders" is tracked at HEAD — as a tree — so existence alone would
+		// accept it and store its read error where a digest belongs.
+		reads := []string{outside, "../elsewhere/notes.md", "orders/untracked.go", "orders"}
 
 		m := completeReviewManifest(repo, identity, started(), &reads)
 
@@ -281,4 +313,39 @@ func TestManifest_CompletionJudgesTheReadsTheCriticClaims(t *testing.T) {
 		m := completeReviewManifest(repo, moved, started(), &[]string{})
 		requireIncomplete(t, m, "head-moved")
 	})
+}
+
+// TestManifest_CompletionNeverWithdrawsAReasonCaptureRecorded: incompleteness
+// is monotonic. A group captured against a dirty tree holds digests of bytes no
+// commit carries, and cleaning the tree before the group is completed does not
+// turn those digests back into something a later run could identify. A reason
+// observed once is carried forward, and never twice.
+func TestManifest_CompletionNeverWithdrawsAReasonCaptureRecorded(t *testing.T) {
+	repo := fixtureRepo(t)
+	head := strings.TrimSpace(mustGit(t, repo, "rev-parse", "HEAD"))
+	identity := runstate.Identity{RunID: "manifest-monotonic", RepoRoot: repo, RepoCommit: head}
+	dispatch := dispatchInputs{Rows: []dispatchRow{{
+		RowID: "SC-01", File: "orders/orders_test.go", ClaimSHA256: "claim",
+	}}}
+	policy := &reviewPolicy{Critic: "coverage-critic", Instructions: []string{
+		writePolicyFile(t, "critic.md", "judge the assertion\n"),
+	}}
+	writeRepoFile(t, repo, "orders/scratch.txt", "uncommitted\n")
+	t.Cleanup(func() { mustGit(t, repo, "clean", "-qfd") })
+
+	started := captureReviewManifest(repo, identity, &dispatch, []string{"SC-01"}, policy)
+	requireIncomplete(t, started, "tree-dirty:orders/scratch.txt")
+
+	stillDirty := completeReviewManifest(repo, identity, started, &[]string{})
+	if got := slices.Compact(slices.Clone(stillDirty.Incomplete)); len(got) != len(stillDirty.Incomplete) {
+		t.Errorf("incomplete = %v, want each reason once", stillDirty.Incomplete)
+	}
+
+	mustGit(t, repo, "clean", "-qfd")
+
+	cleaned := completeReviewManifest(repo, identity, started, &[]string{})
+	requireIncomplete(t, cleaned, "tree-dirty:orders/scratch.txt")
+	if !slices.Contains(started.Incomplete, "tree-dirty:orders/scratch.txt") {
+		t.Errorf("started manifest = %v, want completion to have left it alone", started.Incomplete)
+	}
 }

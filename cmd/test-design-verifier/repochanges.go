@@ -25,7 +25,9 @@ func commitExists(repoRoot, commit string) bool {
 // must see that the old path is gone rather than be told the content merely
 // travelled.
 func changedPaths(repoRoot, from, to string) ([]string, error) {
-	out, err := gitOutput(repoRoot, "diff", "--name-only", "--no-renames", from, to)
+	// core.quotePath=false keeps a non-ASCII path as the bytes it is rather
+	// than an escaped rendering no digest or comparison would match.
+	out, err := gitOutput(repoRoot, "-c", "core.quotePath=false", "diff", "--name-only", "--no-renames", from, to)
 	if err != nil {
 		return nil, err
 	}

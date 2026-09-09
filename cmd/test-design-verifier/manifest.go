@@ -45,12 +45,19 @@ func captureReviewManifest(repoRoot string, identity runstate.Identity, dispatch
 		}
 	}
 	paths, _ := bundleFiles(dispatch, rows)
-	bundle, _ := evidence.DigestFiles(repoRoot, paths)
-	policyID, policyProblems := policyIdentity(policy)
+	bundle, undigestable := digestUnder(repoRoot, paths)
+	policyID, problems := policyIdentity(policy)
+	// A file the critic would be handed but this run cannot digest — a path git
+	// carries as a tree, a file that vanished since the trace — is a file
+	// nothing later can identify, and it is left out of the bundle rather than
+	// recorded as the error that reading it produced.
+	for _, path := range undigestable {
+		problems = append(problems, "unidentifiable-read:"+path)
+	}
 
 	m := &evidence.Manifest{
 		Version:      evidence.ManifestVersion,
-		Incomplete:   policyProblems,
+		Incomplete:   problems,
 		Claims:       claims,
 		Bundle:       bundle,
 		Runner:       dispatch.Runner,
@@ -61,11 +68,12 @@ func captureReviewManifest(repoRoot string, identity runstate.Identity, dispatch
 	return m
 }
 
-// completeReviewManifest closes the manifest a started group captured. The
-// critic's reads are judged — each must be a path this repository can identify
-// — and the state that could have moved since the group opened, HEAD and the
-// tree, is read again. A record started before manifests were captured has
-// none to complete and gets none invented for it.
+// completeReviewManifest returns the manifest a started group captured with the
+// critic's reads judged — each must be a path this repository can identify —
+// and HEAD and the tree read again. The started manifest is left as it was: the
+// returned value keeps its claims and bundle and carries every reason it
+// already recorded, adding the fresh ones. A record started before manifests
+// were captured has none to complete and gets none invented for it.
 func completeReviewManifest(repoRoot string, identity runstate.Identity, started *evidence.Manifest, reads *[]string) *evidence.Manifest {
 	if started == nil {
 		return nil
@@ -77,12 +85,19 @@ func completeReviewManifest(repoRoot string, identity runstate.Identity, started
 
 // applyRepoState fills in everything a manifest reads from the repository
 // rather than from the request: the commit HEAD carries now, the reads the
-// parent relayed, and the incompleteness those imply. The reasons already
-// recorded about the policy are kept — a policy problem is decided once, when
-// the group opens — and every other reason is re-derived, so a started
-// manifest's "reads-unrecorded" does not outlive the reads that answer it.
+// parent relayed, and the incompleteness those imply. Incompleteness is
+// monotonic — every reason already recorded is carried forward, because a
+// manifest captured against a moved HEAD or a dirty tree holds digests of bytes
+// no commit carries and cleaning the tree afterwards does not make them
+// identifiable again. The one reason completion answers is "reads-unrecorded",
+// so that is the only one dropped, and no reason is listed twice.
 func applyRepoState(m *evidence.Manifest, repoRoot string, identity runstate.Identity, reads *[]string) {
-	reasons := policyReasons(m.Incomplete)
+	reasons := carriedReasons(m.Incomplete)
+	add := func(reason string) {
+		if !slices.Contains(reasons, reason) {
+			reasons = append(reasons, reason)
+		}
+	}
 
 	head := ""
 	if out, err := gitOutput(repoRoot, "rev-parse", "HEAD"); err == nil {
@@ -90,32 +105,62 @@ func applyRepoState(m *evidence.Manifest, repoRoot string, identity runstate.Ide
 	}
 	m.RepoCommit = head
 	if head != identity.RepoCommit {
-		reasons = append(reasons, "head-moved")
+		add("head-moved")
 	}
 	for _, path := range dirtyPaths(repoRoot) {
-		reasons = append(reasons, "tree-dirty:"+path)
+		add("tree-dirty:" + path)
 	}
 
 	m.Reads = evidence.FileDigest{}
 	if reads == nil {
-		reasons = append(reasons, "reads-unrecorded")
+		add("reads-unrecorded")
 	}
+	judged := map[string]bool{}
 	for _, path := range readsOf(reads) {
+		if judged[path] {
+			continue
+		}
+		judged[path] = true
 		// confinedRelPath is the repository's own answer to "is this a path
 		// inside the tree": absolute paths and traversals are refused. Its
 		// message is not surfaced here — a read this run cannot identify is
-		// one reason whatever made it unidentifiable.
+		// one reason whatever made it unidentifiable. Being tracked is not
+		// enough either: git carries directories too, and a path with no
+		// digest is not a read a later run can compare.
 		rel, cliErr := confinedRelPath("record-review", "reads", "unidentifiable-read", path)
-		if cliErr != nil || !trackedAt(repoRoot, head, rel) {
-			reasons = append(reasons, "unidentifiable-read:"+path)
+		if cliErr != nil || head == "" || !trackedAt(repoRoot, head, rel) {
+			add("unidentifiable-read:" + path)
 			continue
 		}
-		digest, _ := evidence.DigestFiles(repoRoot, []string{rel})
-		maps.Copy(m.Reads, digest)
+		digests, undigestable := digestUnder(repoRoot, []string{rel})
+		if len(undigestable) > 0 {
+			add("unidentifiable-read:" + path)
+			continue
+		}
+		maps.Copy(m.Reads, digests)
 	}
 
 	m.Incomplete = reasons
 	m.Complete = len(reasons) == 0
+}
+
+// digestUnder hashes every path under repoRoot, keeping only what it could
+// read: a path it could not is returned by name rather than recorded with the
+// error in place of its digest. An error string is deterministic, so a manifest
+// that stored one would match a later probe that failed the same way and let a
+// run stand on a file neither of them ever read.
+func digestUnder(repoRoot string, paths []string) (evidence.FileDigest, []string) {
+	digests := evidence.FileDigest{}
+	var undigestable []string
+	for _, path := range paths {
+		sum, err := evidence.SHA256File(filepath.Join(repoRoot, filepath.FromSlash(path)))
+		if err != nil {
+			undigestable = append(undigestable, path)
+			continue
+		}
+		digests[path] = sum
+	}
+	return digests, undigestable
 }
 
 // readsOf is the relayed read list, or none when the parent recorded none.
@@ -126,13 +171,15 @@ func readsOf(reads *[]string) []string {
 	return *reads
 }
 
-// policyReasons keeps the incompleteness a manifest recorded about its policy.
-// Every other reason describes repository state that is read again whenever the
-// manifest is written, so keeping it would freeze an answer that has moved on.
-func policyReasons(incomplete []string) []string {
+// carriedReasons keeps every reason a manifest already recorded except the one
+// completion exists to answer: whether the critic's reads were recorded at all.
+// A reason is never withdrawn — the run that observed it saw inputs it could
+// not identify, and a later run reading this manifest has no way to see that
+// state again.
+func carriedReasons(incomplete []string) []string {
 	var kept []string
 	for _, reason := range incomplete {
-		if strings.HasPrefix(reason, "policy-") {
+		if reason != "reads-unrecorded" {
 			kept = append(kept, reason)
 		}
 	}
