@@ -10,6 +10,7 @@ import (
 
 	"test-design/internal/coverage"
 	"test-design/internal/mutation"
+	"test-design/internal/runstate"
 )
 
 func evaluateMutationRequestJSON(t *testing.T, repo, runID, runDir, site string, lastSite bool) string {
@@ -401,6 +402,17 @@ func TestEvaluateMutation_CleanRunFailureVoidsSite(t *testing.T) {
 	if lines := gitStatusLines(t, prep.WorktreePath); len(lines) != 0 {
 		t.Errorf("worktree git status = %v, want RestoreTracked to have reverted the mutation before the failed clean rerun", lines)
 	}
+
+	st, err := mutation.LoadState(prep.RunDir)
+	if err != nil {
+		t.Fatalf("LoadState after the refusal: %v", err)
+	}
+	if st.Started == nil {
+		t.Fatal("state carries no started marker after the clean-run refusal, want the site it was inside")
+	}
+	if st.Started.Site != "site-a" || st.Started.Phase != "clean" {
+		t.Errorf("started = %+v, want site-a in phase clean", st.Started)
+	}
 }
 
 func TestEvaluateMutation_SnapshotMismatchDetected(t *testing.T) {
@@ -603,4 +615,153 @@ func TestEvaluateMutation_RejectsPreparedIdentityMismatch(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestEvaluateMutation_AnInterruptedSiteIsRefused(t *testing.T) {
+	repo := fixtureRepo(t)
+	prep := preparedMutation(t, repo, "eval-interrupted", "SC-09")
+
+	st, err := mutation.LoadState(prep.RunDir)
+	if err != nil {
+		t.Fatalf("LoadState: %v", err)
+	}
+	st.Started = &mutation.SiteAttempt{Site: "site-a", Phase: "mutated", StartedAt: "2026-09-07T10:00:00Z"}
+	if err := mutation.WriteState(prep.RunDir, st); err != nil {
+		t.Fatalf("WriteState: %v", err)
+	}
+	mutateOrdersGuard(t, prep.WorktreePath, `	return fmt.Errorf("always rejected")`)
+
+	code, stdout, stderr := runVerifyOp(t, "evaluate-mutation",
+		evaluateMutationRequestJSON(t, repo, "eval-interrupted", prep.RunDir, "site-b", false))
+
+	if code != exitError {
+		t.Fatalf("exit code = %d, want %d; stdout=%s", code, exitError, stdout)
+	}
+	got := decodeCLIError(t, stderr)
+	if got.Code != "site-interrupted" {
+		t.Errorf("error code = %q, want site-interrupted", got.Code)
+	}
+	if !strings.Contains(got.Message, "site-a") {
+		t.Errorf("message = %q, want it to name the site the workspace is uncertain about", got.Message)
+	}
+
+	after, err := mutation.LoadState(prep.RunDir)
+	if err != nil {
+		t.Fatalf("LoadState after the refusal: %v", err)
+	}
+	if len(after.Sites) != 0 {
+		t.Errorf("sites = %+v, want nothing measured on an uncertain workspace", after.Sites)
+	}
+	if after.Started == nil || after.Started.Site != "site-a" {
+		t.Errorf("started = %+v, want the marker left for recover-mutation", after.Started)
+	}
+}
+
+func TestEvaluateMutation_ARowThisRunNeverStartedIsRefused(t *testing.T) {
+	repo := fixtureRepo(t)
+	prep := preparedMutation(t, repo, "eval-prepared", "SC-09")
+
+	// The workspace is real; the run ID it now claims has no ledger at all.
+	st, err := mutation.LoadState(prep.RunDir)
+	if err != nil {
+		t.Fatalf("LoadState: %v", err)
+	}
+	st.RunID = "eval-unstarted"
+	if err := mutation.WriteState(prep.RunDir, st); err != nil {
+		t.Fatalf("WriteState: %v", err)
+	}
+	mutateOrdersGuard(t, prep.WorktreePath, `	return fmt.Errorf("always rejected")`)
+
+	code, stdout, stderr := runVerifyOp(t, "evaluate-mutation",
+		evaluateMutationRequestJSON(t, repo, "eval-unstarted", prep.RunDir, "site-a", false))
+
+	if code != exitError {
+		t.Fatalf("exit code = %d, want %d; stdout=%s", code, exitError, stdout)
+	}
+	got := decodeCLIError(t, stderr)
+	if got.Code != "mutation-row-not-started" {
+		t.Errorf("error code = %q, want mutation-row-not-started", got.Code)
+	}
+}
+
+func TestEvaluateMutation_ARowAlreadyAnsweredIsRefused(t *testing.T) {
+	repo := fixtureRepo(t)
+	prep := preparedMutation(t, repo, "eval-answered", "SC-09")
+	completeLedgerRow(t, repo, "eval-answered", "SC-09", "caught")
+	mutateOrdersGuard(t, prep.WorktreePath, `	return fmt.Errorf("always rejected")`)
+
+	code, stdout, stderr := runVerifyOp(t, "evaluate-mutation",
+		evaluateMutationRequestJSON(t, repo, "eval-answered", prep.RunDir, "site-a", false))
+
+	if code != exitError {
+		t.Fatalf("exit code = %d, want %d; stdout=%s", code, exitError, stdout)
+	}
+	got := decodeCLIError(t, stderr)
+	if got.Code != "mutation-row-completed" {
+		t.Errorf("error code = %q, want mutation-row-completed", got.Code)
+	}
+}
+
+func TestEvaluateMutation_LastSiteCompletesTheLedgerRow(t *testing.T) {
+	t.Run("every site caught", func(t *testing.T) {
+		repo := fixtureRepo(t)
+		prep := preparedMutation(t, repo, "eval-ledger-caught", "SC-09")
+		mutateOrdersGuard(t, prep.WorktreePath, `	return fmt.Errorf("always rejected")`)
+
+		code, stdout, stderr := runVerifyOp(t, "evaluate-mutation",
+			evaluateMutationRequestJSON(t, repo, "eval-ledger-caught", prep.RunDir, "site-a", true))
+		if code != exitOK {
+			t.Fatalf("exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+		}
+		var out evaluateMutationOutput
+		if err := json.Unmarshal([]byte(stdout), &out); err != nil {
+			t.Fatalf("stdout did not decode: %v\nstdout=%s", err, stdout)
+		}
+
+		rec := ledgerRecord(t, runResume(t, repo, "eval-ledger-caught"), runstate.KindMutationRow, "SC-09")
+		if rec.Status != runstate.StatusCompleted {
+			t.Errorf("status = %q, want %q", rec.Status, runstate.StatusCompleted)
+		}
+		if rec.Outcome != "caught" {
+			t.Errorf("outcome = %q, want caught when every site was caught", rec.Outcome)
+		}
+		if got := rec.Artifacts[artifactEvidence].Path; got != out.EvidencePath {
+			t.Errorf("evidence artifact = %q, want the written evidence %q", got, out.EvidencePath)
+		}
+		if reasons := runstate.Verify(&rec); len(reasons) != 0 {
+			t.Errorf("Verify = %v, want the completed row to rest on a digestible artifact", reasons)
+		}
+
+		st, err := mutation.LoadState(prep.RunDir)
+		if err != nil {
+			t.Fatalf("LoadState: %v", err)
+		}
+		if st.Started != nil {
+			t.Errorf("started = %+v, want the marker cleared by the site it belonged to", st.Started)
+		}
+	})
+
+	t.Run("a surviving site", func(t *testing.T) {
+		repo := fixtureRepo(t)
+		prep := preparedMutation(t, repo, "eval-ledger-survived", "SC-09")
+
+		mutateOrdersGuard(t, prep.WorktreePath, "	if qty < 0 {\n\t\treturn fmt.Errorf(\"quantity must be positive\")\n\t}\n\treturn nil")
+		if code, _, stderr := runVerifyOp(t, "evaluate-mutation",
+			evaluateMutationRequestJSON(t, repo, "eval-ledger-survived", prep.RunDir, "site-a", false)); code != exitOK {
+			t.Fatalf("site-a exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+		}
+		mutateOrdersGuard(t, prep.WorktreePath, `	return fmt.Errorf("always rejected")`)
+		if code, _, stderr := runVerifyOp(t, "evaluate-mutation",
+			evaluateMutationRequestJSON(t, repo, "eval-ledger-survived", prep.RunDir, "site-b", true)); code != exitOK {
+			t.Fatalf("site-b exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+		}
+
+		rec := ledgerRecord(t, runResume(t, repo, "eval-ledger-survived"), runstate.KindMutationRow, "SC-09")
+		if rec.Status != runstate.StatusCompleted {
+			t.Errorf("status = %q, want %q", rec.Status, runstate.StatusCompleted)
+		}
+		if rec.Outcome != "survived" {
+			t.Errorf("outcome = %q, want survived when one site was not caught", rec.Outcome)
+		}
+	})
 }

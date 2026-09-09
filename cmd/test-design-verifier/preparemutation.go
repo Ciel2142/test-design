@@ -11,6 +11,7 @@ import (
 	"test-design/internal/evidence"
 	"test-design/internal/jvmsource"
 	"test-design/internal/mutation"
+	"test-design/internal/runstate"
 	"test-design/internal/trace"
 	"test-design/internal/worktree"
 )
@@ -27,10 +28,10 @@ type identityOutput struct {
 
 type prepareMutationOutput struct {
 	evidence.Envelope
-	RunID string `json:"runID"`
-	RepoCommit string `json:"repoCommit"`
-	Source string `json:"source"`
-	SourceSHA256 string `json:"sourceSha256"`
+	RunID        string         `json:"runID"`
+	RepoCommit   string         `json:"repoCommit"`
+	Source       string         `json:"source"`
+	SourceSHA256 string         `json:"sourceSha256"`
 	RowID        string         `json:"rowID"`
 	Identity     identityOutput `json:"identity"`
 	RunnerKind   string         `json:"runnerKind"`
@@ -63,6 +64,23 @@ func prepareMutationHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writ
 	src, cliErr := loadVerifiedSource("prepare-mutation", req.RepoRoot, req.CoverageSource)
 	if cliErr != nil {
 		return cliErr
+	}
+
+	// A row this run already answered is refused here, before a controller
+	// exists and before anything is created for it: the ledger is re-read
+	// under the lock at Start, so this check only spares the caller a
+	// worktree and a run directory it would not be allowed to keep.
+	store, cliErr := openLedger("prepare-mutation", &req.verifyRequest)
+	if cliErr != nil {
+		return cliErr
+	}
+	ledger, cliErr := loadLedgerFor("prepare-mutation", runstate.KindMutationRow, store)
+	if cliErr != nil {
+		return cliErr
+	}
+	current := runstate.Current(ledger, runstate.KindMutationRow, req.RowID)
+	if current != nil && current.Status == runstate.StatusCompleted && repeatReason(&req.verifyRequest) == "" {
+		return completedRecordRefusal("prepare-mutation", runstate.KindMutationRow, req.RowID)
 	}
 
 	ctrl, err := worktree.NewController(req.RepoRoot)
@@ -123,9 +141,9 @@ func prepareMutationHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writ
 		return &cliError{Code: "state-write-failed", Message: fmt.Sprintf("prepare-mutation: marshal snapshot: %v", err)}
 	}
 	st := &mutation.State{
-		RunID: req.RunID,
-		RepoCommit: repoCommit,
-		Source: src.Path,
+		RunID:        req.RunID,
+		RepoCommit:   repoCommit,
+		Source:       src.Path,
 		SourceSHA256: src.SHA256,
 		RowID:        row.ID,
 		Identity:     identity,
@@ -137,15 +155,28 @@ func prepareMutationHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writ
 		return &cliError{Code: "state-write-failed", Message: fmt.Sprintf("prepare-mutation: %v", err)}
 	}
 
+	// The row is opened only once the workspace it names exists: the inputs a
+	// later op reads back to reach that workspace must describe something the
+	// run actually left behind.
+	identityRecord := ledgerIdentity(&req.verifyRequest, req.RepoRoot, repoCommit, src)
+	if _, err := store.Start(identityRecord, runstate.KindMutationRow, row.ID, mutationRowInputs{
+		Identity:     mutationRowIdentity{Scope: identity.Scope, Name: identity.Name},
+		RunnerKind:   src.Runner.Kind,
+		RunDir:       runDir,
+		WorktreePath: wt.Path,
+	}, "", repeatReason(&req.verifyRequest)); err != nil {
+		return ledgerError("prepare-mutation", runstate.KindMutationRow, err)
+	}
+
 	// Success hands the worktree off to evaluate-mutation, which owns
 	// disposing it; disarm the deferred cleanup rather than call dispose().
 	disposed = true
 
 	out := prepareMutationOutput{
 		Envelope:     evidence.Envelope{SchemaVersion: evidence.SchemaVersion, VerifierVersion: evidence.VerifierVersion},
-		RunID: st.RunID,
-		RepoCommit: st.RepoCommit,
-		Source: st.Source,
+		RunID:        st.RunID,
+		RepoCommit:   st.RepoCommit,
+		Source:       st.Source,
 		SourceSHA256: st.SourceSHA256,
 		RowID:        row.ID,
 		Identity:     identityOutput{Scope: identity.Scope, Name: identity.Name},

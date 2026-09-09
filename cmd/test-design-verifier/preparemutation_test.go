@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"test-design/internal/mutation"
+	"test-design/internal/runstate"
 )
 
 func decodeCLIError(t *testing.T, stderr string) cliError {
@@ -224,5 +225,123 @@ func TestPrepareMutation_MissingRowIDRefused(t *testing.T) {
 	got := decodeCLIError(t, stderr)
 	if got.Code != "missing-row-id" {
 		t.Errorf("error code = %q, want missing-row-id", got.Code)
+	}
+}
+
+// completeLedgerRow closes an already-started mutation row in the run's real
+// ledger the way a finished evaluation does, so a test can drive an op that
+// meets a row this run has already answered.
+func completeLedgerRow(t *testing.T, repo, runID, rowID, outcome string) {
+	t.Helper()
+	req := fixtureVerifyRequest(repo, runID)
+	store, cliErr := openLedger("test", req)
+	if cliErr != nil {
+		t.Fatalf("openLedger: %v", cliErr.Message)
+	}
+	src, cliErr := loadVerifiedSource("test", repo, fixtureCoverageSource)
+	if cliErr != nil {
+		t.Fatalf("loadVerifiedSource: %v", cliErr.Message)
+	}
+	commit, cliErr := headCommit("test", repo)
+	if cliErr != nil {
+		t.Fatalf("headCommit: %v", cliErr.Message)
+	}
+	if _, err := store.Complete(ledgerIdentity(req, repo, commit, src), runstate.KindMutationRow, rowID, outcome, nil, ""); err != nil {
+		t.Fatalf("complete mutation-row/%s: %v", rowID, err)
+	}
+}
+
+// answeredMutationRow opens and closes rowID's obligation without preparing a
+// workspace: the ledger standing of a row this run already measured.
+func answeredMutationRow(t *testing.T, repo, runID, rowID, outcome string) {
+	t.Helper()
+	startLedgerRecord(t, repo, runID, runstate.KindMutationRow, rowID, mutationRowInputs{RunnerKind: "go"})
+	completeLedgerRow(t, repo, runID, rowID, outcome)
+}
+
+func TestPrepareMutation_OpensTheRowWithItsPreparedWorkspace(t *testing.T) {
+	repo := fixtureRepo(t)
+	prep := preparedMutation(t, repo, "prep-opens-row", "SC-09")
+
+	rec := ledgerRecord(t, runResume(t, repo, "prep-opens-row"), runstate.KindMutationRow, "SC-09")
+	if rec.Status != runstate.StatusStarted {
+		t.Errorf("mutation-row/SC-09 status = %q, want %q", rec.Status, runstate.StatusStarted)
+	}
+	var inputs mutationRowInputs
+	if err := recordInputs(&rec, &inputs); err != nil {
+		t.Fatalf("decode record inputs: %v", err)
+	}
+	want := mutationRowInputs{
+		Identity:     mutationRowIdentity{Scope: prep.Identity.Scope, Name: prep.Identity.Name},
+		RunnerKind:   prep.RunnerKind,
+		RunDir:       prep.RunDir,
+		WorktreePath: prep.WorktreePath,
+	}
+	if inputs != want {
+		t.Errorf("mutation-row/SC-09 inputs = %+v, want %+v", inputs, want)
+	}
+}
+
+func TestPrepareMutation_ACompletedRowIsRefusedBeforeAnyWorktree(t *testing.T) {
+	repo := fixtureRepo(t)
+	answeredMutationRow(t, repo, "prep-completed", "SC-09", "caught")
+
+	code, stdout, stderr := runVerifyOp(t, "prepare-mutation", prepareMutationRequestJSON(t, repo, "prep-completed", "SC-09"))
+
+	if code != exitError {
+		t.Fatalf("exit code = %d, want %d; stdout=%s", code, exitError, stdout)
+	}
+	got := decodeCLIError(t, stderr)
+	if got.Code != "mutation-row-completed" {
+		t.Errorf("error code = %q, want mutation-row-completed", got.Code)
+	}
+	if !strings.Contains(got.Message, "SC-09") {
+		t.Errorf("message = %q, want it to name the answered row", got.Message)
+	}
+	if left := verifierWorktrees(t); len(left) != 0 {
+		t.Errorf("worktrees registered = %v, want nothing created for a row this run already answered", left)
+	}
+}
+
+func TestPrepareMutation_ARepeatReopensACompletedRow(t *testing.T) {
+	repo := fixtureRepo(t)
+	answeredMutationRow(t, repo, "prep-repeat", "SC-09", "survived")
+
+	const reason = "the guard was rewritten; measure it again"
+	code, stdout, stderr := runVerifyOp(t, "prepare-mutation", requestWith(t, repo, "prep-repeat", map[string]any{
+		"rowID":  "SC-09",
+		"repeat": map[string]any{"reason": reason},
+	}))
+
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+	var out prepareMutationOutput
+	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
+		t.Fatalf("stdout did not decode: %v\nstdout=%s", err, stdout)
+	}
+	if info, err := os.Stat(out.WorktreePath); err != nil || !info.IsDir() {
+		t.Errorf("worktree at %s does not exist after the repeat: %v", out.WorktreePath, err)
+	}
+
+	resumed := runResume(t, repo, "prep-repeat")
+	rec := ledgerRecord(t, resumed, runstate.KindMutationRow, "SC-09")
+	if rec.Status != runstate.StatusStarted {
+		t.Errorf("current mutation-row/SC-09 status = %q, want %q", rec.Status, runstate.StatusStarted)
+	}
+	var superseded *runstate.Record
+	for i := range resumed.Records {
+		if resumed.Records[i].Status == runstate.StatusSuperseded {
+			superseded = &resumed.Records[i]
+		}
+	}
+	if superseded == nil {
+		t.Fatalf("records = %+v, want the answered row superseded by the repeat", resumed.Records)
+	}
+	if superseded.Detail != reason {
+		t.Errorf("superseded detail = %q, want the repeat reason %q", superseded.Detail, reason)
+	}
+	if superseded.Outcome != "survived" {
+		t.Errorf("superseded outcome = %q, want the answer it already carried", superseded.Outcome)
 	}
 }

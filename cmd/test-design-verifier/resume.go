@@ -1,11 +1,9 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -449,16 +447,6 @@ func mutationRowReport(rowID string, rec *runstate.Record, invalidReason func(*r
 	return row
 }
 
-// startedSiteProbe reads the site an interrupted evaluation was inside. It is a
-// probe over the state document rather than a field of the loaded shape because
-// evaluate-mutation owns that field: resume must report what the document says
-// whether or not this build's state package declares it.
-type startedSiteProbe struct {
-	Started *struct {
-		Site string `json:"site"`
-	} `json:"started"`
-}
-
 // mutationProgress reads a prepared row's state document: the sites it already
 // evaluated, and the site it was inside when it stopped.
 func mutationProgress(runDir string) ([]string, string, error) {
@@ -470,19 +458,10 @@ func mutationProgress(runDir string) ([]string, string, error) {
 	for _, site := range st.Sites {
 		completed = append(completed, site.Site)
 	}
-
-	data, err := os.ReadFile(filepath.Join(runDir, "mutation-state.json"))
-	if err != nil {
-		return nil, "", err
-	}
-	var probe startedSiteProbe
-	if err := json.Unmarshal(data, &probe); err != nil {
-		return nil, "", err
-	}
-	if probe.Started == nil {
+	if st.Started == nil {
 		return completed, "", nil
 	}
-	return completed, probe.Started.Site, nil
+	return completed, st.Started.Site, nil
 }
 
 func mutationComplete(required []string, rowRecords map[string]*runstate.Record, invalidReason func(*runstate.Record) string) bool {

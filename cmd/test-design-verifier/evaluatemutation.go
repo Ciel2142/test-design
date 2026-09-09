@@ -9,12 +9,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"test-design/internal/coverage"
 	"test-design/internal/evidence"
 	"test-design/internal/jvmrun"
 	"test-design/internal/mutation"
 	"test-design/internal/runrecord"
+	"test-design/internal/runstate"
 	"test-design/internal/worktree"
 )
 
@@ -32,11 +34,11 @@ type diffSummaryOutput struct {
 
 type evaluateMutationOutput struct {
 	evidence.Envelope
-	RunID string `json:"runId"`
-	RowID string `json:"rowID"`
-	RepoCommit string `json:"repoCommit"`
-	Source string `json:"source"`
-	SourceSHA256 string `json:"sourceSha256"`
+	RunID             string                 `json:"runId"`
+	RowID             string                 `json:"rowID"`
+	RepoCommit        string                 `json:"repoCommit"`
+	Source            string                 `json:"source"`
+	SourceSHA256      string                 `json:"sourceSha256"`
 	Site              string                 `json:"site"`
 	Outcome           string                 `json:"outcome"`
 	Diff              diffSummaryOutput      `json:"diff"`
@@ -63,9 +65,9 @@ type mutationEvidence struct {
 	evidence.Envelope
 	RunID         string                 `json:"runId"`
 	RowID         string                 `json:"rowID"`
-	RepoCommit string `json:"repoCommit"`
-	Source string `json:"source"`
-	SourceSHA256 string `json:"sourceSha256"`
+	RepoCommit    string                 `json:"repoCommit"`
+	Source        string                 `json:"source"`
+	SourceSHA256  string                 `json:"sourceSha256"`
 	Identity      identityOutput         `json:"identity"`
 	RunnerKind    string                 `json:"runnerKind"`
 	SuiteCommand  []string               `json:"suiteCommand"`
@@ -141,6 +143,16 @@ func evaluateMutationOp(req *evaluateMutationRequest, stdout io.Writer, between 
 	if st.RunID != req.RunID || st.RepoCommit != head || st.Source != src.Path || st.SourceSHA256 != src.SHA256 {
 		return &cliError{Code: "stale-evidence", Message: "evaluate-mutation: prepared state does not match request run/source/HEAD; prepare again"}
 	}
+	// Nothing is measured on a workspace of unknown cleanliness: the marker an
+	// interrupted evaluation left behind is cleared by recover-mutation, never
+	// by measuring over it.
+	if st.Started != nil {
+		return &cliError{
+			Code: "site-interrupted",
+			Message: fmt.Sprintf("evaluate-mutation: site %q was interrupted during its %s run; recover-mutation must restore %s before another site is measured",
+				st.Started.Site, st.Started.Phase, st.WorktreePath),
+		}
+	}
 	for _, so := range st.Sites {
 		if so.Site == req.Site {
 			return &cliError{
@@ -148,6 +160,27 @@ func evaluateMutationOp(req *evaluateMutationRequest, stdout io.Writer, between 
 				Message: fmt.Sprintf("evaluate-mutation: site %q is already recorded in %s", req.Site, req.RunDir),
 			}
 		}
+	}
+
+	store, cliErr := openLedger("evaluate-mutation", &req.verifyRequest)
+	if cliErr != nil {
+		return cliErr
+	}
+	ledger, cliErr := loadLedgerFor("evaluate-mutation", runstate.KindMutationRow, store)
+	if cliErr != nil {
+		return cliErr
+	}
+	// The row must be the one prepare-mutation opened and nothing has answered
+	// yet: a row with no record carries no obligation this measurement could
+	// satisfy, and one already answered would have its verdict overwritten.
+	switch current := runstate.Current(ledger, runstate.KindMutationRow, st.RowID); {
+	case current == nil:
+		return &cliError{
+			Code:    "mutation-row-not-started",
+			Message: fmt.Sprintf("evaluate-mutation: %s was never prepared for this run", st.RowID),
+		}
+	case current.Status == runstate.StatusCompleted:
+		return completedRecordRefusal("evaluate-mutation", runstate.KindMutationRow, st.RowID)
 	}
 
 	ctrl, err := worktree.NewController(req.RepoRoot)
@@ -173,6 +206,21 @@ func evaluateMutationOp(req *evaluateMutationRequest, stdout io.Writer, between 
 
 	siteIndex := len(st.Sites) + 1
 
+	// markSite names the site about to run before the run starts, so a process
+	// killed inside it leaves the workspace's uncertainty on disk instead of a
+	// state document that reads as if nothing had happened.
+	markSite := func(phase string) *cliError {
+		st.Started = &mutation.SiteAttempt{
+			Site:      req.Site,
+			Phase:     phase,
+			StartedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		}
+		if err := mutation.WriteState(req.RunDir, st); err != nil {
+			return &cliError{Code: "state-write-failed", Message: fmt.Sprintf("evaluate-mutation: %v", err)}
+		}
+		return nil
+	}
+
 	diff, err := ctrl.Diff(wt)
 	if err != nil {
 		return restoreOnFail(&cliError{Code: "diff-failed", Message: fmt.Sprintf("evaluate-mutation: %v", err)})
@@ -192,6 +240,9 @@ func evaluateMutationOp(req *evaluateMutationRequest, stdout io.Writer, between 
 	if err := os.MkdirAll(mutatedDir, 0o755); err != nil {
 		return restoreOnFail(&cliError{Code: "run-dir-write-failed", Message: fmt.Sprintf("evaluate-mutation: %v", err)})
 	}
+	if cliErr := markSite("mutated"); cliErr != nil {
+		return restoreOnFail(cliErr)
+	}
 	outcome, mutatedExit, cliErr := runTargetedAndVerify("evaluate-mutation", src, suiteDir, wt.Path, mutatedDir, target, st.Identity)
 	if cliErr != nil {
 		return restoreOnFail(cliErr)
@@ -204,6 +255,9 @@ func evaluateMutationOp(req *evaluateMutationRequest, stdout io.Writer, between 
 	cleanDir := filepath.Join(req.RunDir, fmt.Sprintf("site-%d-clean", siteIndex))
 	if err := os.MkdirAll(cleanDir, 0o755); err != nil {
 		return restoreOnFail(&cliError{Code: "run-dir-write-failed", Message: fmt.Sprintf("evaluate-mutation: %v", err)})
+	}
+	if cliErr := markSite("clean"); cliErr != nil {
+		return restoreOnFail(cliErr)
 	}
 	cleanOutcome, cleanExit, cleanErr := runTargetedAndVerify("evaluate-mutation", src, suiteDir, wt.Path, cleanDir, target, st.Identity)
 	if cleanErr != nil || cleanOutcome != "survived" {
@@ -226,6 +280,9 @@ func evaluateMutationOp(req *evaluateMutationRequest, stdout io.Writer, between 
 		CleanRunDir:       cleanDir,
 		CleanExitStatus:   cleanExit,
 	}
+	// The site is finished, so the marker goes out in the same write that
+	// records it: the workspace is clean and the state says so in one step.
+	st.Started = nil
 	st.Sites = append(st.Sites, so)
 	if err := mutation.WriteState(req.RunDir, st); err != nil {
 		return &cliError{Code: "state-write-failed", Message: fmt.Sprintf("evaluate-mutation: %v", err)}
@@ -233,11 +290,11 @@ func evaluateMutationOp(req *evaluateMutationRequest, stdout io.Writer, between 
 
 	out := evaluateMutationOutput{
 		Envelope:          evidence.Envelope{SchemaVersion: evidence.SchemaVersion, VerifierVersion: evidence.VerifierVersion},
-		RunID: st.RunID,
-		RowID: st.RowID,
-		RepoCommit: st.RepoCommit,
-		Source: st.Source,
-		SourceSHA256: st.SourceSHA256,
+		RunID:             st.RunID,
+		RowID:             st.RowID,
+		RepoCommit:        st.RepoCommit,
+		Source:            st.Source,
+		SourceSHA256:      st.SourceSHA256,
 		Site:              req.Site,
 		Outcome:           outcome,
 		Diff:              diffSummaryOutput{File: summary.File, Hunks: summary.Hunks},
@@ -282,9 +339,9 @@ func evaluateMutationOp(req *evaluateMutationRequest, stdout io.Writer, between 
 	ev := mutationEvidence{
 		Envelope:      out.Envelope,
 		RunID:         st.RunID,
-		RepoCommit: st.RepoCommit,
-		Source: st.Source,
-		SourceSHA256: st.SourceSHA256,
+		RepoCommit:    st.RepoCommit,
+		Source:        st.Source,
+		SourceSHA256:  st.SourceSHA256,
 		RowID:         st.RowID,
 		Identity:      identityOutput{Scope: st.Identity.Scope, Name: st.Identity.Name},
 		RunnerKind:    src.Runner.Kind,
@@ -295,6 +352,25 @@ func evaluateMutationOp(req *evaluateMutationRequest, stdout io.Writer, between 
 	}
 	if err := evidence.WriteJSON(evidencePath, &ev); err != nil {
 		return &cliError{Code: "evidence-write-failed", Message: fmt.Sprintf("evaluate-mutation: %v", err)}
+	}
+
+	// The row is answered only once its evidence exists and the repository has
+	// been proved untouched. One site that was not caught answers the whole
+	// row: a guard the mutant walked past is not made sound by the sites that
+	// did catch one.
+	rowOutcome := "caught"
+	for _, site := range st.Sites {
+		if site.Outcome != "caught" {
+			rowOutcome = "survived"
+			break
+		}
+	}
+	if _, err := store.Complete(ledgerIdentity(&req.verifyRequest, req.RepoRoot, head, src),
+		runstate.KindMutationRow, st.RowID, rowOutcome,
+		map[string]string{artifactEvidence: evidencePath}, ""); err != nil {
+		cliErr := ledgerError("evaluate-mutation", runstate.KindMutationRow, err)
+		cliErr.Message = fmt.Sprintf("%s; the evidence stands at %s", cliErr.Message, evidencePath)
+		return cliErr
 	}
 
 	out.Sites = st.Sites

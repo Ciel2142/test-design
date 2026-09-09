@@ -61,6 +61,10 @@ var ops = map[string]opSpec{
 		newFlags: newRecordMutationFlags,
 		handler:  recordMutationHandler,
 	},
+	"recover-mutation": {
+		newFlags: newRecoverMutationFlags,
+		handler:  recoverMutationHandler,
+	},
 	"resume": {
 		newFlags: newResumeFlags,
 		handler:  resumeHandler,
