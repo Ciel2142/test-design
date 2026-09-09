@@ -201,9 +201,9 @@ example rather than from a neighboring request — a `rowID` pasted into `record
 |---|---|---|
 | `trace` | `phase-completed` | The trace phase is already completed for this run and the request carried no `repeat.reason`; add one or use a new run ID |
 | `trace`, `record-review`, `prepare-mutation`, `evaluate-mutation`, `record-mutation`, `record-attempt`, `execute-live` | `ledger-identity-mismatch` | The ledger already belongs to a different repo root, commit, source path or source digest than this request presents — raised by `Start` or `Complete`; `resume` and `recover-mutation` call neither, so they never return it |
-| `trace`, `resume` | `ledger-open-failed` | The state dir could not be resolved, or it resolves inside the repository under verification |
-| `trace`, `resume` | `ledger-invalid` | The checkpoint could not be parsed, names a foreign schema version, or holds two current records for one obligation |
-| `trace` | `ledger-write-failed` | The checkpoint could not be replaced; the prior checkpoint stands unchanged |
+| every ledger-touching op — `trace`, `record-review`, `prepare-mutation`, `evaluate-mutation`, `record-mutation`, `recover-mutation`, `record-attempt`, `execute-live`, `resume` | `ledger-open-failed` | The state dir could not be resolved, or it resolves inside the repository under verification — raised by `openLedger` itself, before anything is read |
+| every ledger-touching op — same list as above | `ledger-invalid` | The checkpoint could not be parsed, names a foreign schema version, or holds two current records for one obligation — raised wherever the checkpoint is loaded, whether through `loadLedgerFor` directly or inside a `Start`/`Complete` call |
+| every ledger-touching op except `resume` and `recover-mutation`, which never write — `trace`, `record-review`, `prepare-mutation`, `evaluate-mutation`, `record-mutation`, `record-attempt`, `execute-live` | `ledger-write-failed` | The checkpoint could not be replaced after a `Start` or `Complete` transition; the prior checkpoint stands unchanged |
 | `record-review` | `missing-group-id` | `groupId` is required |
 | `record-review` | `invalid-group-id` | `groupId` must be a plain name of letters, digits, dot, dash or underscore |
 | `record-review` | `invalid-status` | `status` must be `started` or `completed` |
