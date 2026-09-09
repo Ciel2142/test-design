@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 
@@ -519,4 +520,157 @@ func TestRecordReview_ARepeatedGroupKeepsTheSupersededEvidence(t *testing.T) {
 	if got := reviewOutcome(doc.Verdicts); got != "holds" {
 		t.Errorf("superseded evidence verdicts %+v imply %q, want the holds it was completed from", doc.Verdicts, got)
 	}
+}
+
+// fixtureGateVar, when set in the environment the suite inherits, makes the
+// gated fixture's SC-01 test skip. It is the one lever a test has to make a
+// trace of an unchanged commit hand out different dispatch inputs: trace
+// refuses a dirty tree, and a commit would move the run's identity.
+const fixtureGateVar = "TEST_DESIGN_FIXTURE_GATE_SC01"
+
+// gatedFixtureEdit rewrites the fixture's SC-01 test to skip under
+// fixtureGateVar, applied before the fixture's first commit so the run's
+// commit never moves.
+func gatedFixtureEdit(t *testing.T) func(repo string) {
+	t.Helper()
+	return func(repo string) {
+		path := filepath.Join(repo, "orders", "orders_test.go")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read the fixture's orders test: %v", err)
+		}
+		src := replaceExactlyOnce(t, string(data), `import "testing"`, "import (\n\t\"os\"\n\t\"testing\"\n)")
+		src = replaceExactlyOnce(t, src, "func TestValidateQuantityAccepts(t *testing.T) {\n",
+			"func TestValidateQuantityAccepts(t *testing.T) {\n\tif os.Getenv(\""+fixtureGateVar+"\") != \"\" {\n\t\tt.Skip(\"gated off for this trace\")\n\t}\n")
+		if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+			t.Fatalf("write the fixture's orders test: %v", err)
+		}
+	}
+}
+
+// repeatTrace runs trace again for the run under a repeat reason and returns
+// what it produced.
+func repeatTrace(t *testing.T, repo, runID, reason string) traceOutput {
+	t.Helper()
+	code, stdout, stderr := runVerifyOp(t, "trace", requestWith(t, repo, runID, map[string]any{
+		"repeat": map[string]string{"reason": reason},
+	}))
+	if code != exitOK {
+		t.Fatalf("repeated trace exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+	return decodeTraceOutput(t, stdout)
+}
+
+// TestRecordReview_DispatchInputsAreComparedByContent drives the rule the
+// review layer stands on through the real ops: a group is judged against the
+// content of the dispatch inputs it was opened under, never their path. A
+// repeated trace that hands out byte-identical inputs leaves every group as it
+// was — a completed one valid, an open one completable. One that hands out
+// different inputs, here because the suite's own result changed at the same
+// commit, invalidates the completed groups (resume: inputs-changed) and refuses
+// to close an open one (dispatch-inputs-changed). The trace itself stays valid
+// throughout: what changed is what it hands out, not whether it stands.
+func TestRecordReview_DispatchInputsAreComparedByContent(t *testing.T) {
+	repo := fixtureRepoWith(t, gatedFixtureEdit(t))
+	const runID = "review-dispatch-content"
+
+	code, stdout, stderr := runVerifyOp(t, "trace", verifyRequestJSON(t, repo, runID))
+	if code != exitOK {
+		t.Fatalf("trace exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+	first := decodeTraceOutput(t, stdout)
+	dispatch := readDispatchInputs(t, first.DispatchPath)
+	if got := dispatchRowFor(t, dispatch, "SC-01").Status; got == "gap" {
+		t.Fatalf("SC-01 status = %q with the gate unset, want the bound test run", got)
+	}
+	firstDigest, err := evidence.SHA256File(first.DispatchPath)
+	if err != nil {
+		t.Fatalf("SHA256File: %v", err)
+	}
+
+	startReviewGroup(t, repo, runID, "A", "SC-01", "SC-02")
+	completeReviewGroup(t, repo, runID, "A", dispatch, "SC-01", "SC-02")
+	startReviewGroup(t, repo, runID, "B", "SC-03")
+	startReviewGroup(t, repo, runID, "C", "SC-09")
+
+	t.Run("byte-identical repeated inputs keep every group as it was", func(t *testing.T) {
+		repeated := repeatTrace(t, repo, runID, "trace repeated with nothing changed")
+		if repeated.DispatchPath == first.DispatchPath {
+			t.Fatalf("repeated trace reused %q, want a document of its own so the comparison is of content", repeated.DispatchPath)
+		}
+		digest, err := evidence.SHA256File(repeated.DispatchPath)
+		if err != nil {
+			t.Fatalf("SHA256File: %v", err)
+		}
+		if digest != firstDigest {
+			t.Fatalf("repeated dispatch inputs digest %s != %s, want the unchanged commit to hand out identical inputs", digest, firstDigest)
+		}
+
+		out := runResume(t, repo, runID)
+		if out.Trace.Status != string(runstate.StatusCompleted) || out.Trace.Reason != "" {
+			t.Errorf("trace = %+v, want the repeated phase completed and valid", out.Trace)
+		}
+		if group := resumeGroupFor(t, out, "A"); group.Status != string(runstate.StatusCompleted) || group.Reason != "" {
+			t.Errorf("group A = %+v, want it still a valid completion", group)
+		}
+		for _, id := range []string{"B", "C"} {
+			if group := resumeGroupFor(t, out, id); group.Status != string(runstate.StatusStarted) || group.Reason != "" {
+				t.Errorf("group %s = %+v, want it still an open group with nothing against it", id, group)
+			}
+		}
+		if closed := completeReviewGroup(t, repo, runID, "C", dispatch, "SC-09"); closed.Status != reviewStatusCompleted || closed.Outcome != "holds" {
+			t.Errorf("completing C after the identical repeat = %+v, want it accepted and holds", closed)
+		}
+	})
+
+	t.Run("changed inputs invalidate completed groups and refuse to close open ones", func(t *testing.T) {
+		t.Setenv(fixtureGateVar, "1")
+		gated := repeatTrace(t, repo, runID, "SC-01's test gated off")
+		changed := readDispatchInputs(t, gated.DispatchPath)
+		if got := dispatchRowFor(t, changed, "SC-01").Status; got != "gap" {
+			t.Fatalf("SC-01 status = %q under the gate, want gap: the suite did not see the gate", got)
+		}
+		digest, err := evidence.SHA256File(gated.DispatchPath)
+		if err != nil {
+			t.Fatalf("SHA256File: %v", err)
+		}
+		if digest == firstDigest {
+			t.Fatalf("gated dispatch inputs digest %s equals the first, want different content", digest)
+		}
+
+		got := refuseRecordReview(t, repo, runID, map[string]any{
+			"groupId": "B", "status": "completed",
+			"verdicts": []map[string]string{{"rowId": "SC-03", "verdict": "HOLDS"}},
+		})
+		if got.Code != "dispatch-inputs-changed" {
+			t.Errorf("completing B = %q, want dispatch-inputs-changed (message %q)", got.Code, got.Message)
+		}
+
+		out := runResume(t, repo, runID)
+		if out.Trace.Status != string(runstate.StatusCompleted) || out.Trace.Reason != "" {
+			t.Errorf("trace = %+v, want the gated phase completed and valid: the inputs changed, not the trace's standing", out.Trace)
+		}
+		for _, id := range []string{"A", "C"} {
+			group := resumeGroupFor(t, out, id)
+			if group.Status != statusInvalid || group.Reason != reasonInputsChanged {
+				t.Errorf("group %s = %+v, want status %s reason %s", id, group, statusInvalid, reasonInputsChanged)
+			}
+			owed := resumePending{Kind: runstate.KindReviewGroup, ID: id, Reason: reasonInputsChanged}
+			if !slices.Contains(out.Pending, owed) {
+				t.Errorf("pending = %+v, want %+v offered again", out.Pending, owed)
+			}
+		}
+		if group := resumeGroupFor(t, out, "B"); group.Status != string(runstate.StatusStarted) || group.Reason != reasonInputsChanged {
+			t.Errorf("group B = %+v, want it open with reason %s", group, reasonInputsChanged)
+		}
+		if out.Counts.Invalid != 2 {
+			t.Errorf("counts.invalid = %d, want 2", out.Counts.Invalid)
+		}
+		if out.Review.Complete {
+			t.Error("review.complete = true, want false over groups judged against inputs the run no longer hands out")
+		}
+		if !strings.Contains(strings.Join(out.Review.Uncovered, ","), "SC-06") {
+			t.Errorf("review.uncovered = %v, want the never-grouped rows still listed", out.Review.Uncovered)
+		}
+	})
 }
