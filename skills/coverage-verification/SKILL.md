@@ -70,6 +70,7 @@ A rerun after a fix requires another gate, a new run ID, and all four layers.
 
 | State | Required action before proceeding | Next |
 |---|---|---|
+| Restart or resume | Run `resume` and read [run state](references/run-state.md) in full before repeating any op | Wherever `resume` reports work still owed |
 | Approved | Run trace below; consume its immutable dispatch payload; classify freshness | Critic |
 | Critic | **Read [critic phase](references/critic.md) in full before dispatch** | Live |
 | Live | **Read [live phase](references/live.md) in full before applicability/prepare/dispatch** | Mutation |

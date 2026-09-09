@@ -123,3 +123,12 @@ and record the row as
 the attempt document is loaded through `report.LoadAttempt`, which refuses anything without
 the envelope. The row becomes `MUTATION-N/A (environmental)` and the run yields `PARTIAL`.
 
+### Restart
+
+If a run is picked back up, `resume` names every started mutation row with its
+`completedSites` and its `interruptedSite` — read [run state](run-state.md) in full before
+repeating any op here. `evaluate-mutation` refuses `site-interrupted` for that row until
+`recover-mutation` has restored or recreated its workspace: nothing is measured on a worktree
+of unknown cleanliness. Completed sites are kept either way — recovery never re-measures a
+site the row already answered. A refused recovery leaves the row exactly where it was:
+pending, and the abandoned worktree in place, not removed on your account.

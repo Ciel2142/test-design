@@ -158,6 +158,23 @@ both PARTIAL; a non-empty `executionErrors` yields `live-execution-errors` (PART
 verdict of `LIVE-FAIL` or `LIVE-INCONCLUSIVE` is BLOCKED for that row. These are independent —
 several can fire on the same run — and none of them can turn a run's verdict into a pass.
 
+**Restart.** A prior live-attempt record for this run — completed or left started by an
+interruption — makes `execute-live` run the profile's own `cleanup` commands as recovery
+before any `start` command: the resources that attempt owns are exactly what those commands
+remove, and a fresh start over a half-live environment would judge rows against something
+nobody designed. `recovery` — `{performed, ok, steps}` in both the evidence and the output —
+is absent from a first attempt and present on every later one; `performed` is always `true`
+there, `ok` says whether the commands proved removal, and `steps` carries their reduced
+transcripts. A failed recovery is a completed attempt with ledger outcome `inconclusive`: no
+fresh start at all — no `start`, `health`, plan or plan-cleanup command runs — every
+applicable row is `LIVE-INCONCLUSIVE`, the normal end-of-run cleanup is skipped, and
+`executionErrors` gains a `recovery` entry naming the cause. A completed attempt, by either
+path, is refused `live-attempt-completed` without `repeat.reason`; with one, recovery runs
+again first. Prefer `execute-live` (which recovers) over a layer-3 `record-attempt` while the
+profile is still usable: `record-attempt` completes the layer `unavailable` without running
+recovery at all, leaving the environment exactly as the interruption left it. See
+[run state](run-state.md) for the ledger mechanics.
+
 Artifact identity has no dedicated evidence field: the deploy recipe stamps and checks the
 repository revision itself, refusing to run against a stale checkout on its own account, and the
 verifier only preserves what the recipe printed — each step's `decisiveOutput` carries the
