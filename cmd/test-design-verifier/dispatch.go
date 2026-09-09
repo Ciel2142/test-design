@@ -46,16 +46,38 @@ type dispatchRow struct {
 	TestSource           string                `json:"testSource,omitempty"`
 	TestSourceSHA256     string                `json:"testSourceSha256,omitempty"`
 	Contributors         []dispatchContributor `json:"contributors,omitempty"`
+	ClaimSHA256          string                `json:"claimSha256"`
 }
 
 type dispatchInputs struct {
 	evidence.Envelope
-	RunID        string        `json:"runId"`
-	Source       string        `json:"source"`
-	SourceSHA256 string        `json:"sourceSha256"`
-	RepoCommit   string        `json:"repoCommit"`
-	Rows         []dispatchRow `json:"rows"`
+	RunID        string                  `json:"runId"`
+	Source       string                  `json:"source"`
+	SourceSHA256 string                  `json:"sourceSha256"`
+	RepoCommit   string                  `json:"repoCommit"`
+	Rows         []dispatchRow           `json:"rows"`
+	Runner       evidence.RunnerIdentity `json:"runner"`
+	ToolVersions map[string]string       `json:"toolVersions"`
 }
+
+// claimOf returns the approved semantics row carries as an evidence.Claim,
+// suitable for ClaimDigest. It reads only the row's claim-identity fields:
+// a row's status, source binding or contributors never affect its digest.
+func claimOf(row dispatchRow) evidence.Claim {
+	return evidence.Claim{
+		ID:       row.RowID,
+		Behavior: row.Behavior,
+		Expected: row.Expected,
+		Level:    row.Level,
+		Mutation: row.VerificationMutation,
+		Risk:     row.Risk,
+	}
+}
+
+// toolVersionsFor is the seam writeDispatchInputs calls through to capture
+// toolchain provenance; production code never reassigns it. Tests swap it to
+// avoid depending on a real toolchain binary and restore it with t.Cleanup.
+var toolVersionsFor = toolVersions
 
 func writeDispatchInputs(src *coverage.Source, ev *traceEvidence, suiteDir, runDir string) (string, error) {
 	bindings := make(map[string]traceRowResult, len(ev.RowResults))
@@ -79,6 +101,11 @@ func writeDispatchInputs(src *coverage.Source, ev *traceEvidence, suiteDir, runD
 		Envelope: ev.Envelope, RunID: ev.RunID, Source: ev.Source,
 		SourceSHA256: ev.SourceSHA256, RepoCommit: ev.RepoCommit,
 		Rows: make([]dispatchRow, 0, len(src.Rows)),
+		Runner: evidence.RunnerIdentity{
+			Kind: src.Runner.Kind, Root: src.Runner.Root,
+			Command: src.Runner.Command, ReportGlobs: src.Runner.ReportGlobs,
+		},
+		ToolVersions: toolVersionsFor(suiteDir, src.Runner.Kind, src.Runner.Command),
 	}
 	read := newRangeReader(suiteDir)
 	for _, row := range src.Rows {
@@ -87,6 +114,7 @@ func writeDispatchInputs(src *coverage.Source, ev *traceEvidence, suiteDir, runD
 		}
 		entry := dispatchRow{RowID: row.ID, Behavior: row.Behavior, Expected: row.Expected,
 			Level: row.Level, Risk: row.Risk, VerificationMutation: row.Mutation, Status: "gap"}
+		entry.ClaimSHA256 = evidence.ClaimDigest(claimOf(entry))
 		if binding, bound := bindings[row.ID]; bound && binding.File != "" {
 			entry.Status, entry.Scope, entry.TestName = binding.Status, binding.Scope, binding.Name
 			entry.File, entry.Line, entry.EndLine = binding.File, binding.Line, binding.EndLine
