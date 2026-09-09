@@ -250,7 +250,7 @@ func recordReviewCompleted(
 			Inputs:       recorded,
 			Verdicts:     verdicts,
 		}
-		path := filepath.Join(store.Dir(), "review-"+req.GroupID+".json")
+		path := reviewEvidencePath(store.Dir(), req.GroupID, current.Seq)
 		if err := evidence.WriteJSON(path, &doc); err != nil {
 			return &cliError{Code: "evidence-write-failed", Message: fmt.Sprintf("%s: %v", op, err)}
 		}
@@ -269,6 +269,14 @@ func recordReviewCompleted(
 		return cliErr
 	}
 	return writeStdout(stdout, out)
+}
+
+// reviewEvidencePath names the evidence of the group's completion after the
+// started record it completes, review-<groupId>-<seq>.json: a repeated group
+// gets a file of its own, so the superseded record's artifact stays the bytes
+// it digested rather than a path whose content has moved on.
+func reviewEvidencePath(ledgerDir, groupID string, seq int) string {
+	return filepath.Join(ledgerDir, fmt.Sprintf("review-%s-%d.json", groupID, seq))
 }
 
 // checkGroupRows answers from the coverage document alone what a group may

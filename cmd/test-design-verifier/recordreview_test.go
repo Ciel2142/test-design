@@ -171,8 +171,11 @@ func TestRecordReview_GroupLifecycle(t *testing.T) {
 	}
 
 	t.Run("the completed group's evidence carries what it was judged against", func(t *testing.T) {
-		if filepath.Base(completed.EvidencePath) != "review-g1.json" {
-			t.Errorf("evidencePath = %q, want it to name review-g1.json", completed.EvidencePath)
+		// The trace is the ledger's seq-1 record and g1 its seq-2 one; the
+		// file carries the started record's seq so a repeated group never
+		// writes over the evidence its superseded record digested.
+		if filepath.Base(completed.EvidencePath) != "review-g1-2.json" {
+			t.Errorf("evidencePath = %q, want it to name review-g1-2.json", completed.EvidencePath)
 		}
 		data, err := os.ReadFile(completed.EvidencePath)
 		if err != nil {
@@ -448,5 +451,72 @@ func TestRecordReview_ConcurrentCompletionsRecordOneResult(t *testing.T) {
 	}
 	if got := reviewOutcome(doc.Verdicts); got != rec.Outcome {
 		t.Errorf("evidence verdicts %+v imply %q, want the recorded outcome %q computed from them", doc.Verdicts, got, rec.Outcome)
+	}
+}
+
+// TestRecordReview_ARepeatedGroupKeepsTheSupersededEvidence: a superseded
+// record keeps its outcome, artifacts and timestamps, and the artifact it
+// keeps must still be the file it digested. The repeated group's completion
+// therefore lands in a file of its own, named by its record's seq, and the
+// superseded record verifies against the verdicts it was completed from.
+func TestRecordReview_ARepeatedGroupKeepsTheSupersededEvidence(t *testing.T) {
+	repo := fixtureRepo(t)
+	const runID = "review-repeat-evidence"
+	if code, _, stderr := runVerifyOp(t, "trace", verifyRequestJSON(t, repo, runID)); code != exitOK {
+		t.Fatalf("trace exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+	startReviewGroup(t, repo, runID, "A", "SC-01", "SC-02")
+	first := runRecordReview(t, repo, runID, map[string]any{
+		"groupId": "A", "status": "completed",
+		"verdicts": []map[string]string{{"rowId": "SC-01", "verdict": "HOLDS"}, {"rowId": "SC-02", "verdict": "HOLDS"}},
+	})
+	if first.Outcome != "holds" {
+		t.Fatalf("first outcome = %q, want holds", first.Outcome)
+	}
+
+	runRecordReview(t, repo, runID, map[string]any{
+		"groupId": "A", "status": "started", "rows": []string{"SC-01", "SC-02"},
+		"repeat": map[string]string{"reason": "critic environment repaired"},
+	})
+	second := runRecordReview(t, repo, runID, map[string]any{
+		"groupId": "A", "status": "completed",
+		"verdicts": []map[string]string{{"rowId": "SC-01", "verdict": "HOLDS"}, {"rowId": "SC-02", "verdict": "WEAK", "reason": "asserts nothing about the value"}},
+	})
+	if second.Outcome != "blocked" {
+		t.Fatalf("second outcome = %q, want blocked", second.Outcome)
+	}
+	if second.EvidencePath == first.EvidencePath {
+		t.Fatalf("repeated completion wrote %q, want a file of its own beside the superseded %q", second.EvidencePath, first.EvidencePath)
+	}
+
+	out := runResume(t, repo, runID)
+	replaced := supersededRecord(t, out, runstate.KindReviewGroup, "A")
+	if replaced.Outcome != "holds" || replaced.Artifacts[artifactEvidence].Path != first.EvidencePath {
+		t.Errorf("superseded A = %+v, want outcome holds and its own evidence path %q", replaced, first.EvidencePath)
+	}
+	if reasons := runstate.Verify(&replaced); len(reasons) != 0 {
+		t.Errorf("Verify(superseded A) = %v, want the retained evidence to still digest to what the record carries", reasons)
+	}
+	current := ledgerRecord(t, out, runstate.KindReviewGroup, "A")
+	if current.Outcome != "blocked" || current.Artifacts[artifactEvidence].Path != second.EvidencePath {
+		t.Errorf("current A = %+v, want outcome blocked and evidence path %q", current, second.EvidencePath)
+	}
+	if reasons := runstate.Verify(&current); len(reasons) != 0 {
+		t.Errorf("Verify(current A) = %v, want none", reasons)
+	}
+	if want := fmt.Sprintf("review-A-%d.json", current.Seq); filepath.Base(second.EvidencePath) != want {
+		t.Errorf("current evidence = %q, want it named %s after the record that completed it", second.EvidencePath, want)
+	}
+
+	data, err := os.ReadFile(first.EvidencePath)
+	if err != nil {
+		t.Fatalf("read the superseded evidence: %v", err)
+	}
+	var doc reviewEvidence
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("superseded evidence did not decode: %v\ndata=%s", err, data)
+	}
+	if got := reviewOutcome(doc.Verdicts); got != "holds" {
+		t.Errorf("superseded evidence verdicts %+v imply %q, want the holds it was completed from", doc.Verdicts, got)
 	}
 }

@@ -48,6 +48,14 @@ func fixtureVerifyRequest(repo, runID string) *verifyRequest {
 // can drive the op that finishes one.
 func startLedgerRecord(t *testing.T, repo, runID string, kind runstate.Kind, key string, inputs any) {
 	t.Helper()
+	startLedgerRecordWith(t, repo, runID, kind, key, inputs, "")
+}
+
+// startLedgerRecordWith is startLedgerRecord with a repeat reason, so a test
+// can reopen an obligation the run already completed the way prepare-mutation
+// does under repeat.reason.
+func startLedgerRecordWith(t *testing.T, repo, runID string, kind runstate.Kind, key string, inputs any, repeat string) {
+	t.Helper()
 	req := fixtureVerifyRequest(repo, runID)
 	store, cliErr := openLedger("test", req)
 	if cliErr != nil {
@@ -61,7 +69,7 @@ func startLedgerRecord(t *testing.T, repo, runID string, kind runstate.Kind, key
 	if cliErr != nil {
 		t.Fatalf("headCommit: %v", cliErr.Message)
 	}
-	if _, err := store.Start(ledgerIdentity(req, repo, commit, src), kind, key, inputs, "", ""); err != nil {
+	if _, err := store.Start(ledgerIdentity(req, repo, commit, src), kind, key, inputs, "", repeat); err != nil {
 		t.Fatalf("start %s/%s: %v", kind, key, err)
 	}
 }

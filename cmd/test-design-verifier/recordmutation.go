@@ -76,6 +76,14 @@ func decodeRecordMutationRequest(op string, requestBody []byte) (*recordMutation
 	}, nil
 }
 
+// unappliableEvidencePath names the evidence of the row's completion after the
+// started record it completes, mutation-unappliable-<rowId>-<seq>.json: a
+// repeated row gets a file of its own, so the superseded record's artifact
+// stays the bytes it digested.
+func unappliableEvidencePath(ledgerDir, rowID string, seq int) string {
+	return filepath.Join(ledgerDir, fmt.Sprintf("mutation-unappliable-%s-%d.json", rowID, seq))
+}
+
 // recordMutationHandler closes a mutation row the mutator found no site for.
 // It records the caller's account of why — never a verdict about the test — and
 // completes the row against a document that names the prepared workspace the
@@ -156,7 +164,7 @@ func recordMutationHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Write
 			RunDir:       prepared.RunDir,
 			WorktreePath: prepared.WorktreePath,
 		}
-		path := filepath.Join(store.Dir(), "mutation-unappliable-"+req.RowID+".json")
+		path := unappliableEvidencePath(store.Dir(), req.RowID, current.Seq)
 		if err := evidence.WriteJSON(path, &doc); err != nil {
 			return &cliError{Code: "evidence-write-failed", Message: fmt.Sprintf("%s: %v", op, err)}
 		}

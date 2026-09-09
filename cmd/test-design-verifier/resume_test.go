@@ -558,8 +558,8 @@ func TestResume_SelectsOnlyValidatedCompletions(t *testing.T) {
 		t.Errorf("review.uncovered = %v, want none", out.Review.Uncovered)
 	}
 
-	if base := filepath.Base(groupA.EvidencePath); base != "review-A.json" {
-		t.Fatalf("group A evidence = %q, want review-A.json", base)
+	if base := filepath.Base(groupA.EvidencePath); base != "review-A-2.json" {
+		t.Fatalf("group A evidence = %q, want review-A-2.json (the trace is seq 1, A seq 2)", base)
 	}
 	data, err := os.ReadFile(groupA.EvidencePath)
 	if err != nil {
