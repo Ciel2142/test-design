@@ -349,6 +349,43 @@ func TestResume_AStartedRowNamesTheWorkspaceItsStateNowCarries(t *testing.T) {
 	}
 }
 
+// TestResume_AStartedRowIsOwedWhateverItsRisk holds the difference between
+// what a run is required to do and what it has actually taken on. The rows the
+// dispatch inputs require are the high-risk ones, and only those are offered
+// when nothing has touched them. But a row the run opened is an obligation
+// however it came to be opened: until it is answered or recovered, a parent
+// reading pending top to bottom has to see it, or an interrupted low-risk row
+// leaves a workspace standing that the report says nothing about.
+func TestResume_AStartedRowIsOwedWhateverItsRisk(t *testing.T) {
+	repo := fixtureRepo(t)
+	const runID = "resume-started-low-risk"
+
+	if code, _, stderr := runVerifyOp(t, "trace", verifyRequestJSON(t, repo, runID)); code != exitOK {
+		t.Fatalf("trace exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+	// SC-09 is low risk, so the dispatch inputs never require a mutation of
+	// it; prepare-mutation opening one is the run's own doing.
+	preparedMutation(t, repo, runID, "SC-09")
+
+	out := runResume(t, repo, runID)
+
+	if got, want := resumeRow(t, out, "SC-09").Status, string(runstate.StatusStarted); got != want {
+		t.Errorf("SC-09 status = %q, want %q", got, want)
+	}
+	owed := resumePending{Kind: runstate.KindMutationRow, ID: "SC-09", Reason: reasonNotCompleted}
+	if !slices.Contains(out.Pending, owed) {
+		t.Errorf("pending = %+v, want %+v among them: the run opened this row and has not closed it", out.Pending, owed)
+	}
+	// The rows the dispatch requires are still offered, and still only when
+	// nothing has touched them.
+	for _, required := range []string{"SC-10", "SC-07"} {
+		never := resumePending{Kind: runstate.KindMutationRow, ID: required, Reason: reasonNeverStarted}
+		if !slices.Contains(out.Pending, never) {
+			t.Errorf("pending = %+v, want %+v among them", out.Pending, never)
+		}
+	}
+}
+
 // survivedGuardMutant is the equivalent mutant of
 // TestEvaluateMutation_SurvivedSite: it rewrites ValidateQuantity's message on
 // a branch the bound tests never take, so every targeted test still passes and

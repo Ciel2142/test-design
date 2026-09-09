@@ -510,17 +510,15 @@ func recordEvidencePath(rec *runstate.Record) string {
 // ledger already holds come in ledger order and the untouched ones in dispatch
 // row order. Interleaving the whole ledger by position would hand the parent a
 // list that jumps between layers. A completed failure is never pending — it is
-// an answer, not a gap.
+// an answer, not a gap. Risk decides only what a run must do, never what it has
+// already taken on: a row the run opened is owed until it is answered, whether
+// or not the dispatch inputs required it.
 func pendingObligations(
 	ledger *runstate.Ledger,
 	out resumeOutput,
 	required []string,
 	rowRecords map[string]*runstate.Record,
 ) []resumePending {
-	requiredRow := make(map[string]bool, len(required))
-	for _, id := range required {
-		requiredRow[id] = true
-	}
 	groupReason := make(map[string]string, len(out.Review.Groups))
 	for _, group := range out.Review.Groups {
 		groupReason[group.ID] = group.Reason
@@ -558,9 +556,14 @@ func pendingObligations(
 		}
 	}
 
+	// Every row the run opened, whatever its risk: a started record is an
+	// obligation the run took on, and one whose completion no longer stands is
+	// owed again. Only the rows the dispatch inputs require are offered when
+	// nothing has touched them — a row nobody opened and nobody must is not a
+	// gap.
 	for i := range ledger.Records {
 		rec := &ledger.Records[i]
-		if rec.Kind == runstate.KindMutationRow && rec.Status != runstate.StatusSuperseded && requiredRow[rec.ID] {
+		if rec.Kind == runstate.KindMutationRow && rec.Status != runstate.StatusSuperseded {
 			add(rec, rowReason[rec.ID])
 		}
 	}
