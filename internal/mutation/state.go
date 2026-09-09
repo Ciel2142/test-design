@@ -17,15 +17,28 @@ const stateFileName = "mutation-state.json"
 // only prepare's process ever held.
 type State struct {
 	SchemaVersion string          `json:"schemaVersion"`
-	RunID string `json:"runID"`
-	RepoCommit string `json:"repoCommit"`
-	Source string `json:"source"`
-	SourceSHA256 string `json:"sourceSha256"`
+	RunID         string          `json:"runID"`
+	RepoCommit    string          `json:"repoCommit"`
+	Source        string          `json:"source"`
+	SourceSHA256  string          `json:"sourceSha256"`
 	RowID         string          `json:"rowID"`
 	Identity      Identity        `json:"identity"`
 	WorktreePath  string          `json:"worktreePath"`
 	Snapshot      json.RawMessage `json:"snapshot"`
 	Sites         []SiteOutcome   `json:"sites"`
+	// Started marks the site an evaluation is inside. It is written before
+	// the first run that touches the worktree and cleared only by that
+	// site's own completion or by recover-mutation, so a state document
+	// found carrying it says the workspace is of unknown cleanliness.
+	Started *SiteAttempt `json:"started,omitempty"`
+}
+
+// SiteAttempt is the site an evaluation had in flight when the state was last
+// written: which site, which of its two runs was about to start, and when.
+type SiteAttempt struct {
+	Site      string `json:"site"`
+	Phase     string `json:"phase"` // mutated | clean
+	StartedAt string `json:"startedAt"`
 }
 
 type SiteOutcome struct {

@@ -13,9 +13,9 @@ import (
 func sampleState() *State {
 	return &State{
 		RowID:        "SC-02",
-		RunID: "run-abc123",
-		RepoCommit: "abc123",
-		Source: "spec.md",
+		RunID:        "run-abc123",
+		RepoCommit:   "abc123",
+		Source:       "spec.md",
 		SourceSHA256: "source-sha",
 		Identity:     Identity{Scope: "fixturemod/orders", Name: "TestValidateQuantityRejectsZero"},
 		WorktreePath: "/tmp/wt-example",
@@ -181,5 +181,50 @@ func TestLoadStateEmptyRequiredFieldsFailClosed(t *testing.T) {
 				t.Errorf("error = %q, want it to name the state file", err.Error())
 			}
 		})
+	}
+}
+
+func TestWriteStateRoundTripsTheStartedSiteMarker(t *testing.T) {
+	runDir := t.TempDir()
+	want := sampleState()
+	want.Started = &SiteAttempt{Site: "site-b", Phase: "mutated", StartedAt: "2026-09-07T10:00:00Z"}
+
+	if err := WriteState(runDir, want); err != nil {
+		t.Fatalf("WriteState: %v", err)
+	}
+	got, err := LoadState(runDir)
+	if err != nil {
+		t.Fatalf("LoadState: %v", err)
+	}
+	if got.Started == nil {
+		t.Fatalf("Started = nil, want the marker %+v the evaluation left behind", want.Started)
+	}
+	if *got.Started != *want.Started {
+		t.Errorf("Started = %+v, want %+v", *got.Started, *want.Started)
+	}
+}
+
+func TestWriteStateOmitsTheStartedMarkerWhenNoSiteIsInFlight(t *testing.T) {
+	runDir := t.TempDir()
+	st := sampleState()
+	st.Started = nil
+
+	if err := WriteState(runDir, st); err != nil {
+		t.Fatalf("WriteState: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(runDir, stateFileName))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if strings.Contains(string(data), "started") {
+		t.Errorf("state document = %s, want no started key when no site is in flight", data)
+	}
+
+	got, err := LoadState(runDir)
+	if err != nil {
+		t.Fatalf("LoadState: %v", err)
+	}
+	if got.Started != nil {
+		t.Errorf("Started = %+v, want nil", got.Started)
 	}
 }
