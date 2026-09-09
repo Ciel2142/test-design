@@ -811,14 +811,15 @@ func TestRestart_RestoresMutationWorkspaceBeforeMeasuring(t *testing.T) {
 		if res.Mutation.Complete {
 			t.Error("mutation.complete = true, want false while the row is still open")
 		}
-		// The row is still owed, and the run's own tally says so: one started
-		// record and nothing to close it. resume's pending list is sectioned by
-		// the rows the dispatch inputs require, which are the high-risk ones,
-		// so a row this low-risk is owed through its own started standing
-		// rather than through an entry there.
+		// The row is still owed, and a parent reading pending top to bottom is
+		// told so by name: an interrupted row nothing can measure and nothing
+		// has recovered is exactly the obligation that list is for.
+		owed := resumePending{Kind: runstate.KindMutationRow, ID: "SC-09", Reason: reasonNotCompleted}
+		if !slices.Contains(res.Pending, owed) {
+			t.Errorf("pending = %+v, want %+v among them", res.Pending, owed)
+		}
 		if res.Counts.Started != 1 {
-			t.Errorf("counts.started = %d, want 1: the interrupted row is the run's one open obligation (pending = %+v)",
-				res.Counts.Started, res.Pending)
+			t.Errorf("counts.started = %d, want 1: the interrupted row is the run's one open obligation", res.Counts.Started)
 		}
 		requireOriginalRepoUntouched(t, repo, before, "resume")
 	})
