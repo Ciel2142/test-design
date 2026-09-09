@@ -674,3 +674,190 @@ func TestRecordReview_DispatchInputsAreComparedByContent(t *testing.T) {
 		}
 	})
 }
+
+// startReviewGroupWithPolicy opens groupID over rows through the real
+// record-review op under the critic policy the parent names.
+func startReviewGroupWithPolicy(t *testing.T, repo, runID, groupID string, policy map[string]any, rows ...string) recordReviewOutput {
+	t.Helper()
+	return runRecordReview(t, repo, runID, map[string]any{
+		"groupId": groupID, "status": "started", "rows": rows, "policy": policy,
+	})
+}
+
+// fixturePolicy is a critic policy over one absolute instruction file, the
+// shape a parent hands record-review.
+func fixturePolicy(t *testing.T) map[string]any {
+	t.Helper()
+	return map[string]any{
+		"critic":       "coverage-critic",
+		"instructions": []string{writePolicyFile(t, "critic.md", "judge the assertion, not the name\n")},
+	}
+}
+
+// TestRecordReview_StartedCapturesTheBundleAndTheManifest: opening a group
+// tells the parent exactly which whole files its critic is being handed and
+// which rows each of them serves, and records that same input identity in the
+// ledger. The manifest is captured from the files on disk — the parent supplies
+// only the policy paths — and is incomplete until the critic's reads are known.
+func TestRecordReview_StartedCapturesTheBundleAndTheManifest(t *testing.T) {
+	repo := fixtureRepo(t)
+	const runID = "review-manifest-started"
+	code, stdout, stderr := runVerifyOp(t, "trace", verifyRequestJSON(t, repo, runID))
+	if code != exitOK {
+		t.Fatalf("trace exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+	payload := readDispatchInputs(t, decodeTraceOutput(t, stdout).DispatchPath)
+	rows := []string{"SC-01", "SC-02"}
+
+	started := startReviewGroupWithPolicy(t, repo, runID, "g1", fixturePolicy(t), rows...)
+
+	// One entry per file the group's rows were handed, sorted by path, each
+	// naming every row it serves.
+	wantRows := map[string][]string{}
+	for _, id := range rows {
+		row := dispatchRowFor(t, payload, id)
+		for _, file := range append([]string{row.File}, contributorFiles(row)...) {
+			if file == "" || slices.Contains(wantRows[file], id) {
+				continue
+			}
+			wantRows[file] = append(wantRows[file], id)
+		}
+	}
+	if len(started.Bundle) != len(wantRows) {
+		t.Fatalf("bundle = %+v, want one entry per file the rows were handed (%v)", started.Bundle, wantRows)
+	}
+	var gotPaths []string
+	for _, file := range started.Bundle {
+		gotPaths = append(gotPaths, file.Path)
+		want, err := evidence.SHA256File(filepath.Join(repo, filepath.FromSlash(file.Path)))
+		if err != nil {
+			t.Fatalf("SHA256File %s: %v", file.Path, err)
+		}
+		if file.SHA256 != want {
+			t.Errorf("bundle[%s].sha256 = %q, want the whole file's digest %q", file.Path, file.SHA256, want)
+		}
+		if !reflect.DeepEqual(file.Rows, wantRows[file.Path]) {
+			t.Errorf("bundle[%s].rows = %v, want %v", file.Path, file.Rows, wantRows[file.Path])
+		}
+	}
+	if !slices.IsSorted(gotPaths) {
+		t.Errorf("bundle paths = %v, want them sorted", gotPaths)
+	}
+	if started.ManifestComplete {
+		t.Error("manifestComplete = true, want false while the critic's reads are unrecorded")
+	}
+	if want := []string{"reads-unrecorded"}; !reflect.DeepEqual(started.ManifestIncomplete, want) {
+		t.Errorf("manifestIncomplete = %v, want %v", started.ManifestIncomplete, want)
+	}
+
+	rec := ledgerRecord(t, runResume(t, repo, runID), runstate.KindReviewGroup, "g1")
+	var recorded reviewGroupInputs
+	if err := json.Unmarshal(rec.Inputs, &recorded); err != nil {
+		t.Fatalf("record inputs did not decode: %v\ninputs=%s", err, rec.Inputs)
+	}
+	if recorded.Manifest == nil {
+		t.Fatalf("record inputs = %s, want them to carry the group's manifest", rec.Inputs)
+	}
+	if recorded.Manifest.Version != evidence.ManifestVersion {
+		t.Errorf("manifest.version = %q, want %q", recorded.Manifest.Version, evidence.ManifestVersion)
+	}
+	wantClaims := map[string]string{}
+	for _, id := range rows {
+		wantClaims[id] = dispatchRowFor(t, payload, id).ClaimSHA256
+	}
+	if !reflect.DeepEqual(recorded.Manifest.Claims, wantClaims) {
+		t.Errorf("manifest.claims = %v, want the dispatch document's claim digests %v", recorded.Manifest.Claims, wantClaims)
+	}
+	if recorded.Manifest.Policy == nil || recorded.Manifest.Policy.Critic != "coverage-critic" {
+		t.Errorf("manifest.policy = %+v, want the critic the parent named", recorded.Manifest.Policy)
+	}
+	if len(recorded.Manifest.Bundle) != len(wantRows) {
+		t.Errorf("manifest.bundle = %v, want a digest per file the rows were handed (%v)", recorded.Manifest.Bundle, wantRows)
+	}
+}
+
+// TestRecordReview_CompletedRecordsTheCriticsReads: what the critic read
+// beyond its bundle is a claim the parent relays at completion, and the
+// artifact is the authoritative complete manifest. An explicitly empty list
+// completes the manifest; an absent one leaves it incomplete, which costs this
+// run nothing and only makes the group ineligible for reuse later.
+func TestRecordReview_CompletedRecordsTheCriticsReads(t *testing.T) {
+	repo := fixtureRepo(t)
+	const runID = "review-manifest-reads"
+	code, stdout, stderr := runVerifyOp(t, "trace", verifyRequestJSON(t, repo, runID))
+	if code != exitOK {
+		t.Fatalf("trace exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+	payload := readDispatchInputs(t, decodeTraceOutput(t, stdout).DispatchPath)
+	policy := fixturePolicy(t)
+
+	completeWith := func(t *testing.T, groupID string, extra map[string]any, rows ...string) (recordReviewOutput, evidence.Manifest) {
+		t.Helper()
+		startReviewGroupWithPolicy(t, repo, runID, groupID, policy, rows...)
+		request := map[string]any{
+			"groupId": groupID, "status": "completed", "verdicts": soundVerdicts(t, payload, rows...),
+		}
+		for name, value := range extra {
+			request[name] = value
+		}
+		out := runRecordReview(t, repo, runID, request)
+		data, err := os.ReadFile(out.EvidencePath)
+		if err != nil {
+			t.Fatalf("read review evidence: %v", err)
+		}
+		var doc reviewEvidence
+		if err := json.Unmarshal(data, &doc); err != nil {
+			t.Fatalf("review evidence did not decode: %v\ndata=%s", err, data)
+		}
+		if doc.Inputs.Manifest == nil {
+			t.Fatalf("evidence inputs = %+v, want them to carry the completed manifest", doc.Inputs)
+		}
+		return out, *doc.Inputs.Manifest
+	}
+
+	t.Run("the critic read nothing beyond its bundle", func(t *testing.T) {
+		out, m := completeWith(t, "A", map[string]any{"reads": []string{}}, "SC-01", "SC-02")
+		if !m.Complete || len(m.Incomplete) != 0 {
+			t.Fatalf("manifest = complete %v incomplete %v, want a complete manifest", m.Complete, m.Incomplete)
+		}
+		if m.Reads == nil || len(m.Reads) != 0 {
+			t.Errorf("manifest.reads = %v, want an empty record of reads rather than none", m.Reads)
+		}
+		if !out.ManifestComplete || len(out.ManifestIncomplete) != 0 {
+			t.Errorf("output = complete %v incomplete %v, want the manifest it produced reported complete", out.ManifestComplete, out.ManifestIncomplete)
+		}
+	})
+
+	t.Run("the critic read a tracked file", func(t *testing.T) {
+		out, m := completeWith(t, "B", map[string]any{"reads": []string{"orders/orders.go"}}, "SC-05")
+		if !m.Complete {
+			t.Fatalf("manifest = incomplete %v, want a complete manifest", m.Incomplete)
+		}
+		want, err := evidence.SHA256File(filepath.Join(repo, "orders", "orders.go"))
+		if err != nil {
+			t.Fatalf("SHA256File: %v", err)
+		}
+		if got := m.Reads["orders/orders.go"]; got != want {
+			t.Errorf("manifest.reads[orders/orders.go] = %q, want the file's digest %q", got, want)
+		}
+		if !out.ManifestComplete {
+			t.Errorf("manifestComplete = false (%v), want true", out.ManifestIncomplete)
+		}
+	})
+
+	t.Run("the parent recorded no reads at all", func(t *testing.T) {
+		out, m := completeWith(t, "C", nil, "SC-04")
+		if m.Complete {
+			t.Errorf("manifest.complete = true, want false while the critic's reads are unrecorded")
+		}
+		if want := []string{"reads-unrecorded"}; !reflect.DeepEqual(m.Incomplete, want) {
+			t.Errorf("manifest.incomplete = %v, want %v", m.Incomplete, want)
+		}
+		if out.ManifestComplete || !reflect.DeepEqual(out.ManifestIncomplete, []string{"reads-unrecorded"}) {
+			t.Errorf("output = complete %v incomplete %v, want the incomplete manifest reported", out.ManifestComplete, out.ManifestIncomplete)
+		}
+		if out.Outcome == "" {
+			t.Error("outcome = \"\", want the completion recorded as before: the manifest never refuses a review")
+		}
+	})
+}

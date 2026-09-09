@@ -38,6 +38,13 @@ type recordReviewRequest struct {
 	Status   string          `json:"status"`             // started | completed
 	Rows     []string        `json:"rows,omitempty"`     // started
 	Verdicts []reviewVerdict `json:"verdicts,omitempty"` // completed
+	Policy   *reviewPolicy   `json:"policy,omitempty"`   // started
+	// Reads is the critic's own claim, relayed at completion: an explicitly
+	// empty list says it read nothing beyond its bundle, an absent one says
+	// nobody recorded what it read. The distinction is the difference between
+	// a manifest that can be reused and one that cannot, so it survives as a
+	// pointer rather than collapsing into an empty slice.
+	Reads *[]string `json:"reads,omitempty"` // completed
 }
 
 // reviewGroupInputs is what a group was judged against: its rows, the source
@@ -47,6 +54,13 @@ type reviewGroupInputs struct {
 	Rows                 []string            `json:"rows"`
 	Sources              map[string][]string `json:"sources"`
 	DispatchInputsSHA256 string              `json:"dispatchInputsSha256"`
+	// Manifest is the group's whole input identity: what a later run must find
+	// unchanged before it may stand on this group's verdict. The record keeps
+	// the manifest as the group was started; the evidence file carries the
+	// completed one, with the critic's reads in it.
+	Manifest *evidence.Manifest `json:"manifest,omitempty"`
+	// Reuse is the provenance of a group adopted from a prior run.
+	Reuse *evidence.ReuseReference `json:"reuse,omitempty"`
 }
 
 type reviewEvidence struct {
@@ -61,13 +75,24 @@ type reviewEvidence struct {
 	Verdicts     []reviewVerdict   `json:"verdicts"`
 }
 
+// reviewBundleFile is one whole file the group's critic is handed, with the
+// digest the manifest recorded for it and the rows it serves.
+type reviewBundleFile struct {
+	Path   string   `json:"path"`
+	SHA256 string   `json:"sha256"`
+	Rows   []string `json:"rows"`
+}
+
 type recordReviewOutput struct {
 	evidence.Envelope
-	RunID        string `json:"runId"`
-	GroupID      string `json:"groupId"`
-	Status       string `json:"status"`
-	Outcome      string `json:"outcome"`
-	EvidencePath string `json:"evidencePath"`
+	RunID              string             `json:"runId"`
+	GroupID            string             `json:"groupId"`
+	Status             string             `json:"status"`
+	Outcome            string             `json:"outcome"`
+	EvidencePath       string             `json:"evidencePath"`
+	Bundle             []reviewBundleFile `json:"bundle,omitempty"`
+	ManifestComplete   bool               `json:"manifestComplete"`
+	ManifestIncomplete []string           `json:"manifestIncomplete"`
 }
 
 func newRecordReviewFlags() *flag.FlagSet {
@@ -86,6 +111,8 @@ func decodeRecordReviewRequest(op string, requestBody []byte) (*recordReviewRequ
 		Status   string          `json:"status"`
 		Rows     []string        `json:"rows"`
 		Verdicts []reviewVerdict `json:"verdicts"`
+		Policy   *reviewPolicy   `json:"policy"`
+		Reads    *[]string       `json:"reads"`
 	}
 	if err := json.Unmarshal(requestBody, &extra); err != nil {
 		return nil, &cliError{Code: "malformed-request", Message: fmt.Sprintf("%s: decode request: %v", op, err)}
@@ -111,6 +138,7 @@ func decodeRecordReviewRequest(op string, requestBody []byte) (*recordReviewRequ
 	return &recordReviewRequest{
 		verifyRequest: *base, GroupID: extra.GroupID, Status: extra.Status,
 		Rows: extra.Rows, Verdicts: extra.Verdicts,
+		Policy: extra.Policy, Reads: extra.Reads,
 	}, nil
 }
 
@@ -162,6 +190,8 @@ func recordReviewHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer)
 // exactly one of them, the other nine refused row-already-grouped.
 func recordReviewStarted(op string, req *recordReviewRequest, store *runstate.Store, identity runstate.Identity, stdout io.Writer) *cliError {
 	const kind = runstate.KindReviewGroup
+	var manifest *evidence.Manifest
+	var bundle []reviewBundleFile
 	err := store.Update(identity, func(l *runstate.Ledger) error {
 		if cliErr := checkRowsUngrouped(op, req, l); cliErr != nil {
 			return cliErr
@@ -177,6 +207,11 @@ func recordReviewStarted(op string, req *recordReviewRequest, store *runstate.St
 				Message: fmt.Sprintf("%s: the trace's dispatch inputs name no such row among %v", op, req.Rows),
 			}
 		}
+		// The manifest is captured from the files on disk under the same lock
+		// that fixes the group's sources: the parent supplies only the policy
+		// paths, never a digest of its own.
+		inputs.Manifest = captureReviewManifest(req.RepoRoot, identity, dispatch, req.Rows, req.Policy)
+		manifest, bundle = inputs.Manifest, reviewBundleFor(dispatch, req.Rows, inputs.Manifest.Bundle)
 		_, err := l.Start(kind, req.GroupID, inputs, "", repeatReason(&req.verifyRequest))
 		return err
 	})
@@ -186,6 +221,9 @@ func recordReviewStarted(op string, req *recordReviewRequest, store *runstate.St
 	return writeStdout(stdout, recordReviewOutput{
 		Envelope: evidence.Envelope{SchemaVersion: evidence.SchemaVersion, VerifierVersion: evidence.VerifierVersion},
 		RunID:    req.RunID, GroupID: req.GroupID, Status: reviewStatusStarted,
+		Bundle:             bundle,
+		ManifestComplete:   manifestComplete(manifest),
+		ManifestIncomplete: manifestIncomplete(manifest),
 	})
 }
 
@@ -235,6 +273,12 @@ func recordReviewCompleted(
 			}
 		}
 
+		// The evidence carries the completed manifest — the started one with
+		// the critic's reads judged and HEAD and the tree read again. The
+		// record's own inputs stay as they were at Start, so the artifact is
+		// the authoritative complete manifest.
+		recorded.Manifest = completeReviewManifest(req.RepoRoot, identity, recorded.Manifest, req.Reads)
+
 		verdicts := req.Verdicts
 		if verdicts == nil {
 			verdicts = []reviewVerdict{}
@@ -262,6 +306,8 @@ func recordReviewCompleted(
 		out = recordReviewOutput{
 			Envelope: doc.Envelope, RunID: req.RunID, GroupID: req.GroupID,
 			Status: reviewStatusCompleted, Outcome: outcome, EvidencePath: path,
+			ManifestComplete:   manifestComplete(recorded.Manifest),
+			ManifestIncomplete: manifestIncomplete(recorded.Manifest),
 		}
 		return nil
 	})
