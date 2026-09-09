@@ -294,3 +294,57 @@ func resumeGroupFor(t *testing.T, out resumeOutput, id string) resumeGroup {
 	t.Fatalf("no group %s in %+v", id, out.Review.Groups)
 	return resumeGroup{}
 }
+
+// TestResume_AStartedRowNamesTheWorkspaceItsStateNowCarries locks the one
+// place the ledger record is not the live answer: recover-mutation replaces a
+// vanished worktree and records the replacement in the row's state, so a
+// parent re-dispatching the mutator must be handed the path that exists, not
+// the one the row was opened against.
+func TestResume_AStartedRowNamesTheWorkspaceItsStateNowCarries(t *testing.T) {
+	repo := fixtureRepo(t)
+	const runID = "resume-recreated"
+	// The mutation layer is only reported once the trace that names its rows
+	// has completed.
+	if code, _, stderr := runVerifyOp(t, "trace", verifyRequestJSON(t, repo, runID)); code != exitOK {
+		t.Fatalf("trace exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+
+	prep := interruptedRow(t, repo, runID)
+	if err := os.RemoveAll(prep.WorktreePath); err != nil {
+		t.Fatalf("RemoveAll: %v", err)
+	}
+	recovered := runRecoverMutation(t, repo, runID, prep.RunDir)
+	if !recovered.Recreated || recovered.WorktreePath == prep.WorktreePath {
+		t.Fatalf("recover-mutation = %+v, want a recreated worktree at a fresh path", recovered)
+	}
+
+	row := resumeRow(t, runResume(t, repo, runID), "SC-09")
+	if row.WorktreePath != recovered.WorktreePath {
+		t.Errorf("worktreePath = %q, want the recreated workspace %q", row.WorktreePath, recovered.WorktreePath)
+	}
+	if row.RunDir != prep.RunDir {
+		t.Errorf("runDir = %q, want %q", row.RunDir, prep.RunDir)
+	}
+	if !slices.Equal(row.CompletedSites, []string{"site-a"}) {
+		t.Errorf("completedSites = %v, want [site-a]", row.CompletedSites)
+	}
+	if row.InterruptedSite != "" {
+		t.Errorf("interruptedSite = %q, want none after the recovery cleared the marker", row.InterruptedSite)
+	}
+	if row.Reason != "" {
+		t.Errorf("reason = %q, want none", row.Reason)
+	}
+
+	// With the state unreadable there is nothing live to prefer, so the row
+	// falls back to the workspace its record was opened against.
+	if err := os.WriteFile(filepath.Join(prep.RunDir, "mutation-state.json"), []byte("{not json"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	row = resumeRow(t, runResume(t, repo, runID), "SC-09")
+	if row.Reason != reasonStateUnreadable {
+		t.Errorf("reason = %q, want %q", row.Reason, reasonStateUnreadable)
+	}
+	if row.WorktreePath != prep.WorktreePath {
+		t.Errorf("worktreePath = %q, want the record's %q when the state cannot be read", row.WorktreePath, prep.WorktreePath)
+	}
+}

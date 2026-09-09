@@ -437,31 +437,50 @@ func mutationRowReport(rowID string, rec *runstate.Record, invalidReason func(*r
 	row.WorktreePath = inputs.WorktreePath
 
 	if rec.Status == runstate.StatusStarted && inputs.RunDir != "" {
-		sites, interrupted, err := mutationProgress(inputs.RunDir)
+		progress, err := mutationProgress(inputs.RunDir)
 		if err != nil {
 			row.Reason = reasonStateUnreadable
 		} else {
-			row.CompletedSites, row.InterruptedSite = sites, interrupted
+			row.CompletedSites, row.InterruptedSite = progress.completed, progress.interrupted
+			// recover-mutation may have replaced the worktree the row was
+			// opened against and it records the replacement in the state, not
+			// in the ledger. A parent re-dispatching the mutator needs the
+			// workspace that exists, so the state wins while it can be read
+			// and the record's inputs stand in when it cannot.
+			row.WorktreePath = progress.worktreePath
 		}
 	}
 	return row
 }
 
-// mutationProgress reads a prepared row's state document: the sites it already
-// evaluated, and the site it was inside when it stopped.
-func mutationProgress(runDir string) ([]string, string, error) {
+// rowProgress is what a prepared row's own state document says about it: the
+// sites it already evaluated, the site it was inside when it stopped, and the
+// workspace it currently names.
+type rowProgress struct {
+	completed    []string
+	interrupted  string
+	worktreePath string
+}
+
+// mutationProgress reads a prepared row's state document. LoadState fails
+// closed on an empty worktree path, so a returned progress always names a
+// workspace.
+func mutationProgress(runDir string) (rowProgress, error) {
 	st, err := mutation.LoadState(runDir)
 	if err != nil {
-		return nil, "", err
+		return rowProgress{}, err
 	}
-	completed := make([]string, 0, len(st.Sites))
+	progress := rowProgress{
+		completed:    make([]string, 0, len(st.Sites)),
+		worktreePath: st.WorktreePath,
+	}
 	for _, site := range st.Sites {
-		completed = append(completed, site.Site)
+		progress.completed = append(progress.completed, site.Site)
 	}
-	if st.Started == nil {
-		return completed, "", nil
+	if st.Started != nil {
+		progress.interrupted = st.Started.Site
 	}
-	return completed, st.Started.Site, nil
+	return progress, nil
 }
 
 func mutationComplete(required []string, rowRecords map[string]*runstate.Record, invalidReason func(*runstate.Record) string) bool {
