@@ -338,8 +338,8 @@ Baseline: a1b2c3d · 1 passed, 0 failed, 0 skipped
 	if got.Code != "live-decision-incomplete" {
 		t.Errorf("error code = %q, want %q", got.Code, "live-decision-incomplete")
 	}
-	if !strings.Contains(got.Message, "missing") {
-		t.Errorf("error message = %q, want it to contain %q", got.Message, "missing")
+	if !strings.Contains(got.Message, "no ## Live decision section") {
+		t.Errorf("message = %q, want the missing code's own detail, not any refusal carrying \"missing\"", got.Message)
 	}
 }
 
