@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
 
 	"test-design/internal/evidence"
@@ -70,20 +71,6 @@ func revisionCommit(t *testing.T, s *liveSubject, message string) string {
 	return subjectHead(t, s.repo)
 }
 
-// revisionResume asks the real resume op what the run still owes.
-func revisionResume(t *testing.T, s *liveSubject, runID string) resumeOutput {
-	t.Helper()
-	code, stdout, stderr := runVerifyOp(t, "resume", readyRequestJSON(t, s, runID, nil))
-	if code != exitOK {
-		t.Fatalf("resume exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
-	}
-	var out resumeOutput
-	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
-		t.Fatalf("resume stdout did not decode: %v\nstdout=%s", err, stdout)
-	}
-	return out
-}
-
 // revisionEnvironmentalRow leaves the run's own layer-4 answer for SC-02 —
 // the row is opened by prepare-mutation and closed by record-attempt as
 // environmental — and returns it as the layer-4 entry the parent pastes,
@@ -91,7 +78,7 @@ func revisionResume(t *testing.T, s *liveSubject, runID string) resumeOutput {
 func revisionEnvironmentalRow(t *testing.T, s *liveSubject, runID string) report.MutationInput {
 	t.Helper()
 	readyEnvironmentalVersionRow(t, s, runID)
-	rec := ledgerRecord(t, revisionResume(t, s, runID), runstate.KindMutationRow, readyVersionRow)
+	rec := ledgerRecord(t, readyResume(t, s, runID), runstate.KindMutationRow, readyVersionRow)
 	attempt := rec.Artifacts[artifactAttempt].Path
 	if attempt == "" {
 		t.Fatalf("record-attempt left %s with artifacts %+v, want an attempt document", readyVersionRow, rec.Artifacts)
@@ -175,19 +162,6 @@ func revisionRefuseFinalize(
 	return decodeCLIError(t, stderr)
 }
 
-// revisionDecisionFor returns the decision reuse reported for id, whichever
-// list it landed in, and fails when reuse said nothing about it at all.
-func revisionDecisionFor(t *testing.T, out reuseOutput, id string) reuseDecision {
-	t.Helper()
-	for _, decision := range append(append([]reuseDecision{}, out.Review...), out.Mutation...) {
-		if decision.ID == id {
-			return decision
-		}
-	}
-	t.Fatalf("reuse said nothing about %s: review=%+v mutation=%+v", id, out.Review, out.Mutation)
-	return reuseDecision{}
-}
-
 // covers: SC-29
 func TestReuse_NewRevisionGetsFreshSuiteAndLive(t *testing.T) {
 	s := readySubject(t, "required")
@@ -227,15 +201,15 @@ func TestReuse_NewRevisionGetsFreshSuiteAndLive(t *testing.T) {
 		readyTrace(t, s, runB1)
 		out := readyReuse(t, s, runB1, runA, policy)
 
-		if marker := revisionDecisionFor(t, out, readyMarkerGroup); !marker.Reused || marker.Reason != "" {
+		if marker := reuseDecisionFor(t, out.Review, readyMarkerGroup); !marker.Reused || marker.Reason != "" {
 			t.Errorf("group %s = %+v, want it adopted: nothing it was handed moved", readyMarkerGroup, marker)
 		}
 		const isolated = "isolated-change:ready/version_test.go"
-		if version := revisionDecisionFor(t, out, readyVersionGroup); version.Reused || version.Reason != isolated {
-			t.Errorf("group %s = %+v, want it refused %q", readyVersionGroup, version, isolated)
-		}
-		if row := revisionDecisionFor(t, out, readyVersionRow); row.Reused || row.Reason != isolated {
-			t.Errorf("row %s = %+v, want its mutation evidence refused %q", readyVersionRow, row, isolated)
+		readyRefused(t, out.Review, readyVersionGroup, isolated)
+		readyRefused(t, out.Mutation, readyVersionRow, isolated)
+		if want := (reuseCounts{Reused: 1, Refused: 2}); out.Counts != want {
+			t.Errorf("counts = %+v, want %+v: one group adopted, the edited group and its row refused",
+				out.Counts, want)
 		}
 		if out.Trace.Reused || out.Trace.Reason != reasonFreshRequired {
 			t.Errorf("trace = %+v, want it never adopted, reason %q", out.Trace, reasonFreshRequired)
@@ -244,7 +218,7 @@ func TestReuse_NewRevisionGetsFreshSuiteAndLive(t *testing.T) {
 			t.Errorf("live = %+v, want it never adopted, reason %q", out.Live, reasonFreshRequired)
 		}
 
-		resumed := revisionResume(t, s, runB1)
+		resumed := readyResume(t, s, runB1)
 		if !resumed.Live.Required || resumed.Live.Status != statusNone {
 			t.Errorf("resumed live = %+v, want a required attempt with status %q", resumed.Live, statusNone)
 		}
@@ -289,7 +263,16 @@ func TestReuse_NewRevisionGetsFreshSuiteAndLive(t *testing.T) {
 
 		out := readyReuse(t, s, runB2, runA, policy)
 		const changed = "module-changed:ready/ready.go"
-		for _, decision := range append(append([]reuseDecision{}, out.Review...), out.Mutation...) {
+		// Each record the prior run holds is named before the sweep, and the
+		// counts pin how many there were: a sweep over a list reuse never
+		// filled would pass over nothing at all.
+		readyRefused(t, out.Review, readyMarkerGroup, changed)
+		readyRefused(t, out.Review, readyVersionGroup, changed)
+		readyRefused(t, out.Mutation, readyVersionRow, changed)
+		if want := (reuseCounts{Refused: 3}); out.Counts != want {
+			t.Errorf("counts = %+v, want %+v: a production change leaves nothing to adopt", out.Counts, want)
+		}
+		for _, decision := range slices.Concat(out.Review, out.Mutation) {
 			if decision.Reused || decision.Reason != changed {
 				t.Errorf("%s %s = %+v, want every record refused %q", decision.Kind, decision.ID, decision, changed)
 			}
@@ -323,6 +306,9 @@ func TestReuse_NewRevisionGetsFreshSuiteAndLive(t *testing.T) {
 		rep := readPublishedReport(t, s.repo, final.JSONPath)
 		if rep.HeadCommit != headB2 {
 			t.Errorf("published headCommit = %q, want the new revision %q", rep.HeadCommit, headB2)
+		}
+		if len(rep.Batches) != len(revisionBatches(runB2)) {
+			t.Fatalf("published batches = %+v, want the two the parent pasted", rep.Batches)
 		}
 		for _, batch := range rep.Batches {
 			if batch.Reuse != nil {
