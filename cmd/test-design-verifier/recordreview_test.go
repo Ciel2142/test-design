@@ -2,13 +2,16 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
+	"sync"
 	"testing"
 
 	"test-design/internal/evidence"
+	"test-design/internal/runstate"
 )
 
 // runRecordReview drives the real record-review op and decodes its output.
@@ -297,5 +300,153 @@ func TestRecordReview_GroupLifecycle(t *testing.T) {
 	}
 	if out.Counts.Failed != 1 {
 		t.Errorf("counts.failed = %d, want 1: the blocked group is a failed outcome", out.Counts.Failed)
+	}
+}
+
+// opResult is what one concurrently driven op returned.
+type opResult struct {
+	code   int
+	stdout string
+	stderr string
+}
+
+// runConcurrently drives one op once per request, every call released at the
+// same instant, and returns the results in request order. The requests are
+// built beforehand so that nothing inside a goroutine can fail the test.
+func runConcurrently(t *testing.T, op string, requests []string) []opResult {
+	t.Helper()
+	results := make([]opResult, len(requests))
+	release := make(chan struct{})
+	var wg sync.WaitGroup
+	for i, request := range requests {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-release
+			code, stdout, stderr := runVerifyOp(t, op, request)
+			results[i] = opResult{code: code, stdout: stdout, stderr: stderr}
+		}()
+	}
+	close(release)
+	wg.Wait()
+	return results
+}
+
+// TestRecordReview_ConcurrentStartsKeepARowInOneGroup is the parallel-critic
+// case the ledger lock exists for: ten parents open ten groups over one row at
+// once. The row belongs to exactly one current group afterwards — the check
+// that a row is ungrouped and the Start that claims it happen under one
+// exclusive lock, so nine callers see the tenth's claim and are refused by
+// name rather than each reading a ledger with no group in it.
+func TestRecordReview_ConcurrentStartsKeepARowInOneGroup(t *testing.T) {
+	repo := fixtureRepo(t)
+	const runID = "review-start-race"
+	if code, _, stderr := runVerifyOp(t, "trace", verifyRequestJSON(t, repo, runID)); code != exitOK {
+		t.Fatalf("trace exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+
+	const groups = 10
+	requests := make([]string, 0, groups)
+	for i := range groups {
+		requests = append(requests, requestWith(t, repo, runID, map[string]any{
+			"groupId": fmt.Sprintf("g%d", i), "status": "started", "rows": []string{"SC-01"},
+		}))
+	}
+
+	results := runConcurrently(t, "record-review", requests)
+
+	started, refused := 0, 0
+	for i, result := range results {
+		switch result.code {
+		case exitOK:
+			started++
+		case exitError:
+			if got := decodeCLIError(t, result.stderr); got.Code != "row-already-grouped" {
+				t.Errorf("g%d refused with %q, want row-already-grouped (message %q)", i, got.Code, got.Message)
+			}
+			refused++
+		default:
+			t.Errorf("g%d exit code = %d; stdout=%s stderr=%s", i, result.code, result.stdout, result.stderr)
+		}
+	}
+	if started != 1 || refused != groups-1 {
+		t.Errorf("started = %d, refused = %d, want exactly one group started and %d refused", started, refused, groups-1)
+	}
+
+	out := runResume(t, repo, runID)
+	if len(out.Review.Groups) != 1 {
+		t.Errorf("review.groups = %+v, want SC-01 in exactly one current group", out.Review.Groups)
+	}
+}
+
+// TestRecordReview_ConcurrentCompletionsRecordOneResult: two parents complete
+// one group at the same instant with different verdicts. Exactly one result
+// stands, and it is whole — the recorded outcome was computed from the verdicts
+// the evidence file holds, and the record's digest is of that file. The evidence
+// is written and the completion recorded under one exclusive lock, so the loser
+// sees a completed group and writes nothing.
+func TestRecordReview_ConcurrentCompletionsRecordOneResult(t *testing.T) {
+	repo := fixtureRepo(t)
+	const runID = "review-complete-race"
+	if code, _, stderr := runVerifyOp(t, "trace", verifyRequestJSON(t, repo, runID)); code != exitOK {
+		t.Fatalf("trace exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+	startReviewGroup(t, repo, runID, "A", "SC-01", "SC-02")
+
+	requests := []string{
+		requestWith(t, repo, runID, map[string]any{
+			"groupId": "A", "status": "completed",
+			"verdicts": []map[string]string{{"rowId": "SC-01", "verdict": "HOLDS"}, {"rowId": "SC-02", "verdict": "HOLDS"}},
+		}),
+		requestWith(t, repo, runID, map[string]any{
+			"groupId": "A", "status": "completed",
+			"verdicts": []map[string]string{{"rowId": "SC-01", "verdict": "HOLDS"}, {"rowId": "SC-02", "verdict": "WEAK", "reason": "asserts nothing about the value"}},
+		}),
+	}
+
+	results := runConcurrently(t, "record-review", requests)
+
+	var accepted []recordReviewOutput
+	for i, result := range results {
+		switch result.code {
+		case exitOK:
+			var out recordReviewOutput
+			if err := json.Unmarshal([]byte(result.stdout), &out); err != nil {
+				t.Fatalf("completion %d stdout did not decode: %v\nstdout=%s", i, err, result.stdout)
+			}
+			accepted = append(accepted, out)
+		case exitError:
+			if got := decodeCLIError(t, result.stderr); got.Code != "duplicate-completion" {
+				t.Errorf("completion %d refused with %q, want duplicate-completion (message %q)", i, got.Code, got.Message)
+			}
+		default:
+			t.Errorf("completion %d exit code = %d; stdout=%s stderr=%s", i, result.code, result.stdout, result.stderr)
+		}
+	}
+	if len(accepted) != 1 {
+		t.Fatalf("accepted completions = %+v, want exactly one", accepted)
+	}
+	won := accepted[0]
+
+	rec := ledgerRecord(t, runResume(t, repo, runID), runstate.KindReviewGroup, "A")
+	if rec.Status != runstate.StatusCompleted || rec.Outcome != won.Outcome {
+		t.Errorf("record A = %s/%s, want completed with the accepted outcome %q", rec.Status, rec.Outcome, won.Outcome)
+	}
+	if got := rec.Artifacts[artifactEvidence].Path; got != won.EvidencePath {
+		t.Errorf("record A evidence path = %q, want the accepted completion's %q", got, won.EvidencePath)
+	}
+	if reasons := runstate.Verify(&rec); len(reasons) != 0 {
+		t.Errorf("Verify(A) = %v, want the recorded digest to match the evidence on disk", reasons)
+	}
+	data, err := os.ReadFile(won.EvidencePath)
+	if err != nil {
+		t.Fatalf("read review evidence: %v", err)
+	}
+	var doc reviewEvidence
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("review evidence did not decode: %v\ndata=%s", err, data)
+	}
+	if got := reviewOutcome(doc.Verdicts); got != rec.Outcome {
+		t.Errorf("evidence verdicts %+v imply %q, want the recorded outcome %q computed from them", doc.Verdicts, got, rec.Outcome)
 	}
 }

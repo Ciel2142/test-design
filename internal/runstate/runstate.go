@@ -2,9 +2,11 @@
 // the record of every obligation the run took on — a phase, a review group, a
 // mutation row, a live attempt — as it moved from started to completed or was
 // superseded by a later attempt. The ledger lives in its own directory outside
-// the repository under test; every write transition takes an exclusive lock,
-// re-reads the checkpoint, applies one transition and replaces the checkpoint
-// atomically, so two concurrent callers never lose each other's record.
+// the repository under test; every write runs as one Update transaction that
+// takes an exclusive lock, re-reads the checkpoint, applies its transitions and
+// replaces the checkpoint atomically, so two concurrent callers never lose each
+// other's record and every check a transition rests on sees the ledger it
+// changes.
 package runstate
 
 import (
@@ -154,9 +156,9 @@ func validateRunID(runID string) error {
 	return nil
 }
 
-// Store is a handle on one ledger directory. Every method that writes takes the
-// exclusive lock, re-reads the checkpoint, applies one transition, saves
-// atomically, then unlocks.
+// Store is a handle on one ledger directory. Every method that writes runs as
+// one Update: it takes the exclusive lock, re-reads the checkpoint, applies its
+// transitions, saves atomically, then unlocks.
 type Store struct {
 	dir string
 }
@@ -190,17 +192,22 @@ func (s *Store) Load() (*Ledger, error) {
 	return loadLedger(s.dir)
 }
 
-// Start opens a started record for (kind, key) and returns it. With no current
-// record it is simply new. Over a current started record the prior one is
-// superseded with detail "restarted"; over a current completed record Start
-// reports ErrCompleted unless repeat carries a reason, in which case the prior
-// record is superseded with that reason as its detail. The first Start creates
-// the ledger with id; a later Start presenting a different identity reports
-// ErrIdentityMismatch.
-func (s *Store) Start(id Identity, kind Kind, key string, inputs any, detail, repeat string) (*Record, error) {
+// Update runs one transaction over the ledger. It takes the exclusive lock,
+// loads the checkpoint — creating the ledger with id when there is none yet,
+// reporting ErrIdentityMismatch when the one on disk belongs to another run —
+// hands the in-memory ledger to fn, and replaces the checkpoint atomically
+// only when fn returns nil. A non-nil error from fn comes back as it was,
+// unwrapped, and nothing fn did to the ledger reaches disk. Every check and
+// transition inside fn therefore sees one ledger no other process can change
+// under it, which is what lets an invariant spanning several records — a row
+// in one current group, an artifact digested from the bytes its outcome was
+// computed from — hold across concurrent callers. fn must not call back into
+// the Store: the lock is held for its whole extent, and a second flock from
+// the same process contends with it.
+func (s *Store) Update(id Identity, fn func(l *Ledger) error) error {
 	unlock, err := lockDir(s.dir, true)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer unlock()
 
@@ -209,11 +216,63 @@ func (s *Store) Start(id Identity, kind Kind, key string, inputs any, detail, re
 	case errors.Is(err, ErrNoLedger):
 		l = &Ledger{SchemaVersion: evidence.SchemaVersion, Identity: id, Records: []Record{}}
 	case err != nil:
-		return nil, err
+		return err
 	case l.Identity != id:
-		return nil, fmt.Errorf("start %s/%s: %w", kind, key, ErrIdentityMismatch)
+		return fmt.Errorf("update ledger %s: %w", filepath.Join(s.dir, LedgerFile), ErrIdentityMismatch)
 	}
 
+	if err := fn(l); err != nil {
+		return err
+	}
+	return saveLedger(s.dir, l)
+}
+
+// Start opens a started record for (kind, key) and returns it, in one Update:
+// see Ledger.Start for the transition. The first Start creates the ledger with
+// id; a later Start presenting a different identity reports
+// ErrIdentityMismatch.
+func (s *Store) Start(id Identity, kind Kind, key string, inputs any, detail, repeat string) (*Record, error) {
+	var started *Record
+	err := s.Update(id, func(l *Ledger) error {
+		rec, err := l.Start(kind, key, inputs, detail, repeat)
+		if err != nil {
+			return err
+		}
+		started = rec
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return started, nil
+}
+
+// Complete finishes the current started record for (kind, key), in one Update:
+// see Ledger.Complete for the transition. A run with no ledger yet has nothing
+// started, so it reports ErrNotStarted and creates no ledger.
+func (s *Store) Complete(id Identity, kind Kind, key, outcome string, artifacts map[string]string, detail string) (*Record, error) {
+	var completed *Record
+	err := s.Update(id, func(l *Ledger) error {
+		rec, err := l.Complete(kind, key, outcome, artifacts, detail)
+		if err != nil {
+			return err
+		}
+		completed = rec
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return completed, nil
+}
+
+// Start opens a started record for (kind, key) in the in-memory ledger and
+// returns a copy of it. With no current record it is simply new. Over a
+// current started record the prior one is superseded with detail "restarted";
+// over a current completed record Start reports ErrCompleted unless repeat
+// carries a reason, in which case the prior record is superseded with that
+// reason as its detail. Nothing reaches disk until the enclosing Update saves.
+func (l *Ledger) Start(kind Kind, key string, inputs any, detail, repeat string) (*Record, error) {
 	raw, err := json.Marshal(inputs)
 	if err != nil {
 		return nil, fmt.Errorf("start %s/%s: marshal inputs: %w", kind, key, err)
@@ -245,38 +304,19 @@ func (s *Store) Start(id Identity, kind Kind, key string, inputs any, detail, re
 		Detail:    detail,
 		StartedAt: now,
 	})
-	if err := saveLedger(s.dir, l); err != nil {
-		return nil, err
-	}
 
 	started := l.Records[len(l.Records)-1]
 	return &started, nil
 }
 
-// Complete finishes the current started record for (kind, key) with outcome and
-// the digested artifacts (role → path; the SHA-256 is computed from the file as
-// retained). A non-empty detail replaces the record's detail. It reports
-// ErrNotStarted when there is no current record and ErrDuplicateCompletion when
-// the current record is already completed — a completed record is never
-// rewritten, only superseded.
-func (s *Store) Complete(id Identity, kind Kind, key, outcome string, artifacts map[string]string, detail string) (*Record, error) {
-	unlock, err := lockDir(s.dir, true)
-	if err != nil {
-		return nil, err
-	}
-	defer unlock()
-
-	l, err := loadLedger(s.dir)
-	if errors.Is(err, ErrNoLedger) {
-		return nil, fmt.Errorf("complete %s/%s: %w", kind, key, ErrNotStarted)
-	}
-	if err != nil {
-		return nil, err
-	}
-	if l.Identity != id {
-		return nil, fmt.Errorf("complete %s/%s: %w", kind, key, ErrIdentityMismatch)
-	}
-
+// Complete finishes the current started record for (kind, key) in the
+// in-memory ledger with outcome and the digested artifacts (role → path; the
+// SHA-256 is computed from the file as retained), and returns a copy of it. A
+// non-empty detail replaces the record's detail. It reports ErrNotStarted when
+// there is no current record and ErrDuplicateCompletion when the current
+// record is already completed — a completed record is never rewritten, only
+// superseded. Nothing reaches disk until the enclosing Update saves.
+func (l *Ledger) Complete(kind Kind, key, outcome string, artifacts map[string]string, detail string) (*Record, error) {
 	cur := Current(l, kind, key)
 	switch {
 	case cur == nil:
@@ -305,10 +345,6 @@ func (s *Store) Complete(id Identity, kind Kind, key, outcome string, artifacts 
 	cur.CompletedAt = nowStamp()
 	if detail != "" {
 		cur.Detail = detail
-	}
-
-	if err := saveLedger(s.dir, l); err != nil {
-		return nil, err
 	}
 
 	completed := *cur

@@ -1,10 +1,13 @@
 package runstate
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -568,4 +571,153 @@ func TestIsFailedOutcome(t *testing.T) {
 			}
 		})
 	}
+}
+
+func readLedgerBytes(t *testing.T, dir string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(dir, LedgerFile))
+	if err != nil {
+		t.Fatalf("read ledger: %v", err)
+	}
+	return data
+}
+
+// TestUpdate_AnErrorLeavesTheCheckpointByteIdentical locks the transaction's
+// one promise: what a callback did to the in-memory ledger reaches disk only
+// when the callback returns nil. A refusal decided halfway through — after a
+// Start and a Complete were already applied in memory — leaves the checkpoint
+// exactly as it was, and the callback's own error comes back unwrapped.
+func TestUpdate_AnErrorLeavesTheCheckpointByteIdentical(t *testing.T) {
+	dir := t.TempDir()
+	s := openStore(t, dir)
+	id := testIdentity()
+	if _, err := s.Start(id, KindReviewGroup, "g1", map[string]any{"rows": []string{"sc-17"}}, "", ""); err != nil {
+		t.Fatalf("Start g1: %v", err)
+	}
+	before := readLedgerBytes(t, dir)
+
+	refused := errors.New("row already grouped")
+	err := s.Update(id, func(l *Ledger) error {
+		if _, err := l.Start(KindReviewGroup, "g2", map[string]any{"rows": []string{"sc-17"}}, "", ""); err != nil {
+			return err
+		}
+		if _, err := l.Complete(KindReviewGroup, "g1", "holds", nil, ""); err != nil {
+			return err
+		}
+		if len(l.Records) != 2 || l.Records[0].Status != StatusCompleted {
+			return fmt.Errorf("in-memory ledger = %+v, want g1 completed and g2 started before the refusal", l.Records)
+		}
+		return refused
+	})
+	if err != refused {
+		t.Fatalf("Update = %v, want the callback's error %v returned unwrapped", err, refused)
+	}
+
+	if after := readLedgerBytes(t, dir); !bytes.Equal(before, after) {
+		t.Errorf("ledger.json changed under a refused Update:\nbefore=%s\nafter=%s", before, after)
+	}
+	l, err := s.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(l.Records) != 1 || l.Records[0].ID != "g1" || l.Records[0].Status != StatusStarted {
+		t.Errorf("records = %+v, want only the started g1 record", l.Records)
+	}
+}
+
+// TestUpdate_FirstUseCreatesTheLedgerOnlyWhenTheCallbackSucceeds: a run with no
+// ledger yet gets one from Update exactly as it gets one from Start — carrying
+// the presented identity — but only once a callback succeeds; a refused first
+// transaction leaves no checkpoint behind. Every transition one callback makes
+// lands in the same replacement.
+func TestUpdate_FirstUseCreatesTheLedgerOnlyWhenTheCallbackSucceeds(t *testing.T) {
+	dir := t.TempDir()
+	s := openStore(t, dir)
+	id := testIdentity()
+
+	nothing := errors.New("nothing to record")
+	if err := s.Update(id, func(l *Ledger) error { return nothing }); err != nothing {
+		t.Fatalf("Update = %v, want %v", err, nothing)
+	}
+	if _, err := os.Stat(filepath.Join(dir, LedgerFile)); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("ledger.json after a refused first Update: stat err = %v, want it absent", err)
+	}
+
+	var started, completed *Record
+	err := s.Update(id, func(l *Ledger) error {
+		if l.SchemaVersion != evidence.SchemaVersion || l.Identity != id || len(l.Records) != 0 {
+			return fmt.Errorf("fresh ledger = %+v, want the presented identity and no records", l)
+		}
+		rec, err := l.Start(KindPhase, "trace", map[string]string{"runDir": dir}, "", "")
+		if err != nil {
+			return err
+		}
+		started = rec
+		done, err := l.Complete(KindPhase, "trace", "ok", nil, "phase done")
+		if err != nil {
+			return err
+		}
+		completed = done
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if started == nil || started.Seq != 1 || started.Status != StatusStarted {
+		t.Errorf("Start inside Update = %+v, want the seq-1 started record", started)
+	}
+	if completed == nil || completed.Seq != 1 || completed.Status != StatusCompleted || completed.Outcome != "ok" {
+		t.Errorf("Complete inside Update = %+v, want the seq-1 record completed ok", completed)
+	}
+
+	l, err := s.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if l.Identity != id {
+		t.Errorf("Identity = %+v, want %+v", l.Identity, id)
+	}
+	if len(l.Records) != 1 || l.Records[0].Status != StatusCompleted || l.Records[0].Detail != "phase done" {
+		t.Errorf("records = %+v, want one completed trace record carrying both transitions", l.Records)
+	}
+}
+
+// TestUpdate_RefusesBeforeTheCallbackRuns: a ledger that belongs to another run
+// or cannot be read is refused by Update itself, so a callback never sees a
+// ledger it must not change.
+func TestUpdate_RefusesBeforeTheCallbackRuns(t *testing.T) {
+	t.Run("foreign identity", func(t *testing.T) {
+		dir := t.TempDir()
+		s := openStore(t, dir)
+		id := testIdentity()
+		if _, err := s.Start(id, KindPhase, "trace", map[string]string{"runDir": dir}, "", ""); err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+		other := id
+		other.RepoCommit = "ffffffffffffffff"
+
+		ran := false
+		err := s.Update(other, func(l *Ledger) error { ran = true; return nil })
+		if !errors.Is(err, ErrIdentityMismatch) {
+			t.Errorf("Update with a foreign identity = %v, want ErrIdentityMismatch", err)
+		}
+		if ran {
+			t.Error("the callback ran over a ledger of another run")
+		}
+	})
+
+	t.Run("corrupt checkpoint", func(t *testing.T) {
+		dir := t.TempDir()
+		s := openStore(t, dir)
+		writeFile(t, filepath.Join(dir, LedgerFile), `{"schemaVersion": "1", `)
+
+		ran := false
+		err := s.Update(testIdentity(), func(l *Ledger) error { ran = true; return nil })
+		if err == nil || !strings.Contains(err.Error(), "load ledger ") {
+			t.Errorf("Update over a corrupt checkpoint = %v, want a load ledger error", err)
+		}
+		if ran {
+			t.Error("the callback ran over a checkpoint that could not be read")
+		}
+	})
 }

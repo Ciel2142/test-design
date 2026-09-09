@@ -118,10 +118,12 @@ func decodeRecordReviewRequest(op string, requestBody []byte) (*recordReviewRequ
 // they answered. Starting a group fixes the sources it will be judged against;
 // completing it writes the group's evidence and closes the obligation. The op
 // never judges a row itself — it refuses anything it cannot attribute to the
-// group's own rows and the trace those rows were dispatched from.
+// group's own rows and the trace those rows were dispatched from. Every check
+// that reads the ledger and the transition it guards run inside one exclusive
+// ledger transaction, so two parents working the same run at once cannot each
+// pass a check the other's write has already falsified.
 func recordReviewHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer) *cliError {
 	const op = "record-review"
-	const kind = runstate.KindReviewGroup
 
 	req, cliErr := decodeRecordReviewRequest(op, requestBody)
 	if cliErr != nil {
@@ -145,24 +147,29 @@ func recordReviewHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer)
 	if cliErr != nil {
 		return cliErr
 	}
-	ledger, cliErr := loadLedgerFor(op, kind, store)
-	if cliErr != nil {
-		return cliErr
-	}
-
-	if req.Status == reviewStatusStarted {
-		if cliErr := checkRowsUngrouped(op, req, ledger); cliErr != nil {
-			return cliErr
-		}
-	}
-
-	dispatch, digest, cliErr := currentDispatch(op, ledger)
-	if cliErr != nil {
-		return cliErr
-	}
 	identity := ledgerIdentity(&req.verifyRequest, req.RepoRoot, repoCommit, src)
 
 	if req.Status == reviewStatusStarted {
+		return recordReviewStarted(op, req, store, identity, stdout)
+	}
+	return recordReviewCompleted(op, req, src, repoCommit, store, identity, stdout)
+}
+
+// recordReviewStarted opens the group. The check that no current group already
+// claims one of its rows, the dispatch inputs it is judged against and the
+// Start that claims the rows are decided over one ledger, under the exclusive
+// lock: ten parents opening ten groups over one row at once leave the row in
+// exactly one of them, the other nine refused row-already-grouped.
+func recordReviewStarted(op string, req *recordReviewRequest, store *runstate.Store, identity runstate.Identity, stdout io.Writer) *cliError {
+	const kind = runstate.KindReviewGroup
+	err := store.Update(identity, func(l *runstate.Ledger) error {
+		if cliErr := checkRowsUngrouped(op, req, l); cliErr != nil {
+			return cliErr
+		}
+		dispatch, digest, cliErr := currentDispatch(op, l)
+		if cliErr != nil {
+			return cliErr
+		}
 		inputs, ok := reviewGroupInputsFor(dispatch, req.Rows, digest)
 		if !ok {
 			return &cliError{
@@ -170,73 +177,98 @@ func recordReviewHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer)
 				Message: fmt.Sprintf("%s: the trace's dispatch inputs name no such row among %v", op, req.Rows),
 			}
 		}
-		if _, err := store.Start(identity, kind, req.GroupID, inputs, "", repeatReason(&req.verifyRequest)); err != nil {
-			return ledgerError(op, kind, err)
-		}
-		return writeStdout(stdout, recordReviewOutput{
-			Envelope: evidence.Envelope{SchemaVersion: evidence.SchemaVersion, VerifierVersion: evidence.VerifierVersion},
-			RunID:    req.RunID, GroupID: req.GroupID, Status: reviewStatusStarted,
-		})
-	}
-
-	current := runstate.Current(ledger, kind, req.GroupID)
-	switch {
-	case current == nil:
-		return &cliError{
-			Code:    "review-group-not-started",
-			Message: fmt.Sprintf("%s: group %s was never started for this run", op, req.GroupID),
-		}
-	case current.Status == runstate.StatusCompleted:
-		return &cliError{
-			Code:    "duplicate-completion",
-			Message: fmt.Sprintf("%s: group %s is already completed; the first result stands", op, req.GroupID),
-		}
-	}
-
-	var recorded reviewGroupInputs
-	if err := recordInputs(current, &recorded); err != nil {
-		return &cliError{Code: "ledger-invalid", Message: fmt.Sprintf("%s: %v", op, err)}
-	}
-	if cliErr := checkVerdicts(op, req.GroupID, req.Verdicts, recorded.Rows); cliErr != nil {
+		_, err := l.Start(kind, req.GroupID, inputs, "", repeatReason(&req.verifyRequest))
+		return err
+	})
+	if cliErr := updateError(op, kind, err); cliErr != nil {
 		return cliErr
 	}
-	inputs, ok := reviewGroupInputsFor(dispatch, recorded.Rows, digest)
-	if !ok || !groupInputsMatch(recorded, inputs) {
-		return &cliError{
-			Code: "dispatch-inputs-changed",
-			Message: fmt.Sprintf("%s: group %s was judged against dispatch inputs the run no longer hands out; regroup against the current trace",
-				op, req.GroupID),
-		}
-	}
-
-	verdicts := req.Verdicts
-	if verdicts == nil {
-		verdicts = []reviewVerdict{}
-	}
-	doc := reviewEvidence{
-		Envelope:     evidence.Envelope{SchemaVersion: evidence.SchemaVersion, VerifierVersion: evidence.VerifierVersion},
-		RunID:        req.RunID,
-		RepoCommit:   repoCommit,
-		Source:       src.Path,
-		SourceSHA256: src.SHA256,
-		GroupID:      req.GroupID,
-		Rows:         recorded.Rows,
-		Inputs:       recorded,
-		Verdicts:     verdicts,
-	}
-	path := filepath.Join(store.Dir(), "review-"+req.GroupID+".json")
-	if err := evidence.WriteJSON(path, &doc); err != nil {
-		return &cliError{Code: "evidence-write-failed", Message: fmt.Sprintf("%s: %v", op, err)}
-	}
-
-	outcome := reviewOutcome(verdicts)
-	if _, err := store.Complete(identity, kind, req.GroupID, outcome, map[string]string{artifactEvidence: path}, ""); err != nil {
-		return ledgerError(op, kind, err)
-	}
 	return writeStdout(stdout, recordReviewOutput{
-		Envelope: doc.Envelope, RunID: req.RunID, GroupID: req.GroupID,
-		Status: reviewStatusCompleted, Outcome: outcome, EvidencePath: path,
+		Envelope: evidence.Envelope{SchemaVersion: evidence.SchemaVersion, VerifierVersion: evidence.VerifierVersion},
+		RunID:    req.RunID, GroupID: req.GroupID, Status: reviewStatusStarted,
 	})
+}
+
+// recordReviewCompleted closes the group. The evidence is written after the
+// group is known to be started and before its record is completed, all under
+// the one exclusive lock, so the digest the record carries is of the bytes the
+// outcome was computed from; a second completer arriving meanwhile sees a
+// completed group and writes nothing.
+func recordReviewCompleted(
+	op string, req *recordReviewRequest, src *coverage.Source, repoCommit string,
+	store *runstate.Store, identity runstate.Identity, stdout io.Writer,
+) *cliError {
+	const kind = runstate.KindReviewGroup
+	var out recordReviewOutput
+	err := store.Update(identity, func(l *runstate.Ledger) error {
+		dispatch, digest, cliErr := currentDispatch(op, l)
+		if cliErr != nil {
+			return cliErr
+		}
+		current := runstate.Current(l, kind, req.GroupID)
+		switch {
+		case current == nil:
+			return &cliError{
+				Code:    "review-group-not-started",
+				Message: fmt.Sprintf("%s: group %s was never started for this run", op, req.GroupID),
+			}
+		case current.Status == runstate.StatusCompleted:
+			return &cliError{
+				Code:    "duplicate-completion",
+				Message: fmt.Sprintf("%s: group %s is already completed; the first result stands", op, req.GroupID),
+			}
+		}
+
+		var recorded reviewGroupInputs
+		if err := recordInputs(current, &recorded); err != nil {
+			return &cliError{Code: "ledger-invalid", Message: fmt.Sprintf("%s: %v", op, err)}
+		}
+		if cliErr := checkVerdicts(op, req.GroupID, req.Verdicts, recorded.Rows); cliErr != nil {
+			return cliErr
+		}
+		inputs, ok := reviewGroupInputsFor(dispatch, recorded.Rows, digest)
+		if !ok || !groupInputsMatch(recorded, inputs) {
+			return &cliError{
+				Code: "dispatch-inputs-changed",
+				Message: fmt.Sprintf("%s: group %s was judged against dispatch inputs the run no longer hands out; regroup against the current trace",
+					op, req.GroupID),
+			}
+		}
+
+		verdicts := req.Verdicts
+		if verdicts == nil {
+			verdicts = []reviewVerdict{}
+		}
+		doc := reviewEvidence{
+			Envelope:     evidence.Envelope{SchemaVersion: evidence.SchemaVersion, VerifierVersion: evidence.VerifierVersion},
+			RunID:        req.RunID,
+			RepoCommit:   repoCommit,
+			Source:       src.Path,
+			SourceSHA256: src.SHA256,
+			GroupID:      req.GroupID,
+			Rows:         recorded.Rows,
+			Inputs:       recorded,
+			Verdicts:     verdicts,
+		}
+		path := filepath.Join(store.Dir(), "review-"+req.GroupID+".json")
+		if err := evidence.WriteJSON(path, &doc); err != nil {
+			return &cliError{Code: "evidence-write-failed", Message: fmt.Sprintf("%s: %v", op, err)}
+		}
+
+		outcome := reviewOutcome(verdicts)
+		if _, err := l.Complete(kind, req.GroupID, outcome, map[string]string{artifactEvidence: path}, ""); err != nil {
+			return err
+		}
+		out = recordReviewOutput{
+			Envelope: doc.Envelope, RunID: req.RunID, GroupID: req.GroupID,
+			Status: reviewStatusCompleted, Outcome: outcome, EvidencePath: path,
+		}
+		return nil
+	})
+	if cliErr := updateError(op, kind, err); cliErr != nil {
+		return cliErr
+	}
+	return writeStdout(stdout, out)
 }
 
 // checkGroupRows answers from the coverage document alone what a group may

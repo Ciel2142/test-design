@@ -159,6 +159,20 @@ func ledgerError(op string, kind runstate.Kind, err error) *cliError {
 	}
 }
 
+// updateError names what an Update refused in the op's vocabulary. A refusal
+// the transaction's own checks decided comes back as it was; anything else is
+// the ledger's, named the way ledgerError names it.
+func updateError(op string, kind runstate.Kind, err error) *cliError {
+	if err == nil {
+		return nil
+	}
+	var refusal *cliError
+	if errors.As(err, &refusal) {
+		return refusal
+	}
+	return ledgerError(op, kind, err)
+}
+
 // completedRecordRefusal names the obligation a caller may not record twice.
 // Start reports it for itself; the ops that only finish an obligation check it
 // before they write an artifact nothing will point at.

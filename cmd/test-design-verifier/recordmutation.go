@@ -120,51 +120,58 @@ func recordMutationHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Write
 	if cliErr != nil {
 		return cliErr
 	}
-	ledger, cliErr := loadLedgerFor(op, kind, store)
-	if cliErr != nil {
-		return cliErr
-	}
+	identity := ledgerIdentity(&req.verifyRequest, req.RepoRoot, repoCommit, src)
 
 	// The row must already be prepared: this op finishes an obligation, it never
-	// opens one, so a row nothing started has nothing here to close.
-	current := runstate.Current(ledger, kind, req.RowID)
-	switch {
-	case current == nil:
-		return &cliError{
-			Code:    "mutation-row-not-started",
-			Message: fmt.Sprintf("%s: %s was never prepared for this run", op, req.RowID),
+	// opens one, so a row nothing started has nothing here to close. The check,
+	// the evidence write and the completion run under one exclusive lock, so a
+	// second verdict arriving meanwhile finds the row completed and writes
+	// nothing.
+	var out recordMutationOutput
+	err := store.Update(identity, func(l *runstate.Ledger) error {
+		current := runstate.Current(l, kind, req.RowID)
+		switch {
+		case current == nil:
+			return &cliError{
+				Code:    "mutation-row-not-started",
+				Message: fmt.Sprintf("%s: %s was never prepared for this run", op, req.RowID),
+			}
+		case current.Status == runstate.StatusCompleted:
+			return completedRecordRefusal(op, kind, req.RowID)
 		}
-	case current.Status == runstate.StatusCompleted:
-		return completedRecordRefusal(op, kind, req.RowID)
-	}
 
-	var prepared mutationRowInputs
-	if err := recordInputs(current, &prepared); err != nil {
-		return &cliError{Code: "ledger-invalid", Message: fmt.Sprintf("%s: %v", op, err)}
-	}
+		var prepared mutationRowInputs
+		if err := recordInputs(current, &prepared); err != nil {
+			return &cliError{Code: "ledger-invalid", Message: fmt.Sprintf("%s: %v", op, err)}
+		}
 
-	doc := mutationUnappliableEvidence{
-		Envelope:     evidence.Envelope{SchemaVersion: evidence.SchemaVersion, VerifierVersion: evidence.VerifierVersion},
-		RunID:        req.RunID,
-		RowID:        req.RowID,
-		RepoCommit:   repoCommit,
-		Source:       src.Path,
-		SourceSHA256: src.SHA256,
-		Reason:       req.Reason,
-		RunDir:       prepared.RunDir,
-		WorktreePath: prepared.WorktreePath,
-	}
-	path := filepath.Join(store.Dir(), "mutation-unappliable-"+req.RowID+".json")
-	if err := evidence.WriteJSON(path, &doc); err != nil {
-		return &cliError{Code: "evidence-write-failed", Message: fmt.Sprintf("%s: %v", op, err)}
-	}
+		doc := mutationUnappliableEvidence{
+			Envelope:     evidence.Envelope{SchemaVersion: evidence.SchemaVersion, VerifierVersion: evidence.VerifierVersion},
+			RunID:        req.RunID,
+			RowID:        req.RowID,
+			RepoCommit:   repoCommit,
+			Source:       src.Path,
+			SourceSHA256: src.SHA256,
+			Reason:       req.Reason,
+			RunDir:       prepared.RunDir,
+			WorktreePath: prepared.WorktreePath,
+		}
+		path := filepath.Join(store.Dir(), "mutation-unappliable-"+req.RowID+".json")
+		if err := evidence.WriteJSON(path, &doc); err != nil {
+			return &cliError{Code: "evidence-write-failed", Message: fmt.Sprintf("%s: %v", op, err)}
+		}
 
-	identity := ledgerIdentity(&req.verifyRequest, req.RepoRoot, repoCommit, src)
-	if _, err := store.Complete(identity, kind, req.RowID, outcomeUnappliable, map[string]string{artifactEvidence: path}, ""); err != nil {
-		return ledgerError(op, kind, err)
-	}
-	return writeStdout(stdout, recordMutationOutput{
-		Envelope: doc.Envelope, RunID: req.RunID, RowID: req.RowID,
-		Outcome: outcomeUnappliable, EvidencePath: path,
+		if _, err := l.Complete(kind, req.RowID, outcomeUnappliable, map[string]string{artifactEvidence: path}, ""); err != nil {
+			return err
+		}
+		out = recordMutationOutput{
+			Envelope: doc.Envelope, RunID: req.RunID, RowID: req.RowID,
+			Outcome: outcomeUnappliable, EvidencePath: path,
+		}
+		return nil
 	})
+	if cliErr := updateError(op, kind, err); cliErr != nil {
+		return cliErr
+	}
+	return writeStdout(stdout, out)
 }
