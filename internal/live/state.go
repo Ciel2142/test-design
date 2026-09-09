@@ -18,9 +18,9 @@ const stateFileName = "live-state.json"
 type State struct {
 	SchemaVersion string          `json:"schemaVersion"`
 	RunID         string          `json:"runID"`
-	RepoCommit string `json:"repoCommit"`
-	Source string `json:"source"`
-	SourceSHA256 string `json:"sourceSha256"`
+	RepoCommit    string          `json:"repoCommit"`
+	Source        string          `json:"source"`
+	SourceSHA256  string          `json:"sourceSha256"`
 	WorktreePath  string          `json:"worktreePath"`
 	Snapshot      json.RawMessage `json:"snapshot"`
 	ProfilePath   string          `json:"profilePath"`

@@ -13,8 +13,8 @@ import (
 func sampleState() *State {
 	return &State{
 		RunID:        "run-abc123",
-		RepoCommit: "abc123",
-		Source: "spec.md",
+		RepoCommit:   "abc123",
+		Source:       "spec.md",
 		SourceSHA256: "source-sha",
 		WorktreePath: "/tmp/wt-example",
 		Snapshot:     json.RawMessage(`{"headCommit":"abc123"}`),
