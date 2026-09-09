@@ -20,6 +20,7 @@ func isolateEnv(t *testing.T) {
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	t.Setenv("TMPDIR", tempBase)
+	t.Setenv("TEST_DESIGN_STATE_DIR", t.TempDir())
 }
 
 func mustGit(t *testing.T, dir string, args ...string) string {

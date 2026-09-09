@@ -15,6 +15,7 @@ import (
 	"test-design/internal/gotestjson"
 	"test-design/internal/jvmsource"
 	"test-design/internal/runrecord"
+	"test-design/internal/runstate"
 	"test-design/internal/trace"
 	"test-design/internal/worktree"
 )
@@ -147,6 +148,19 @@ func traceOp(req *verifyRequest, stdout io.Writer, between func()) *cliError {
 	runDir, err := ctrl.NewRunDir(req.RunID)
 	if err != nil {
 		return &cliError{Code: "run-dir-failed", Message: fmt.Sprintf("trace: %v", err)}
+	}
+
+	// The phase is opened before the worktree is: a run ID whose trace already
+	// completed is refused here, where nothing has been created to dispose of
+	// and no suite has run.
+	store, cliErr := openLedger("trace", req)
+	if cliErr != nil {
+		return cliErr
+	}
+	identity := ledgerIdentity(req, req.RepoRoot, repoCommit, src)
+	if _, err := store.Start(identity, runstate.KindPhase, tracePhaseID,
+		phaseInputs{RunDir: runDir}, "", repeatReason(req)); err != nil {
+		return ledgerError("trace", runstate.KindPhase, err)
 	}
 
 	wt, err := ctrl.Create(repoCommit)
@@ -293,6 +307,17 @@ func traceOp(req *verifyRequest, stdout io.Writer, between func()) *cliError {
 			Message: fmt.Sprintf("trace: source repository changed during verification: %s; commit or discard the concurrent change, then rerun",
 				strings.Join(differing, ", ")),
 		}
+	}
+
+	// The phase is closed only once the repository has been proved untouched:
+	// evidence produced by a run that changed its own subject is not evidence.
+	if _, err := store.Complete(identity, runstate.KindPhase, tracePhaseID, "ok", map[string]string{
+		artifactEvidence:       evidencePath,
+		artifactDispatchInputs: dispatchPath,
+	}, ""); err != nil {
+		cliErr := ledgerError("trace", runstate.KindPhase, err)
+		cliErr.Message = fmt.Sprintf("%s; the evidence stands at %s", cliErr.Message, evidencePath)
+		return cliErr
 	}
 
 	out := traceOutput{

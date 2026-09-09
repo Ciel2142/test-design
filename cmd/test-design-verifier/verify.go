@@ -23,11 +23,19 @@ import (
 	"test-design/internal/subprocess"
 )
 
+// repeatRequest is the caller's deliberate repetition of an obligation this
+// run already completed. The reason is mandatory and is retained as the
+// superseded record's detail, so a repeated obligation always says why.
+type repeatRequest struct {
+	Reason string `json:"reason"`
+}
+
 type verifyRequest struct {
-	SchemaVersion  string `json:"schemaVersion"`
-	RepoRoot       string `json:"repoRoot"`
-	CoverageSource string `json:"coverageSource"`
-	RunID          string `json:"runID"`
+	SchemaVersion  string         `json:"schemaVersion"`
+	RepoRoot       string         `json:"repoRoot"`
+	CoverageSource string         `json:"coverageSource"`
+	RunID          string         `json:"runID"`
+	Repeat         *repeatRequest `json:"repeat,omitempty"`
 }
 
 func decodeVerifyRequest(op string, requestBody []byte) (*verifyRequest, *cliError) {
@@ -49,6 +57,12 @@ func decodeVerifyRequest(op string, requestBody []byte) (*verifyRequest, *cliErr
 		return nil, cliErr
 	}
 	req.CoverageSource = rel
+	if req.Repeat != nil && strings.TrimSpace(req.Repeat.Reason) == "" {
+		return nil, &cliError{
+			Code:    "missing-repeat-reason",
+			Message: fmt.Sprintf("%s: repeat requires a reason; a repetition that says nothing is not a decision", op),
+		}
+	}
 	return &req, nil
 }
 

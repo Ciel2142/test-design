@@ -12,6 +12,7 @@ import (
 	"test-design/internal/coverage"
 	"test-design/internal/evidence"
 	"test-design/internal/live"
+	"test-design/internal/runstate"
 	"test-design/internal/worktree"
 )
 
@@ -67,6 +68,7 @@ func recordAttemptHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer
 		return cliErr
 	}
 	name := liveAttemptEvidenceFile
+	kind, key, outcome := runstate.KindLiveAttempt, liveAttemptID, "unavailable"
 	if attempt.Layer == 3 {
 		if cliErr := requireLiveDecision(op, src); cliErr != nil {
 			return cliErr
@@ -92,7 +94,25 @@ func recordAttemptHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer
 			return &cliError{Code: "not-high-risk", Message: fmt.Sprintf("%s: %s does not require mutation evidence", op, attempt.RowID)}
 		}
 		name = "mutation-attempt.json"
+		kind, key, outcome = runstate.KindMutationRow, attempt.RowID, "environmental"
 	}
+
+	// An obligation this run already answered is refused before anything is
+	// created for it: the ledger is re-read under the lock at Start, so the
+	// check here only spares the caller a run directory it would not keep.
+	store, cliErr := openLedger(op, req)
+	if cliErr != nil {
+		return cliErr
+	}
+	ledger, cliErr := loadLedgerFor(op, kind, store)
+	if cliErr != nil {
+		return cliErr
+	}
+	current := runstate.Current(ledger, kind, key)
+	if current != nil && current.Status == runstate.StatusCompleted && repeatReason(req) == "" {
+		return completedRecordRefusal(op, kind, key)
+	}
+
 	ctrl, err := worktree.NewController(req.RepoRoot)
 	if err != nil {
 		return &cliError{Code: "controller-failed", Message: fmt.Sprintf("%s: %v", op, err)}
@@ -112,6 +132,21 @@ func recordAttemptHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer
 	if err != nil {
 		return &cliError{Code: "run-dir-failed", Message: fmt.Sprintf("%s: %v", op, err)}
 	}
+	identity := ledgerIdentity(req, req.RepoRoot, commit, src)
+	// A row or a layer nothing opened is opened here: a refused attempt is the
+	// whole of the obligation's life, start to finish, in one call. One already
+	// started is finished where it stands, so an interrupted attempt is not
+	// silently replaced.
+	if current == nil || current.Status == runstate.StatusCompleted {
+		var inputs any = liveAttemptInputs{RunDir: runDir, ProfilePath: src.LiveProfile}
+		if kind == runstate.KindMutationRow {
+			inputs = mutationRowInputs{RunnerKind: src.Runner.Kind, RunDir: runDir}
+		}
+		if _, err := store.Start(identity, kind, key, inputs, "", repeatReason(req)); err != nil {
+			return ledgerError(op, kind, err)
+		}
+	}
+
 	doc := attemptEvidence{
 		Envelope: evidence.Envelope{SchemaVersion: evidence.SchemaVersion, VerifierVersion: evidence.VerifierVersion},
 		RunID:    req.RunID, RowID: attempt.RowID, Source: src.Path, SourceSHA256: src.SHA256,
@@ -130,6 +165,9 @@ func recordAttemptHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer
 	}
 	if equal, paths := worktree.Compare(before, after); !equal {
 		return &cliError{Code: "source-changed-during-verification", Message: fmt.Sprintf("%s: repository changed: %s", op, strings.Join(paths, ", "))}
+	}
+	if _, err := store.Complete(identity, kind, key, outcome, map[string]string{artifactAttempt: path}, ""); err != nil {
+		return ledgerError(op, kind, err)
 	}
 	return writeStdout(stdout, attemptOutput{Envelope: doc.Envelope, EvidencePath: path})
 }

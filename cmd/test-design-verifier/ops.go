@@ -53,6 +53,18 @@ var ops = map[string]opSpec{
 		newFlags: newRecordAttemptFlags,
 		handler:  recordAttemptHandler,
 	},
+	"record-review": {
+		newFlags: newRecordReviewFlags,
+		handler:  recordReviewHandler,
+	},
+	"record-mutation": {
+		newFlags: newRecordMutationFlags,
+		handler:  recordMutationHandler,
+	},
+	"resume": {
+		newFlags: newResumeFlags,
+		handler:  resumeHandler,
+	},
 }
 
 func newNextIDFlags() *flag.FlagSet {
