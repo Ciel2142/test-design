@@ -223,6 +223,25 @@ func proofDispatchedRows(dispatch dispatchInputs, except ...string) []string {
 	return rows
 }
 
+// proofEveryRecordRefused holds a widening change to what widening means: every
+// prior record of the subject — its three review groups and its three mutation
+// rows — refused with the one reason naming the path. The count is asserted
+// before the reasons, so a reuse that emitted no decisions at all fails here
+// rather than passing an empty loop.
+func proofEveryRecordRefused(t *testing.T, out reuseOutput, want string) {
+	t.Helper()
+	if len(out.Review) != 3 || len(out.Mutation) != 3 {
+		t.Fatalf("decisions = %d review, %d mutation, want the subject's 3 and 3",
+			len(out.Review), len(out.Mutation))
+	}
+	for _, decision := range append(slices.Clone(out.Review), out.Mutation...) {
+		proofRefused(t, string(decision.Kind)+"/"+decision.ID, decision, want)
+	}
+	if got := (reuseCounts{Refused: 6}); out.Counts != got {
+		t.Errorf("counts = %+v, want %+v: widening adopts nothing", out.Counts, got)
+	}
+}
+
 // proofPendingIs holds resume's pending list to exactly want, in any order.
 func proofPendingIs(t *testing.T, label string, got, want []resumePending) {
 	t.Helper()
@@ -332,15 +351,18 @@ func TestReuse_MatchesCompleteInputsBeforeReuse(t *testing.T) {
 		if got := resumeRow(t, resumed, "SC-12"); got.Status != string(runstate.StatusCompleted) || got.Reason != "" {
 			t.Errorf("resumed SC-12 = %+v, want it completed and valid", got)
 		}
-		for _, pending := range resumed.Pending {
-			if pending.ID == "G-ship" || pending.ID == "SC-12" {
-				t.Errorf("pending = %+v, want the adopted records never offered again", resumed.Pending)
-			}
-		}
-		want := proofDispatchedRows(tracedDispatchOf(t, resumed), proofShipRows...)
+		want := proofDispatchedRows(proofTracedDispatch(t, resumed), proofShipRows...)
 		if !slices.Equal(resumed.Review.Uncovered, want) {
 			t.Errorf("uncovered = %v, want the rows of the two refused groups %v", resumed.Review.Uncovered, want)
 		}
+		// The adopted group and the adopted row are never offered again, and
+		// what is offered is exactly the two refused groups' rows and the two
+		// high-risk rows this run has no mutation record for.
+		proofPendingIs(t, "unchanged", resumed.Pending, []resumePending{
+			{Kind: runstate.KindReviewGroup, Reason: "uncovered: " + strings.Join(want, ", ")},
+			{Kind: runstate.KindMutationRow, ID: "SC-10", Reason: reasonNeverStarted},
+			{Kind: runstate.KindMutationRow, ID: "SC-07", Reason: reasonNeverStarted},
+		})
 	})
 
 	otherPolicy := &reviewPolicy{
@@ -367,8 +389,9 @@ func TestReuse_MatchesCompleteInputsBeforeReuse(t *testing.T) {
 			},
 			shipReason: "claim-changed:SC-11",
 			extra: func(t *testing.T, out reuseOutput) {
-				if len(out.ChangedPaths) == 0 || out.ChangedPaths[0].Class != changeExempt {
-					t.Errorf("changedPaths = %+v, want the coverage source itself classified exempt", out.ChangedPaths)
+				if len(out.ChangedPaths) != 1 || out.ChangedPaths[0].Path != fixtureCoverageSource ||
+					out.ChangedPaths[0].Class != changeExempt {
+					t.Errorf("changedPaths = %+v, want only %s, classified exempt", out.ChangedPaths, fixtureCoverageSource)
 				}
 			},
 		},
@@ -552,9 +575,9 @@ func proofDigest(t *testing.T, path string) string {
 	return sum
 }
 
-// tracedDispatchOf reads back the dispatch document of a resumed run's trace,
-// which is the order its rows were dispatched in.
-func tracedDispatchOf(t *testing.T, out resumeOutput) dispatchInputs {
+// proofTracedDispatch reads back the dispatch document of a resumed run's
+// trace, which is the order its rows were dispatched in.
+func proofTracedDispatch(t *testing.T, out resumeOutput) dispatchInputs {
 	t.Helper()
 	return readDispatchInputs(t, out.Trace.DispatchPath)
 }
@@ -648,16 +671,14 @@ func TestReuse_IsolatedRepairInvalidatesOnlyItsGroup(t *testing.T) {
 
 		out := proofTraceAndReuse(t, repo, runID, priorRunID, policy)
 
-		if len(out.ChangedPaths) != 1 || out.ChangedPaths[0].Class != changeShared {
-			t.Fatalf("changedPaths = %+v, want %s classified shared", out.ChangedPaths, production)
+		if len(out.ChangedPaths) != 1 || out.ChangedPaths[0].Path != production ||
+			out.ChangedPaths[0].Class != changeShared {
+			t.Fatalf("changedPaths = %+v, want only %s, classified shared", out.ChangedPaths, production)
 		}
-		want := "module-changed:" + production
-		for _, decision := range append(slices.Clone(out.Review), out.Mutation...) {
-			proofRefused(t, string(decision.Kind)+"/"+decision.ID, decision, want)
-		}
+		proofEveryRecordRefused(t, out, "module-changed:"+production)
 
 		resumed := runResume(t, repo, runID)
-		every := proofDispatchedRows(tracedDispatchOf(t, resumed))
+		every := proofDispatchedRows(proofTracedDispatch(t, resumed))
 		proofPendingIs(t, "production", resumed.Pending, []resumePending{
 			{Kind: runstate.KindReviewGroup, Reason: "uncovered: " + strings.Join(every, ", ")},
 			{Kind: runstate.KindMutationRow, ID: "SC-07", Reason: reasonNeverStarted},
@@ -676,13 +697,11 @@ func TestReuse_IsolatedRepairInvalidatesOnlyItsGroup(t *testing.T) {
 
 		out := proofTraceAndReuse(t, repo, runID, priorRunID, policy)
 
-		if len(out.ChangedPaths) != 1 || out.ChangedPaths[0].Class != changeUnknown {
-			t.Fatalf("changedPaths = %+v, want %s classified unknown", out.ChangedPaths, helper)
+		if len(out.ChangedPaths) != 1 || out.ChangedPaths[0].Path != helper ||
+			out.ChangedPaths[0].Class != changeUnknown {
+			t.Fatalf("changedPaths = %+v, want only %s, classified unknown", out.ChangedPaths, helper)
 		}
-		want := "unknown-ownership:" + helper
-		for _, decision := range append(slices.Clone(out.Review), out.Mutation...) {
-			proofRefused(t, string(decision.Kind)+"/"+decision.ID, decision, want)
-		}
+		proofEveryRecordRefused(t, out, "unknown-ownership:"+helper)
 	})
 
 	t.Run("exempt", func(t *testing.T) {
@@ -695,8 +714,9 @@ func TestReuse_IsolatedRepairInvalidatesOnlyItsGroup(t *testing.T) {
 
 		out := proofTraceAndReuse(t, repo, runID, priorRunID, policy)
 
-		if len(out.ChangedPaths) != 1 || out.ChangedPaths[0].Class != changeExempt {
-			t.Fatalf("changedPaths = %+v, want %s classified exempt", out.ChangedPaths, published)
+		if len(out.ChangedPaths) != 1 || out.ChangedPaths[0].Path != published ||
+			out.ChangedPaths[0].Class != changeExempt {
+			t.Fatalf("changedPaths = %+v, want only %s, classified exempt", out.ChangedPaths, published)
 		}
 		proofReused(t, "G-orders", reuseDecisionFor(t, out.Review, "G-orders"), "blocked")
 		proofReused(t, "G-pay", reuseDecisionFor(t, out.Review, "G-pay"), "blocked")
