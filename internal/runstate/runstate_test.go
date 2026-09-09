@@ -551,7 +551,14 @@ func TestIsFailedOutcome(t *testing.T) {
 		{KindLiveAttempt, "unavailable", true},
 		{KindPhase, "", false},
 		{KindLiveAttempt, "sideways", false},
-		{Kind("unknown"), "fail", false},
+
+		// The set is flat: a failing outcome stays failing under any kind, so a
+		// ledger whose kind string is unrecognized cannot report a blocked run clean.
+		{Kind("unknown"), "fail", true},
+		{Kind(""), "survived", true},
+		{KindPhase, "blocked", true},
+		{KindReviewGroup, "unavailable", true},
+		{Kind("unknown"), "ok", false},
 	}
 
 	for _, tt := range tests {

@@ -360,19 +360,27 @@ func Verify(rec *Record) []string {
 	return reasons
 }
 
-// failedOutcomes is each kind's outcome vocabulary that counts as a failure.
-// A kind's remaining outcomes, and any outcome it does not define, are not
-// failures: phase has none, since its only outcome is "ok".
-var failedOutcomes = map[Kind]map[string]bool{
-	KindPhase:       {},
-	KindReviewGroup: {"blocked": true},
-	KindMutationRow: {"survived": true, "unappliable": true, "environmental": true},
-	KindLiveAttempt: {"fail": true, "inconclusive": true, "unavailable": true},
+// failedOutcomes is the flat set of outcomes that count as a failure, across
+// every kind. The four kinds' vocabularies are disjoint, so no outcome here is
+// a success for some other kind; phase contributes none, since its only outcome
+// is "ok".
+var failedOutcomes = map[string]bool{
+	"blocked":       true,
+	"survived":      true,
+	"unappliable":   true,
+	"environmental": true,
+	"fail":          true,
+	"inconclusive":  true,
+	"unavailable":   true,
 }
 
-// IsFailedOutcome reports whether outcome is one of kind's failing outcomes.
+// IsFailedOutcome reports whether outcome is a failing one. The set is flat: an
+// outcome that fails for one kind is not silently forgiven under another, or
+// under a kind string a future writer adds without updating this file. kind is
+// part of the cross-wave signature and is reserved for a kind-specific
+// vocabulary; today no kind narrows the answer.
 func IsFailedOutcome(kind Kind, outcome string) bool {
-	return failedOutcomes[kind][outcome]
+	return failedOutcomes[outcome]
 }
 
 // supersede replaces rec's status with superseded, pointing at the record that
