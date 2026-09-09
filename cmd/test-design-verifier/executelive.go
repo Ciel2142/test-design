@@ -217,6 +217,17 @@ func executeLiveOp(req *executeLiveRequest, stdout io.Writer, between func()) (o
 	if cliErr != nil {
 		return cliErr
 	}
+	// The workspace was prepared at one commit and the attempt is evidence of
+	// that commit alone. A HEAD that moved since is refused here, the way
+	// evaluate-mutation and recover-mutation refuse it, before a ledger could
+	// be created under a commit the evidence does not name.
+	if repoCommit != st.RepoCommit {
+		return &cliError{
+			Code: "stale-evidence",
+			Message: fmt.Sprintf("execute-live: HEAD is %s but the workspace was prepared at %s; run prepare-live again",
+				repoCommit, st.RepoCommit),
+		}
+	}
 	store, cliErr := openLedger("execute-live", &ledgerReq)
 	if cliErr != nil {
 		return cliErr

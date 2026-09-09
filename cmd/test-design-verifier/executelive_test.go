@@ -1824,3 +1824,45 @@ func TestExecuteLive_ResumeReportsTheCompletedAttempt(t *testing.T) {
 		})
 	}
 }
+
+// TestExecuteLive_StaleWorkspaceRefusedBeforeTheLedger: the live attempt is
+// measured against the commit the workspace was prepared at. A HEAD that moved
+// since is refused stale-evidence the way evaluate-mutation and
+// recover-mutation refuse it, before the ledger is opened — otherwise the run's
+// ledger would be created under a commit the evidence does not name, and
+// resume would report nothing stale.
+func TestExecuteLive_StaleWorkspaceRefusedBeforeTheLedger(t *testing.T) {
+	repo := liveFixtureRepo(t)
+	const runID = "live-stale-head"
+	prep := preparedLive(t, repo, runID)
+	tracePath := writeGapTraceEvidence(t, "SC-13")
+	planPath := filepath.Join(repo, filepath.FromSlash(liveFixturePlanPath))
+
+	// The tree stays clean; only HEAD moves past the prepared commit.
+	mustGit(t, repo, "-c", "user.name=Test", "-c", "user.email=test@example.com",
+		"commit", "-q", "--allow-empty", "-m", "moved past the prepared commit")
+
+	code, stdout, stderr := runVerifyOp(t, "execute-live",
+		executeLiveRequestJSON(t, repo, prep.RunDir, planPath, tracePath))
+	if code != exitError {
+		t.Fatalf("execute-live exit code = %d, want %d; stdout=%s", code, exitError, stdout)
+	}
+	if got := decodeCLIError(t, stderr); got.Code != "stale-evidence" {
+		t.Errorf("error code = %q, want stale-evidence (message %q)", got.Code, got.Message)
+	}
+	if _, err := os.Stat(filepath.Join(prep.RunDir, liveEvidenceFile)); !os.IsNotExist(err) {
+		t.Error("live-evidence.json exists, want no run behind a refused attempt")
+	}
+
+	code, stdout, stderr = runVerifyOp(t, "resume", liveFixturePrepareRequestJSON(t, repo, runID))
+	if code != exitOK {
+		t.Fatalf("resume exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+	var res resumeOutput
+	if err := json.Unmarshal([]byte(stdout), &res); err != nil {
+		t.Fatalf("resume stdout did not decode: %v\nstdout=%s", err, stdout)
+	}
+	if res.Initialized {
+		t.Errorf("resume initialized = true (live %+v), want no ledger created by the refused attempt", res.Live)
+	}
+}
