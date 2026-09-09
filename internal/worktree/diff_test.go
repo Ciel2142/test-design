@@ -297,3 +297,39 @@ func TestRestoreAllRefusesAWorktreeCheckedOutElsewhere(t *testing.T) {
 		t.Errorf("error = %v, want it to name the expected revision %q", err, head)
 	}
 }
+
+func TestRestoreAllRemovesAnUntrackedNestedRepository(t *testing.T) {
+	repo := newTestRepo(t)
+	head := strings.TrimSpace(mustGit(t, repo, "rev-parse", "HEAD"))
+
+	ctrl, err := NewController(repo)
+	if err != nil {
+		t.Fatalf("NewController: %v", err)
+	}
+	w, err := ctrl.Create(head)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// A target run that vendored or cloned something leaves a directory with
+	// its own .git behind. git clean skips those unless force is given twice,
+	// and a worktree that can never be cleaned can never be recovered.
+	nested := filepath.Join(w.Path, "vendorcache")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	mustGit(t, nested, "init", "-q")
+	if err := os.WriteFile(filepath.Join(nested, "note.txt"), []byte("left behind\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	if err := ctrl.RestoreAll(w, head); err != nil {
+		t.Fatalf("RestoreAll: %v", err)
+	}
+	if _, err := os.Stat(nested); !os.IsNotExist(err) {
+		t.Errorf("nested repository survived RestoreAll: Stat = %v", err)
+	}
+	if status := strings.TrimSpace(mustGit(t, w.Path, "status", "--porcelain=v1", "--ignored", "--untracked-files=all")); status != "" {
+		t.Errorf("worktree status = %q, want empty", status)
+	}
+}

@@ -82,25 +82,34 @@ var (
 
 // RestoreAll returns w to the pristine checkout of commit: it resets the index
 // and working tree to HEAD and removes every untracked path, ignored ones
-// included. It then proves the result rather than trusting it. `git clean`'s
-// own exit status is not that proof — it is nonzero for a path it merely warned
-// about as much as for one it truly left behind — so what survived is read from
-// the ignored-inclusive status afterwards, which names every remaining path
-// (ErrResidue); the revision is read from rev-parse (ErrWrongRevision). Every
-// command runs inside w, so the original repository's HEAD, index, working tree
-// and reflog are untouched.
+// included. The clean is forced twice (`-ffdx`), which is what it takes to
+// remove a directory carrying its own .git: a target run that vendored or
+// cloned something leaves one behind, and a single -f only warns and skips it,
+// which would make an otherwise recoverable workspace permanently
+// unrecoverable. It then proves the result rather than trusting it. `git
+// clean`'s own exit status is not that proof — it is nonzero for a path it
+// merely warned about as much as for one it truly left behind — so what
+// survived is read from the ignored-inclusive status afterwards, which names
+// every remaining path (ErrResidue), with git's own reason carried alongside
+// when it had one; the revision is read from rev-parse (ErrWrongRevision).
+// Every command runs inside w, so the original repository's HEAD, index,
+// working tree and reflog are untouched.
 func (c *Controller) RestoreAll(w *Worktree, commit string) error {
 	if _, err := runGit(w.Path, "reset", "--hard", "HEAD"); err != nil {
 		return fmt.Errorf("restore all %s: %w", w.Path, err)
 	}
-	_, _ = runGit(w.Path, "clean", "-fdx")
+	_, cleanErr := runGit(w.Path, "clean", "-ffdx")
 
 	status, err := runGit(w.Path, "--no-optional-locks", "status", "--porcelain=v1", "--ignored", "--untracked-files=all")
 	if err != nil {
 		return fmt.Errorf("restore all %s: %w", w.Path, err)
 	}
 	if residue := statusPaths(status); len(residue) > 0 {
-		return fmt.Errorf("restore all %s: %w: %s", w.Path, ErrResidue, strings.Join(residue, ", "))
+		detail := strings.Join(residue, ", ")
+		if cleanErr != nil {
+			detail = fmt.Sprintf("%s (git clean: %v)", detail, cleanErr)
+		}
+		return fmt.Errorf("restore all %s: %w: %s", w.Path, ErrResidue, detail)
 	}
 
 	head, err := runGit(w.Path, "rev-parse", "HEAD")
