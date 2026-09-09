@@ -67,8 +67,10 @@ type LiveRowVerdict struct {
 // with no scBindings, or a plan-cleanup step with no scBindings or whose
 // verdict application was suppressed because the walkthrough never ran.
 // Profile cleanup commands are never listed here; CleanupOK/CleanupFailed
-// carry those. Expectation has already passed the redaction barrier at the
-// producer, so it is safe to surface verbatim in a finalize reason.
+// carry those. Expectation is the planner's own text as the producer published
+// it: the same redaction barrier that governs a reduced transcript scanned it,
+// and on a hit the producer wrote the literal "[withheld by redaction barrier]"
+// here in place of the text. A finalize reason may repeat it as it stands.
 type LiveStepFailure struct {
 	Phase       string `json:"phase"`
 	Index       int    `json:"index"`

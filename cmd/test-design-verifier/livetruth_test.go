@@ -241,8 +241,8 @@ func recipeEnv() []string {
 // runRecipe invokes a subject's own helper script from dir the way the profile
 // does, by path under python3; script is the path the subject committed it at.
 // A script that could not be started at all reports exit code -1 with the
-// reason on the stderr result, so a caller inside t.Cleanup can log it rather
-// than fail from a cleanup function.
+// reason on the stderr result, so a caller inside t.Cleanup can report it
+// rather than crash the test binary from a cleanup function.
 func runRecipe(t *testing.T, dir, script, action, runID string) (int, string, string) {
 	t.Helper()
 	cmd := exec.Command("python3", filepath.FromSlash(script), action, runID)
@@ -262,11 +262,15 @@ func runRecipe(t *testing.T, dir, script, action, runID string) (int, string, st
 // run whatever the assertions did. A run root left under /tmp keeps a service
 // listening and makes every later deploy under the same id exit 1, so this has
 // to run after a failed assertion as much as after a passing one. A root that
-// is already gone is a cleanup pass, so the exit code is only worth logging.
+// is already gone is a cleanup pass the script reports absent and exits zero
+// for, so a nonzero exit is a refusal — an unproven shutdown, an unexpected
+// file — and the leak it names fails the test rather than scrolling past in a
+// log line.
 func registerRunCleanup(t *testing.T, s *liveSubject, script, runID string) {
 	t.Cleanup(func() {
 		if code, stdout, stderr := runRecipe(t, s.repo, script, "cleanup", runID); code != 0 {
-			t.Logf("cleanup of run %s exited %d; stdout=%s stderr=%s", runID, code, stdout, stderr)
+			t.Errorf("cleanup of run %s exited %d, want the run's own resources released; stdout=%s stderr=%s",
+				runID, code, stdout, stderr)
 		}
 	})
 }
@@ -307,17 +311,17 @@ func TestLiveTruth_DeployedRevisionJourney(t *testing.T) {
 		registerRunCleanup(t, subject, redesignRecipePath, runID)
 		root := redesignRunRoot(runID)
 
-		tr, _, exec := runLivePipeline(t, subject, runID, redesignPlan(subject.head, runID), nil)
+		tr, _, execOut := runLivePipeline(t, subject, runID, redesignPlan(subject.head, runID), nil)
 
 		// The run root lives outside the disposable worktree, so its absence is
 		// observable here rather than only through the cleanup predicate.
 		requireAbsent(t, "after execute-live returned", root)
-		if !exec.CleanupOK || exec.CleanupFailed {
-			t.Errorf("cleanupOK = %v, cleanupFailed = %v, want true/false", exec.CleanupOK, exec.CleanupFailed)
+		if !execOut.CleanupOK || execOut.CleanupFailed {
+			t.Errorf("cleanupOK = %v, cleanupFailed = %v, want true/false", execOut.CleanupOK, execOut.CleanupFailed)
 		}
 
 		code, stdout, stderr := runVerifyOp(t, "finalize",
-			liveFinalizeRequestJSON(t, subject, runID, tr.EvidencePath, exec.EvidencePath))
+			liveFinalizeRequestJSON(t, subject, runID, tr.EvidencePath, execOut.EvidencePath))
 		if code != exitOK {
 			t.Fatalf("finalize refused the live evidence: exit code = %d, stderr=%s", code, stderr)
 		}
@@ -402,8 +406,8 @@ func TestLiveTruth_DeployedRevisionJourney(t *testing.T) {
 			t.Fatalf("deploying the prior revision exited %d, want 0; stdout=%s stderr=%s", code, stdout, stderr)
 		}
 
-		_, _, exec := runLivePipeline(t, subject, runID, redesignPlan(subject.head, runID), nil)
-		ev := readLiveEvidence(t, exec.EvidencePath)
+		_, _, execOut := runLivePipeline(t, subject, runID, redesignPlan(subject.head, runID), nil)
+		ev := readLiveEvidence(t, execOut.EvidencePath)
 
 		if len(ev.StartSteps) != 1 || ev.StartSteps[0].Result != "fail" {
 			t.Fatalf("start steps = %+v, want the deploy command recorded as a completed failure", ev.StartSteps)
@@ -464,9 +468,20 @@ func TestLiveTruth_CleanupConfinedToRun(t *testing.T) {
 		t.Fatalf("deploying the neighbouring run exited %d, want 0; stdout=%s stderr=%s", code, stdout, stderr)
 	}
 
-	_, _, exec := runLivePipeline(t, subject, runA, redesignPlan(subject.head, runA), nil)
-	if !exec.CleanupOK || exec.CleanupFailed {
-		t.Errorf("cleanupOK = %v, cleanupFailed = %v, want true/false", exec.CleanupOK, exec.CleanupFailed)
+	_, _, execOut := runLivePipeline(t, subject, runA, redesignPlan(subject.head, runA), nil)
+	if !execOut.CleanupOK || execOut.CleanupFailed {
+		t.Errorf("cleanupOK = %v, cleanupFailed = %v, want true/false", execOut.CleanupOK, execOut.CleanupFailed)
+	}
+
+	// Run A really did deploy and really was judged: every survival assertion
+	// below holds vacuously of a run that removed nothing because it started
+	// nothing, so what run A did comes first.
+	ev := readLiveEvidence(t, execOut.EvidencePath)
+	if len(ev.StartSteps) != 1 || ev.StartSteps[0].Result != "pass" {
+		t.Fatalf("start steps = %+v, want run A's own deployment to have been made", ev.StartSteps)
+	}
+	if got := rowVerdict(t, ev.RowVerdicts, redesignSmokeRow).Verdict; got != "LIVE-PASS" {
+		t.Fatalf("live verdict for %s = %q, want LIVE-PASS: run A must have answered from its own deployment", redesignSmokeRow, got)
 	}
 
 	requireAbsent(t, "run A after its own cleanup", redesignRunRoot(runA))
@@ -1345,6 +1360,71 @@ func TestLiveTruth_UnboundAssertionFailureBlocks(t *testing.T) {
 			t.Errorf("unboundFailures = %+v, want %+v", ev.UnboundFailures, want)
 		}
 	})
+}
+
+// TestLiveTruth_WithheldExpectationNeverReachesThePublishedReport carries the
+// barrier all the way to the record a reviewer receives. The failing unbound
+// step quotes a non-allowlisted parent value in its own expectation, so the
+// run must list the failure, name it with the withheld stand-in, and publish
+// neither the value nor the transcript that carried it.
+func TestLiveTruth_WithheldExpectationNeverReachesThePublishedReport(t *testing.T) {
+	requirePython3(t)
+	t.Setenv(liveCanaryName, liveCanaryValue)
+
+	subject := newPhaseSubject(t, phasePatientTimeoutSeconds)
+	runID := newPhaseRun(t, subject, "lt-withheld-expectation", map[string]string{"teardown": "fail"})
+
+	plan := phaseUnboundPlan(t, runID, false)
+	steps, ok := plan["steps"].([]map[string]any)
+	if !ok {
+		t.Fatalf("plan steps = %T, want the walkthrough step list the probe extends", plan["steps"])
+	}
+	steps[len(steps)-1]["expectation"] = unboundProbeExpectation + " for " + liveCanaryValue
+
+	tr, _, execOut := runLivePipeline(t, subject, runID, plan, nil)
+	ev := readLiveEvidence(t, execOut.EvidencePath)
+
+	want := []liveStepFailure{{Phase: "step", Index: 2, Expectation: withheldExpectation}}
+	if !reflect.DeepEqual(ev.UnboundFailures, want) {
+		t.Errorf("unboundFailures = %+v, want %+v", ev.UnboundFailures, want)
+	}
+	if got := rowVerdict(t, ev.RowVerdicts, phaseRow).Verdict; got != "LIVE-PASS" {
+		t.Errorf("live verdict for %s = %q, want LIVE-PASS: withholding text judges no row", phaseRow, got)
+	}
+
+	code, stdout, stderr := runVerifyOp(t, "finalize",
+		liveFinalizeRequestJSON(t, subject, runID, tr.EvidencePath, execOut.EvidencePath))
+	if code != exitOK {
+		t.Fatalf("finalize exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+	out := decodeFinalizeOutput(t, stdout)
+	if out.Verdict != report.VerdictBlocked {
+		t.Fatalf("verdict = %q, want %q; reasons=%+v", out.Verdict, report.VerdictBlocked, out.Reasons)
+	}
+	if got := liveReasonDetail(t, out.Reasons, "live-unbound-assertion-failed"); !strings.Contains(got, withheldExpectation) {
+		t.Errorf("unbound-assertion detail = %q, want it to name the withheld expectation", got)
+	}
+
+	// The published artifacts are the record: the same withheld stand-in in the
+	// report's own reason, a live transcript that really was published, and no
+	// file beside it carrying the value the barrier took.
+	rep := readPublishedReport(t, subject.repo, out.JSONPath)
+	if got := liveReasonDetail(t, rep.Reasons, "live-unbound-assertion-failed"); !strings.Contains(got, withheldExpectation) {
+		t.Errorf("published unbound-assertion detail = %q, want it to name the withheld expectation", got)
+	}
+	transcript := out.TranscriptsDir + "/" + liveEvidenceFile
+	publishedTranscript(t, rep, transcript)
+	if published := readLiveEvidence(t, filepath.Join(subject.repo, filepath.FromSlash(transcript))); len(published.Steps) != 1 {
+		t.Errorf("published walkthrough steps = %+v, want the barriered step omitted and the business check kept", published.Steps)
+	}
+	assertNoCanaryUnder(t, filepath.Join(subject.repo, filepath.FromSlash(out.TranscriptsDir)))
+	reportJSON, err := os.ReadFile(filepath.Join(subject.repo, filepath.FromSlash(out.JSONPath)))
+	if err != nil {
+		t.Fatalf("read the published report: %v", err)
+	}
+	if strings.Contains(string(reportJSON), liveCanaryValue) {
+		t.Errorf("%s contains the non-allowlisted canary value", out.JSONPath)
+	}
 }
 
 // The cleanup-accounting subject exists for the phase no assertion watches: the

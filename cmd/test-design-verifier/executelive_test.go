@@ -732,6 +732,80 @@ func TestExecuteLive_RedactionBarrierWithholdsStepButKeepsVerdict(t *testing.T) 
 	}
 }
 
+// TestExecuteLive_RedactionBarrierWithholdsUnboundExpectation drives the real
+// op over a plan whose failing unbound step quotes a non-allowlisted parent
+// value in its own expectation. The failure is still listed, because it is a
+// fact independent of the text, but no artifact the run leaves behind — the
+// evidence file included — may repeat the value the barrier withheld.
+func TestExecuteLive_RedactionBarrierWithholdsUnboundExpectation(t *testing.T) {
+	repo := liveFixtureRepo(t)
+	prep := preparedLive(t, repo, "live-expectation-barrier")
+	tracePath := writeGapTraceEvidence(t, "SC-13")
+	planPath := writePlanFile(t, map[string]any{
+		"schemaVersion": "1",
+		"steps": []map[string]any{
+			{
+				"expectation": "the happy walkthrough reaches the ready marker",
+				"command":     []string{"echo", "live-fixture-ready"},
+				"predicates":  []map[string]string{{"form": "exit-code", "value": "0"}},
+				"scBindings":  []string{"SC-11", "SC-12", "SC-13"},
+			},
+			{
+				"expectation": "the unbound expectation quotes " + liveCanaryValue,
+				"command":     []string{"echo", "live-fixture-accepted"},
+				"predicates": []map[string]string{
+					{"form": "matches", "stream": "stdout", "value": "live-fixture-refused"},
+				},
+			},
+		},
+	})
+
+	code, stdout, stderr := runVerifyOp(t, "execute-live",
+		executeLiveRequestJSON(t, repo, prep.RunDir, planPath, tracePath))
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+
+	// Runs before every Fatalf-bearing assertion below, so a leak is reported
+	// even when some later expectation moved.
+	assertNoCanaryUnder(t, prep.RunDir)
+	if strings.Contains(stdout, liveCanaryValue) {
+		t.Error("execute-live stdout contains the canary value, want the barrier to withhold it")
+	}
+
+	var out executeLiveOutput
+	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
+		t.Fatalf("stdout did not decode: %v\nstdout=%s", err, stdout)
+	}
+	ev := readLiveEvidence(t, out.EvidencePath)
+
+	for _, listed := range []struct {
+		label    string
+		failures []liveStepFailure
+	}{{"op output", out.UnboundFailures}, {"evidence", ev.UnboundFailures}} {
+		if len(listed.failures) != 1 {
+			t.Fatalf("%s unboundFailures = %+v, want the one failed unbound step listed", listed.label, listed.failures)
+		}
+		want := liveStepFailure{Phase: "step", Index: 2, Expectation: withheldExpectation}
+		if listed.failures[0] != want {
+			t.Errorf("%s unboundFailures[0] = %+v, want %+v", listed.label, listed.failures[0], want)
+		}
+	}
+
+	// The withheld step's transcript is gone from the phase's step list, and
+	// the barrier that took it names the variable a reviewer must look at.
+	if len(ev.Steps) != 1 {
+		t.Errorf("walkthrough steps = %+v, want the barriered step omitted and the other kept", ev.Steps)
+	}
+	requireExecutionError(t, ev.ExecutionErrors, "step[2]:", liveCanaryName)
+
+	// Withholding text judges nothing: the row the passing step settled keeps
+	// the verdict it earned.
+	if got := rowVerdict(t, out.RowVerdicts, "SC-11").Verdict; got != "LIVE-PASS" {
+		t.Errorf("verdict for SC-11 = %q, want LIVE-PASS beside a withheld expectation", got)
+	}
+}
+
 func TestExecuteLive_SnapshotMismatchDetected(t *testing.T) {
 	repo := liveFixtureRepo(t)
 	prep := preparedLive(t, repo, "live-mismatch")

@@ -252,3 +252,73 @@ func TestReduceTranscriptNeverContainsCanaryValue(t *testing.T) {
 		t.Fatalf("ReduceTranscript() reduced step = %+v, want nil", rs)
 	}
 }
+
+func TestReduceTranscriptRedactionBarrierBlocksSecretInExpectation(t *testing.T) {
+	const secretName = "DB_PASSWORD"
+	const secretValue = "sup3r-secret-value" // len >= 6
+
+	// Only the expectation carries the value: the command and the output the
+	// step produced are clean, so nothing but the planner's own text can be
+	// what the barrier catches.
+	step := Step{
+		Expectation: "the operator connects with " + secretValue,
+		Command:     []string{"run"},
+		Predicates:  []Predicate{{Form: "exit-code", Value: "0"}},
+	}
+	res := &StepResult{ExitStatus: 0, CombinedPath: writeTestCapture(t, "connected")}
+	parentEnv := []string{secretName + "=" + secretValue, "PATH=/usr/bin"}
+	allowlist := []string{"PATH"}
+
+	rs, err := ReduceTranscript(step, res, parentEnv, allowlist)
+	if err == nil {
+		t.Fatal("ReduceTranscript() error = nil, want a redaction barrier error for the expectation")
+	}
+	if rs != nil {
+		t.Errorf("ReduceTranscript() reduced step = %+v, want nil on redaction barrier error", rs)
+	}
+	if !strings.Contains(err.Error(), secretName) {
+		t.Errorf("error = %q, want it to name the variable %q", err.Error(), secretName)
+	}
+	if strings.Contains(err.Error(), secretValue) {
+		t.Errorf("error = %q, must never contain the secret value", err.Error())
+	}
+}
+
+func TestReduceTranscriptRedactionBarrierKeepsHarmlessExpectation(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		parentEnv []string
+		allowlist []string
+	}{
+		{
+			name:      "an allowlisted value is the operator's own to publish",
+			parentEnv: []string{"BASE_URL=http://allowed-value-here"},
+			allowlist: []string{"BASE_URL"},
+		},
+		{
+			name:      "a value below the length floor is not a leak signal",
+			parentEnv: []string{"PORT=8080", "PATH=/usr/bin"},
+			allowlist: []string{"PATH"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			step := Step{
+				Expectation: "the service at http://allowed-value-here answers on port 8080",
+				Command:     []string{"run"},
+				Predicates:  []Predicate{{Form: "exit-code", Value: "0"}},
+			}
+			res := &StepResult{ExitStatus: 0, CombinedPath: writeTestCapture(t, "answered")}
+
+			rs, err := ReduceTranscript(step, res, tc.parentEnv, tc.allowlist)
+			if err != nil {
+				t.Fatalf("ReduceTranscript() error = %v, want nil", err)
+			}
+			if rs == nil {
+				t.Fatal("ReduceTranscript() reduced step = nil, want non-nil")
+			}
+			if rs.Expectation != step.Expectation {
+				t.Errorf("Expectation = %q, want the planner's text kept verbatim %q", rs.Expectation, step.Expectation)
+			}
+		})
+	}
+}

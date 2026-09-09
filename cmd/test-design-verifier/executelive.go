@@ -523,7 +523,9 @@ const withheldExpectation = "[withheld by redaction barrier]"
 // recordUnboundFailure lists a completed failure that reached no row verdict.
 // The expectation is planner text copied into the evidence, so it passes the
 // same barrier a transcript does; the failure itself is a fact independent of
-// the text and is listed either way.
+// the text and is listed either way. A hit here can only happen on a step exec
+// already recorded an error against: the same barrier, over the same parent
+// environment, refused that step's transcript before it could be reduced.
 func (r *liveRun) recordUnboundFailure(phase string, index int, expectation string) {
 	if live.RedactionBarrierHit(expectation, r.parentEnv, r.descriptor.EnvAllowlist) {
 		expectation = withheldExpectation

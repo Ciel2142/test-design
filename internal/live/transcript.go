@@ -29,9 +29,9 @@ var (
 
 // ReduceTranscript evaluates step's predicates against res and produces the
 // durable, redacted record of the run. It refuses to return a step whose
-// decisive output contains the value of any parent env var not on the
-// allowlist — the redaction barrier — naming only the variable, never the
-// value, in that case.
+// decisive output, command or expectation contains the value of any parent env
+// var not on the allowlist — the redaction barrier — naming only the variable,
+// never the value, in that case.
 func ReduceTranscript(step Step, res *StepResult, parentEnv []string, allowlist []string) (*ReducedStep, error) {
 	pass, failed := EvaluatePredicates(step.Predicates, res)
 	decisive, err := decisiveOutput(step.Predicates, failed, res)
@@ -41,8 +41,11 @@ func ReduceTranscript(step Step, res *StepResult, parentEnv []string, allowlist 
 	command := redactCommand(step.Command)
 
 	// redactCommand misses secrets in plain argv slots (e.g. `mysql -p <value>`);
-	// barrier must scan the command too, not just decisive.
-	if err := redactionBarrier(decisive+"\n"+strings.Join(command, " "), parentEnv, allowlist); err != nil {
+	// barrier must scan the command too, not just decisive. The expectation is
+	// planner text this record publishes verbatim, so it is scanned here as
+	// well: everything a reduced step carries passes the one barrier.
+	published := strings.Join([]string{decisive, strings.Join(command, " "), step.Expectation}, "\n")
+	if err := redactionBarrier(published, parentEnv, allowlist); err != nil {
 		return nil, err
 	}
 
@@ -135,11 +138,12 @@ func RedactionBarrierHit(text string, parentEnv []string, allowlist []string) bo
 	return redactionBarrier(text, parentEnv, allowlist) != nil
 }
 
-// redactionBarrier fails closed when decisive contains the value of any
-// parent env var not on the allowlist. Values shorter than 6 characters are
-// skipped: a value that short (e.g. a port number) collides with ordinary
+// redactionBarrier fails closed when text — anything a run would publish:
+// decisive output, a command line, a planner's expectation — contains the value
+// of any parent env var not on the allowlist. Values shorter than 6 characters
+// are skipped: a value that short (e.g. a port number) collides with ordinary
 // output too often to be a meaningful leak signal.
-func redactionBarrier(decisive string, parentEnv []string, allowlist []string) error {
+func redactionBarrier(text string, parentEnv []string, allowlist []string) error {
 	allowed := make(map[string]bool, len(allowlist))
 	for _, name := range allowlist {
 		allowed[name] = true
@@ -153,8 +157,8 @@ func redactionBarrier(decisive string, parentEnv []string, allowlist []string) e
 		if len(value) < 6 {
 			continue
 		}
-		if strings.Contains(decisive, value) {
-			return fmt.Errorf("reduce transcript: redaction barrier: non-allowlisted env var %s value present in decisive output", name)
+		if strings.Contains(text, value) {
+			return fmt.Errorf("reduce transcript: redaction barrier: non-allowlisted env var %s value present in the text this run would publish", name)
 		}
 	}
 	return nil
