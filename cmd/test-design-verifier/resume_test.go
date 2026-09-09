@@ -348,3 +348,346 @@ func TestResume_AStartedRowNamesTheWorkspaceItsStateNowCarries(t *testing.T) {
 		t.Errorf("worktreePath = %q, want the record's %q when the state cannot be read", row.WorktreePath, prep.WorktreePath)
 	}
 }
+
+// survivedGuardMutant is the equivalent mutant of
+// TestEvaluateMutation_SurvivedSite: it rewrites ValidateQuantity's message on
+// a branch the bound tests never take, so every targeted test still passes and
+// the site survives.
+const survivedGuardMutant = "\tif qty < 0 {\n\t\treturn fmt.Errorf(\"quantity must be positive\")\n\t}\n\treturn nil"
+
+// startReviewGroup opens groupID over rows through the real record-review op.
+func startReviewGroup(t *testing.T, repo, runID, groupID string, rows ...string) {
+	t.Helper()
+	runRecordReview(t, repo, runID, map[string]any{
+		"groupId": groupID, "status": "started", "rows": rows,
+	})
+}
+
+// soundVerdicts answers rows the way a critic that found every bound assertion
+// sound would: HOLDS, and MISSING for a row the trace reported as a layer-1
+// gap, the only verdict a gap can carry.
+func soundVerdicts(t *testing.T, dispatch dispatchInputs, rows ...string) []map[string]string {
+	t.Helper()
+	verdicts := make([]map[string]string, 0, len(rows))
+	for _, id := range rows {
+		verdict := "HOLDS"
+		if dispatchRowFor(t, dispatch, id).Status == "gap" {
+			verdict = "MISSING"
+		}
+		verdicts = append(verdicts, map[string]string{"rowId": id, "verdict": verdict})
+	}
+	return verdicts
+}
+
+// completeReviewGroup closes groupID with one sound verdict per row.
+func completeReviewGroup(t *testing.T, repo, runID, groupID string, dispatch dispatchInputs, rows ...string) recordReviewOutput {
+	t.Helper()
+	return runRecordReview(t, repo, runID, map[string]any{
+		"groupId": groupID, "status": "completed", "verdicts": soundVerdicts(t, dispatch, rows...),
+	})
+}
+
+// supersededRecord returns the superseded record the ledger kept for (kind, id).
+func supersededRecord(t *testing.T, out resumeOutput, kind runstate.Kind, id string) runstate.Record {
+	t.Helper()
+	for _, rec := range out.Records {
+		if rec.Kind == kind && rec.ID == id && rec.Status == runstate.StatusSuperseded {
+			return rec
+		}
+	}
+	t.Fatalf("no superseded %s/%s record in %+v", kind, id, out.Records)
+	return runstate.Record{}
+}
+
+// TestResume_SelectsOnlyValidatedCompletions holds the line between work a run
+// may stand on and work it must do again. Only a completed record whose
+// artifacts still digest to what it recorded is reusable: an open group is not,
+// a group that never claimed a row does not answer for it, and a completed
+// group whose evidence changed under it stops standing the moment it does. The
+// protocol around that line is proved with it — a completed group is completed
+// once, verdicts belong to the group that owns their rows, and a group that was
+// never opened cannot be closed.
+// covers: SC-20
+func TestResume_SelectsOnlyValidatedCompletions(t *testing.T) {
+	repo := fixtureRepo(t)
+	const runID = "resume-validated-completions"
+
+	code, stdout, stderr := runVerifyOp(t, "trace", verifyRequestJSON(t, repo, runID))
+	if code != exitOK {
+		t.Fatalf("trace exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+	tr := decodeTraceOutput(t, stdout)
+	dispatch := readDispatchInputs(t, tr.DispatchPath)
+
+	startReviewGroup(t, repo, runID, "A", "SC-01", "SC-02")
+	groupA := completeReviewGroup(t, repo, runID, "A", dispatch, "SC-01", "SC-02")
+	startReviewGroup(t, repo, runID, "B", "SC-03", "SC-04")
+	startReviewGroup(t, repo, runID, "C", "SC-05")
+	// C closes while B is still open. Completing groups out of order is
+	// ordinary: neither group's standing depends on the other's.
+	completeReviewGroup(t, repo, runID, "C", dispatch, "SC-05")
+
+	prep := preparedMutation(t, repo, runID, "SC-10")
+	mutateOrdersGuard(t, prep.WorktreePath, survivedGuardMutant)
+	if code, _, stderr := runVerifyOp(t, "evaluate-mutation",
+		evaluateMutationRequestJSON(t, repo, runID, prep.RunDir, "site-a", false)); code != exitOK {
+		t.Fatalf("evaluate-mutation exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+
+	out := runResume(t, repo, runID)
+
+	if out.Trace.Status != string(runstate.StatusCompleted) {
+		t.Errorf("trace.status = %q, want completed", out.Trace.Status)
+	}
+	if out.Trace.EvidencePath != tr.EvidencePath {
+		t.Errorf("trace.evidencePath = %q, want the trace op's own %q", out.Trace.EvidencePath, tr.EvidencePath)
+	}
+	if out.Trace.DispatchPath != tr.DispatchPath {
+		t.Errorf("trace.dispatchPath = %q, want the trace op's own %q", out.Trace.DispatchPath, tr.DispatchPath)
+	}
+
+	if out.Review.Complete {
+		t.Error("review.complete = true, want false while B is open and five rows belong to no group")
+	}
+	for _, id := range []string{"A", "C"} {
+		if group := resumeGroupFor(t, out, id); group.Status != string(runstate.StatusCompleted) || group.Reason != "" {
+			t.Errorf("group %s = %+v, want a valid completed group", id, group)
+		}
+	}
+	if group := resumeGroupFor(t, out, "B"); group.Status != string(runstate.StatusStarted) {
+		t.Errorf("group B = %+v, want started: an open group never satisfies its obligation", group)
+	}
+	// The rows in no group, compared as a set: resume lists them in dispatch
+	// order, which is not the order the coverage row names them in.
+	wantUncovered := []string{"SC-06", "SC-07", "SC-08", "SC-09", "SC-10"}
+	if got := slices.Sorted(slices.Values(out.Review.Uncovered)); !slices.Equal(got, wantUncovered) {
+		t.Errorf("review.uncovered = %v, want the active rows no group claims %v", out.Review.Uncovered, wantUncovered)
+	}
+
+	row := resumeRow(t, out, "SC-10")
+	if row.Status != string(runstate.StatusStarted) {
+		t.Errorf("SC-10 status = %q, want started: sites without evidence are not an answer", row.Status)
+	}
+	if !slices.Equal(row.CompletedSites, []string{"site-a"}) {
+		t.Errorf("SC-10 completedSites = %v, want [site-a]", row.CompletedSites)
+	}
+	if untouched := resumeRow(t, out, "SC-07"); untouched.Status != statusNone {
+		t.Errorf("SC-07 = %+v, want status none", untouched)
+	}
+	if out.Live.Required || out.Live.Status != statusNone {
+		t.Errorf("live = %+v, want a layer the fixture document never asks for", out.Live)
+	}
+
+	wantPending := []resumePending{
+		{Kind: runstate.KindReviewGroup, ID: "B", Reason: reasonNotCompleted},
+		{Kind: runstate.KindReviewGroup, Reason: "uncovered: " + strings.Join(out.Review.Uncovered, ", ")},
+		{Kind: runstate.KindMutationRow, ID: "SC-10", Reason: reasonNotCompleted},
+		{Kind: runstate.KindMutationRow, ID: "SC-07", Reason: reasonNeverStarted},
+	}
+	if !reflect.DeepEqual(out.Pending, wantPending) {
+		t.Errorf("pending = %+v, want %+v", out.Pending, wantPending)
+	}
+	if want := (resumeCounts{Started: 2, Completed: 3, Pending: 4}); out.Counts != want {
+		t.Errorf("counts = %+v, want %+v", out.Counts, want)
+	}
+
+	verdictsA := soundVerdicts(t, dispatch, "SC-01", "SC-02")
+	if got := refuseRecordReview(t, repo, runID, map[string]any{
+		"groupId": "A", "status": "completed", "verdicts": verdictsA,
+	}); got.Code != "duplicate-completion" {
+		t.Errorf("completing A twice = %q, want duplicate-completion (message %q)", got.Code, got.Message)
+	}
+	if got := refuseRecordReview(t, repo, runID, map[string]any{
+		"groupId": "B", "status": "completed", "verdicts": verdictsA,
+	}); got.Code != "verdict-outside-group" {
+		t.Errorf("completing B with A's verdicts = %q, want verdict-outside-group (message %q)", got.Code, got.Message)
+	}
+	if got := refuseRecordReview(t, repo, runID, map[string]any{
+		"groupId": "D", "status": "completed", "verdicts": soundVerdicts(t, dispatch, "SC-06"),
+	}); got.Code != "review-group-not-started" {
+		t.Errorf("completing an unopened D = %q, want review-group-not-started (message %q)", got.Code, got.Message)
+	}
+
+	completeReviewGroup(t, repo, runID, "B", dispatch, "SC-03", "SC-04")
+	remaining := []string{"SC-06", "SC-07", "SC-08", "SC-09", "SC-10"}
+	startReviewGroup(t, repo, runID, "E", remaining...)
+	completeReviewGroup(t, repo, runID, "E", dispatch, remaining...)
+
+	out = runResume(t, repo, runID)
+	if !out.Review.Complete {
+		t.Errorf("review.complete = false, want true once every active row sits in a completed group (uncovered %v)", out.Review.Uncovered)
+	}
+	if len(out.Review.Uncovered) != 0 {
+		t.Errorf("review.uncovered = %v, want none", out.Review.Uncovered)
+	}
+
+	if base := filepath.Base(groupA.EvidencePath); base != "review-A.json" {
+		t.Fatalf("group A evidence = %q, want review-A.json", base)
+	}
+	data, err := os.ReadFile(groupA.EvidencePath)
+	if err != nil {
+		t.Fatalf("read %s: %v", groupA.EvidencePath, err)
+	}
+	data[len(data)-1] = ' '
+	if err := os.WriteFile(groupA.EvidencePath, data, 0o644); err != nil {
+		t.Fatalf("write %s: %v", groupA.EvidencePath, err)
+	}
+
+	out = runResume(t, repo, runID)
+	group := resumeGroupFor(t, out, "A")
+	if group.Status != statusInvalid {
+		t.Errorf("group A status = %q, want %q", group.Status, statusInvalid)
+	}
+	if group.Reason != "artifact-digest-mismatch:evidence" {
+		t.Errorf("group A reason = %q, want artifact-digest-mismatch:evidence", group.Reason)
+	}
+	offered := resumePending{Kind: runstate.KindReviewGroup, ID: "A", Reason: "artifact-digest-mismatch:evidence"}
+	if !slices.Contains(out.Pending, offered) {
+		t.Errorf("pending = %+v, want %+v offered again", out.Pending, offered)
+	}
+	if out.Counts.Invalid != 1 {
+		t.Errorf("counts.invalid = %d, want 1", out.Counts.Invalid)
+	}
+	if out.Review.Complete {
+		t.Error("review.complete = true, want false: a group resting on changed evidence is not a validated completion")
+	}
+}
+
+// TestResume_PreservesFailedOutcomes holds a run to the answers it already
+// has. A blocked group, a surviving mutant and a refused mutation runner are
+// results, not gaps: resume counts them, never offers them again, and the ops
+// that would overwrite them refuse by name. Repeating one is possible but
+// deliberate — it costs a reason, which the replaced record keeps alongside the
+// outcome it measured. And none of it reaches a different run ID.
+// covers: SC-22
+func TestResume_PreservesFailedOutcomes(t *testing.T) {
+	repo := fixtureRepo(t)
+	const runID = "resume-failed-outcomes"
+
+	code, stdout, stderr := runVerifyOp(t, "trace", verifyRequestJSON(t, repo, runID))
+	if code != exitOK {
+		t.Fatalf("trace exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+
+	startReviewGroup(t, repo, runID, "A", "SC-01", "SC-02")
+	blocked := runRecordReview(t, repo, runID, map[string]any{
+		"groupId": "A", "status": "completed",
+		"verdicts": []map[string]string{
+			{"rowId": "SC-01", "verdict": "HOLDS"},
+			{"rowId": "SC-02", "verdict": "WEAK", "reason": "the assertion does not name the value it rejects"},
+		},
+	})
+	if blocked.Outcome != "blocked" {
+		t.Fatalf("group A outcome = %q, want blocked when a verdict is below HOLDS", blocked.Outcome)
+	}
+
+	prep := preparedMutation(t, repo, runID, "SC-09")
+	mutateOrdersGuard(t, prep.WorktreePath, survivedGuardMutant)
+	code, stdout, stderr = runVerifyOp(t, "evaluate-mutation",
+		evaluateMutationRequestJSON(t, repo, runID, prep.RunDir, "site-a", true))
+	if code != exitOK {
+		t.Fatalf("evaluate-mutation exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+	var evaluated evaluateMutationOutput
+	if err := json.Unmarshal([]byte(stdout), &evaluated); err != nil {
+		t.Fatalf("evaluate-mutation stdout did not decode: %v\nstdout=%s", err, stdout)
+	}
+	if evaluated.Outcome != "survived" {
+		t.Fatalf("SC-09 outcome = %q, want survived", evaluated.Outcome)
+	}
+
+	attempt := requestWith(t, repo, runID, map[string]any{
+		"layer": 4, "rowID": "SC-10", "refusal": "mutation runner unavailable on this machine",
+	})
+	if code, _, stderr := runVerifyOp(t, "record-attempt", attempt); code != exitOK {
+		t.Fatalf("record-attempt exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+
+	// The restart: everything below is read from the ledger alone.
+	out := runResume(t, repo, runID)
+	answered := []struct {
+		kind    runstate.Kind
+		id      string
+		outcome string
+	}{
+		{runstate.KindReviewGroup, "A", "blocked"},
+		{runstate.KindMutationRow, "SC-09", "survived"},
+		{runstate.KindMutationRow, "SC-10", "environmental"},
+	}
+	for _, want := range answered {
+		rec := ledgerRecord(t, out, want.kind, want.id)
+		if rec.Status != runstate.StatusCompleted || rec.Outcome != want.outcome {
+			t.Errorf("%s/%s = %s/%s, want completed %s", want.kind, want.id, rec.Status, rec.Outcome, want.outcome)
+		}
+	}
+	wantPending := []resumePending{
+		{Kind: runstate.KindReviewGroup, Reason: "uncovered: " + strings.Join(out.Review.Uncovered, ", ")},
+		{Kind: runstate.KindMutationRow, ID: "SC-07", Reason: reasonNeverStarted},
+	}
+	if !reflect.DeepEqual(out.Pending, wantPending) {
+		t.Errorf("pending = %+v, want %+v: a completed failure is an answer, not a gap", out.Pending, wantPending)
+	}
+	if out.Counts.Failed != 3 {
+		t.Errorf("counts.failed = %d, want 3", out.Counts.Failed)
+	}
+	if out.Counts.Completed != 4 {
+		t.Errorf("counts.completed = %d, want 4: the trace and the three answers", out.Counts.Completed)
+	}
+
+	restartA := map[string]any{"groupId": "A", "status": "started", "rows": []string{"SC-01", "SC-02"}}
+	if got := refuseRecordReview(t, repo, runID, restartA); got.Code != "review-group-completed" {
+		t.Errorf("reopening A = %q, want review-group-completed (message %q)", got.Code, got.Message)
+	}
+	code, stdout, stderr = runVerifyOp(t, "prepare-mutation", prepareMutationRequestJSON(t, repo, runID, "SC-09"))
+	if code != exitError || stdout != "" {
+		t.Fatalf("an answered row was measured again: exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	if got := decodeCLIError(t, stderr); got.Code != "mutation-row-completed" {
+		t.Errorf("re-preparing SC-09 = %q, want mutation-row-completed (message %q)", got.Code, got.Message)
+	}
+	if left := verifierWorktrees(t); len(left) != 0 {
+		t.Errorf("worktrees = %v, want the refusal to land before any workspace was made", left)
+	}
+
+	const reason = "environmental recovery: runner cache repaired"
+	repeat := map[string]any{"reason": reason}
+	runRecordReview(t, repo, runID, map[string]any{
+		"groupId": "A", "status": "started", "rows": []string{"SC-01", "SC-02"}, "repeat": repeat,
+	})
+	if code, _, stderr := runVerifyOp(t, "prepare-mutation", requestWith(t, repo, runID, map[string]any{
+		"rowID": "SC-09", "repeat": repeat,
+	})); code != exitOK {
+		t.Fatalf("repeat prepare-mutation exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+
+	out = runResume(t, repo, runID)
+	for _, want := range answered[:2] {
+		replaced := supersededRecord(t, out, want.kind, want.id)
+		if replaced.Outcome != want.outcome {
+			t.Errorf("superseded %s/%s outcome = %q, want the outcome it kept %q", want.kind, want.id, replaced.Outcome, want.outcome)
+		}
+		if replaced.Detail != reason {
+			t.Errorf("superseded %s/%s detail = %q, want the retained repeat reason %q", want.kind, want.id, replaced.Detail, reason)
+		}
+		if rec := ledgerRecord(t, out, want.kind, want.id); rec.Status != runstate.StatusStarted {
+			t.Errorf("current %s/%s status = %q, want %q", want.kind, want.id, rec.Status, runstate.StatusStarted)
+		}
+	}
+	if out.Counts.Superseded != 2 {
+		t.Errorf("counts.superseded = %d, want 2", out.Counts.Superseded)
+	}
+
+	// A ledger is keyed by run ID, so a changed input is a new run that
+	// inherits none of this one's answers.
+	fresh := runResume(t, repo, runID+"-2")
+	if fresh.Initialized {
+		t.Errorf("initialized = true for %s-2, want a run with no ledger of its own", runID)
+	}
+	wantFresh := []resumePending{{Kind: runstate.KindPhase, ID: tracePhaseID, Reason: reasonNeverStarted}}
+	if !reflect.DeepEqual(fresh.Pending, wantFresh) {
+		t.Errorf("pending = %+v, want only the trace phase %+v", fresh.Pending, wantFresh)
+	}
+	if fresh.Counts.Completed != 0 {
+		t.Errorf("counts.completed = %d, want 0", fresh.Counts.Completed)
+	}
+}
