@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -536,5 +538,421 @@ func TestFinalize_RefusesARecordWhoseCapturedInputsCannotBeRead(t *testing.T) {
 			t.Cleanup(func() { readyRestoreLedger(t, s, runID, original) })
 			readyWantRefusal(t, s, runID, tracePath, nil, nil, "ledger-invalid")
 		})
+	}
+}
+
+// readyVersionSite is the site readyCaughtVersionRow hands evaluate-mutation
+// for SC-02. A run that adopts that row publishes the prior run's site list
+// unchanged, so the name has to be stated here to be checked there.
+const readyVersionSite = "version-constant"
+
+// readyPriorRun is the earlier run the retained-bytes and provenance proofs
+// stand on: a run that reviewed both groups, caught SC-02's mutation and
+// published a passing report, with everything a later run must be able to name
+// about it — the commit and document it verified, the artifacts it retained and
+// the sequence numbers they sit at, the commit its published files became, and
+// the critic policy it reviewed under, which a consuming run must present again
+// for the groups to be adopted at all.
+type readyPriorRun struct {
+	runID        string
+	commit       string // the commit the prior run traced and verified
+	sourceSHA256 string // the coverage document it verified
+	headAfter    string // HEAD once its published files were committed
+	ledgerPath   string
+	reportPath   string // the published report, relative to the repository
+	policy       *reviewPolicy
+	artifacts    map[string]string // record id -> the retained artifact the record points at
+	seqs         map[string]int    // record id -> its sequence number in the prior ledger
+}
+
+// readyResume asks the real resume op what one run of the subject holds.
+func readyResume(t *testing.T, s *liveSubject, runID string) resumeOutput {
+	t.Helper()
+	code, stdout, stderr := runVerifyOp(t, "resume", readyRequestJSON(t, s, runID, nil))
+	if code != exitOK {
+		t.Fatalf("resume exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+	var out resumeOutput
+	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
+		t.Fatalf("resume stdout did not decode: %v\nstdout=%s", err, stdout)
+	}
+	return out
+}
+
+// readyLayer2 is the layer-2 bookkeeping a run that adopted nothing pastes for
+// the subject: the canary shape every published proof over a live subject
+// builds, over the rows this run's own trace bound.
+func readyLayer2(t *testing.T, s *liveSubject, runID, tracePath string) []report.Batch {
+	t.Helper()
+	src, cliErr := loadVerifiedSource("finalize", s.repo, s.coverageSource)
+	if cliErr != nil {
+		t.Fatalf("loadVerifiedSource: %s", cliErr.Message)
+	}
+	tr, err := report.LoadTrace(tracePath)
+	if err != nil {
+		t.Fatalf("LoadTrace: %v", err)
+	}
+	return layer2ForSubject(runID, report.ActiveRows(src), report.Layer1Gaps(tr))
+}
+
+// readyPublishedPriorRun drives the whole earlier run — trace, both review
+// groups under one policy, SC-02's mutation caught through the real mutation
+// ops — finalizes it to a published PASS, and commits what it published, so the
+// run that stands on it traces at a commit whose only difference from the prior
+// one is the publication the coverage directory exempts.
+func readyPublishedPriorRun(t *testing.T, s *liveSubject, prefix string) *readyPriorRun {
+	t.Helper()
+	prior := &readyPriorRun{
+		runID:     liveRunID(prefix),
+		policy:    reusePolicy(t),
+		artifacts: map[string]string{},
+		seqs:      map[string]int{},
+	}
+
+	tr := readyTrace(t, s, prior.runID)
+	readyGroups(t, s, prior.runID, readDispatchInputs(t, tr.DispatchPath), prior.policy)
+	readyCaughtVersionRow(t, s, prior.runID)
+
+	state := readyResume(t, s, prior.runID)
+	if state.Identity == nil {
+		t.Fatalf("resume %s reported no identity; the prior run must name the commit and document it verified", prior.runID)
+	}
+	prior.ledgerPath = state.LedgerPath
+	prior.commit, prior.sourceSHA256 = state.Identity.RepoCommit, state.Identity.SourceSHA256
+	for _, want := range []struct {
+		kind runstate.Kind
+		id   string
+	}{
+		{runstate.KindReviewGroup, readyMarkerGroup},
+		{runstate.KindReviewGroup, readyVersionGroup},
+		{runstate.KindMutationRow, readyVersionRow},
+	} {
+		rec := ledgerRecord(t, state, want.kind, want.id)
+		artifact, ok := rec.Artifacts[artifactEvidence]
+		if !ok {
+			t.Fatalf("prior %s %s retained no evidence artifact", want.kind, want.id)
+		}
+		prior.artifacts[want.id], prior.seqs[want.id] = artifact.Path, rec.Seq
+	}
+
+	out := readyFinalize(t, s, prior.runID, tr.EvidencePath,
+		readyLayer2(t, s, prior.runID, tr.EvidencePath),
+		[]report.MutationInput{{RowID: readyVersionRow, EvidencePath: prior.artifacts[readyVersionRow]}})
+	if out.Verdict != report.VerdictPass {
+		t.Fatalf("prior run verdict = %q, want %s; reasons=%+v", out.Verdict, report.VerdictPass, out.Reasons)
+	}
+	prior.reportPath = out.JSONPath
+
+	// The published report is committed inside the subject so the run that
+	// adopts this one traces a clean tree; the only path that moved is the
+	// publication itself.
+	mustGit(t, s.repo, "add", "-A")
+	mustGit(t, s.repo, "commit", "-q", "-m", "publish the prior run's verification")
+	prior.headAfter = subjectHead(t, s.repo)
+	if lines := gitStatusLines(t, s.repo); len(lines) != 0 {
+		t.Fatalf("git status = %v, want the subject clean once the prior run's report is committed", lines)
+	}
+	return prior
+}
+
+// readyArtifactBytes reads a retained artifact of the prior run, which lives in
+// the isolated state directory rather than the subject repository.
+func readyArtifactBytes(t *testing.T, path string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read retained artifact %s: %v", path, err)
+	}
+	return data
+}
+
+func readyWriteArtifact(t *testing.T, path string, data []byte) {
+	t.Helper()
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write retained artifact %s: %v", path, err)
+	}
+}
+
+func readyDigest(t *testing.T, path string) string {
+	t.Helper()
+	sum, err := evidence.SHA256File(path)
+	if err != nil {
+		t.Fatalf("digest %s: %v", path, err)
+	}
+	return sum
+}
+
+// readyReused asserts one prior record was adopted and returns its decision.
+func readyReused(t *testing.T, decisions []reuseDecision, id string) reuseDecision {
+	t.Helper()
+	decision := reuseDecisionFor(t, decisions, id)
+	if !decision.Reused {
+		t.Errorf("%s was refused %q, want it adopted: nothing about it moved", id, decision.Reason)
+	}
+	return decision
+}
+
+// readyRefused asserts one prior record was refused for reason, and that the
+// refusal is the whole of what happened to it.
+func readyRefused(t *testing.T, decisions []reuseDecision, id, reason string) {
+	t.Helper()
+	decision := reuseDecisionFor(t, decisions, id)
+	if decision.Reused || decision.Reason != reason {
+		t.Errorf("%s = %+v, want it refused %q", id, decision, reason)
+	}
+}
+
+// readyFinalizeRequest is the decoded finalize request, which is how a proof
+// reaches finalizeOp's between hook: the hook exists to change the world at the
+// one moment between the report being written and being published.
+func readyFinalizeRequest(
+	t *testing.T, s *liveSubject, runID, tracePath string, batches []report.Batch, rows []report.MutationInput,
+) *finalizeRequest {
+	t.Helper()
+	req, cliErr := decodeFinalizeRequest("finalize", []byte(readyFinalizeRequestJSON(t, s, runID, tracePath, batches, rows)))
+	if cliErr != nil {
+		t.Fatalf("decodeFinalizeRequest: %s", cliErr.Message)
+	}
+	return req
+}
+
+// covers: SC-27
+func TestReuse_RejectsAlteredRetainedBytes(t *testing.T) {
+	s := readySubject(t, "not-applicable")
+	prior := readyPublishedPriorRun(t, s, "rdy-altered")
+	reviewPath, mutationPath := prior.artifacts[readyMarkerGroup], prior.artifacts[readyVersionRow]
+
+	// Reuse trusts nothing it did not re-hash. A record whose retained bytes no
+	// longer answer to the digest the prior run recorded is refused by name,
+	// and the refusal is that record's alone: every other record of the same
+	// prior run is still adopted in the same answer.
+	t.Run("tampered-at-reuse", func(t *testing.T) {
+		truncated := liveRunID("rdy-alt-trunc")
+		readyTrace(t, s, truncated)
+		original := readyArtifactBytes(t, reviewPath)
+		readyWriteArtifact(t, reviewPath, original[:len(original)-1])
+
+		out := readyReuse(t, s, truncated, prior.runID, prior.policy)
+		readyRefused(t, out.Review, readyMarkerGroup, "artifact-digest-mismatch:"+artifactEvidence)
+		readyReused(t, out.Review, readyVersionGroup)
+		readyReused(t, out.Mutation, readyVersionRow)
+		readyWriteArtifact(t, reviewPath, original)
+
+		deleted := liveRunID("rdy-alt-del")
+		readyTrace(t, s, deleted)
+		evidenceBytes := readyArtifactBytes(t, mutationPath)
+		if err := os.Remove(mutationPath); err != nil {
+			t.Fatalf("remove retained mutation evidence: %v", err)
+		}
+
+		out = readyReuse(t, s, deleted, prior.runID, prior.policy)
+		readyRefused(t, out.Mutation, readyVersionRow, "artifact-missing:"+artifactEvidence)
+		readyReused(t, out.Review, readyMarkerGroup)
+		readyReused(t, out.Review, readyVersionGroup)
+		readyWriteArtifact(t, mutationPath, evidenceBytes)
+	})
+
+	// Adoption is not the last time the bytes are read. Finalize re-hashes every
+	// adopted artifact immediately before it publishes, so bytes that changed
+	// after the ledger was read leave nothing published at all; with them
+	// restored the same request publishes, and the transcript copy it names
+	// digests to what the reuse reference recorded for the original.
+	t.Run("tampered-at-finalize", func(t *testing.T) {
+		runID := liveRunID("rdy-alt-fin")
+		tracePath := readyTrace(t, s, runID).EvidencePath
+		out := readyReuse(t, s, runID, prior.runID, prior.policy)
+		readyReused(t, out.Review, readyMarkerGroup)
+		readyReused(t, out.Review, readyVersionGroup)
+		readyReused(t, out.Mutation, readyVersionRow)
+
+		original := readyArtifactBytes(t, reviewPath)
+		cliErr := finalizeOp(readyFinalizeRequest(t, s, runID, tracePath, nil, nil), io.Discard, func() {
+			readyWriteArtifact(t, reviewPath, append(slices.Clone(original), '\n'))
+		})
+		if cliErr == nil {
+			t.Fatalf("finalizeOp published a report over an artifact that changed under it")
+		}
+		if cliErr.Code != codeReusedArtifactChanged {
+			t.Errorf("refusal code = %q, want %q; message=%s", cliErr.Code, codeReusedArtifactChanged, cliErr.Message)
+		}
+		if lines := gitStatusLines(t, s.repo); len(lines) != 0 {
+			t.Errorf("git status = %v, want the refusal to have published nothing", lines)
+		}
+		readyWriteArtifact(t, reviewPath, original)
+
+		// The other three doors into a report the ledger already answers for.
+		readyWantRefusal(t, s, runID, tracePath,
+			[]report.Batch{readyHoldingBatch(runID, "b1", readyMarkerRow)}, nil, codeReusedRowRepasted)
+
+		pasted := readyHoldingBatch(runID, "b1", readyMarkerRow)
+		pasted.Reuse = &evidence.ReuseReference{
+			PriorRunID: prior.runID, PriorRepoCommit: prior.commit, PriorSeq: 1, Outcome: "holds",
+		}
+		readyWantRefusal(t, s, runID, tracePath, []report.Batch{pasted}, nil, report.CodeReuseNotAdmitted)
+
+		readyWantRefusal(t, s, runID, tracePath, nil,
+			[]report.MutationInput{{RowID: readyVersionRow, Outcome: "caught"}}, codeReusedRowRepasted)
+
+		published := readyFinalize(t, s, runID, tracePath, nil, nil)
+		if published.Verdict != report.VerdictPass {
+			t.Fatalf("verdict = %q, want %s; reasons=%+v", published.Verdict, report.VerdictPass, published.Reasons)
+		}
+		rep := readPublishedReport(t, s.repo, published.JSONPath)
+		copyPath := readyTranscriptPath(s, runID, "reused-review-"+readyMarkerGroup+".json")
+		ref := publishedTranscript(t, rep, copyPath)
+		batch := readyBatch(t, rep, "reuse:"+readyMarkerGroup)
+		if batch.Reuse == nil {
+			t.Fatalf("batch %s carries no reuse reference", batch.BatchID)
+		}
+		if ref.SHA256 != batch.Reuse.Artifact.SHA256 {
+			t.Errorf("transcript %s sha256 = %s, want the recorded %s", copyPath, ref.SHA256, batch.Reuse.Artifact.SHA256)
+		}
+		if got := readyDigest(t, reviewPath); ref.SHA256 != got {
+			t.Errorf("transcript %s sha256 = %s, want the original's %s", copyPath, ref.SHA256, got)
+		}
+	})
+}
+
+// covers: SC-28
+func TestReuse_PreservesOriginalProvenanceInReport(t *testing.T) {
+	s := readySubject(t, "not-applicable")
+	prior := readyPublishedPriorRun(t, s, "rdy-prov")
+
+	retained := []string{
+		prior.ledgerPath,
+		prior.artifacts[readyMarkerGroup],
+		prior.artifacts[readyVersionGroup],
+		prior.artifacts[readyVersionRow],
+	}
+	before := make([]string, len(retained))
+	for i, path := range retained {
+		before[i] = readyDigest(t, path)
+	}
+
+	runID := liveRunID("rdy-prov-now")
+	tracePath := readyTrace(t, s, runID).EvidencePath
+	adopted := readyReuse(t, s, runID, prior.runID, prior.policy)
+	readyReused(t, adopted.Review, readyMarkerGroup)
+	readyReused(t, adopted.Review, readyVersionGroup)
+	readyReused(t, adopted.Mutation, readyVersionRow)
+
+	// The publication is the only thing that moved between the two commits, and
+	// the coverage directory is the one place a run writes: exempt, and so
+	// absent from every adopted record's basis.
+	if len(adopted.ChangedPaths) == 0 {
+		t.Errorf("changedPaths = %+v, want the prior run's committed report", adopted.ChangedPaths)
+	}
+	for _, changed := range adopted.ChangedPaths {
+		if changed.Class != "exempt" {
+			t.Errorf("changed path %s class = %q, want exempt", changed.Path, changed.Class)
+		}
+	}
+	reuseChangedPathFor(t, adopted, prior.reportPath)
+
+	out := readyFinalize(t, s, runID, tracePath, nil, nil)
+	if out.Verdict != report.VerdictPass {
+		t.Fatalf("verdict = %q, want %s; reasons=%+v", out.Verdict, report.VerdictPass, out.Reasons)
+	}
+
+	// Adoption reads the prior run; it never writes to it.
+	for i, path := range retained {
+		if got := readyDigest(t, path); got != before[i] {
+			t.Errorf("%s digests to %s after the adopting run finalized, want the untouched %s", path, got, before[i])
+		}
+	}
+
+	rep := readPublishedReport(t, s.repo, out.JSONPath)
+	if rep.RunID != runID {
+		t.Errorf("report runId = %q, want the consuming run %q", rep.RunID, runID)
+	}
+	if rep.HeadCommit != prior.headAfter {
+		t.Errorf("report headCommit = %q, want the commit this run verified %q", rep.HeadCommit, prior.headAfter)
+	}
+
+	for _, group := range []string{readyMarkerGroup, readyVersionGroup} {
+		batch := readyBatch(t, rep, "reuse:"+group)
+		if batch.RunID != prior.runID {
+			t.Errorf("batch %s runId = %q, want the run it was judged in %q", batch.BatchID, batch.RunID, prior.runID)
+		}
+		ref := batch.Reuse
+		if ref == nil {
+			t.Errorf("batch %s carries no reuse reference", batch.BatchID)
+			continue
+		}
+		if ref.PriorRunID != prior.runID || ref.PriorRepoCommit != prior.commit || ref.PriorSourceSHA256 != prior.sourceSHA256 {
+			t.Errorf("batch %s reference = %+v, want run %s at %s over %s",
+				batch.BatchID, ref, prior.runID, prior.commit, prior.sourceSHA256)
+		}
+		if ref.PriorSeq != prior.seqs[group] {
+			t.Errorf("batch %s priorSeq = %d, want the prior record's %d", batch.BatchID, ref.PriorSeq, prior.seqs[group])
+		}
+		if ref.Outcome != "holds" {
+			t.Errorf("batch %s reference outcome = %q, want holds", batch.BatchID, ref.Outcome)
+		}
+		if ref.Artifact.Path != prior.artifacts[group] {
+			t.Errorf("batch %s artifact path = %q, want the original %q", batch.BatchID, ref.Artifact.Path, prior.artifacts[group])
+		}
+		if ref.Basis.PriorCommit != prior.commit {
+			t.Errorf("batch %s basis priorCommit = %q, want %q", batch.BatchID, ref.Basis.PriorCommit, prior.commit)
+		}
+		if len(ref.Basis.ChangedPaths) != 0 {
+			t.Errorf("batch %s basis changedPaths = %v, want none outside the exempt directory",
+				batch.BatchID, ref.Basis.ChangedPaths)
+		}
+	}
+
+	if got := publishedRow(t, rep, readyMarkerRow).Layer2; got.Verdict != "HOLDS" || got.BatchID != "reuse:"+readyMarkerGroup {
+		t.Errorf("%s layer2 = %+v, want HOLDS from reuse:%s", readyMarkerRow, got, readyMarkerGroup)
+	}
+	// A row report's sites are the sites that survived, so a caught row names
+	// none; the site the prior run mutated is preserved in the transcript copy
+	// of its evidence, which is asserted below.
+	layer4 := publishedRow(t, rep, readyVersionRow).Layer4
+	if layer4.Status != "MUTATION-CAUGHT" || len(layer4.Sites) != 0 {
+		t.Errorf("%s layer4 = %+v, want MUTATION-CAUGHT with no surviving site", readyVersionRow, layer4)
+	}
+	if layer4.Reuse == nil || layer4.Reuse.PriorRunID != prior.runID || layer4.Reuse.Outcome != "caught" {
+		t.Errorf("%s layer4 reuse = %+v, want the caught row adopted from %s", readyVersionRow, layer4.Reuse, prior.runID)
+	}
+
+	// The published copies are the prior run's documents, not restamped ones.
+	reviewCopy := filepath.Join(s.repo,
+		filepath.FromSlash(readyTranscriptPath(s, runID, "reused-review-"+readyMarkerGroup+".json")))
+	art, err := report.LoadReviewArtifact(reviewCopy, readyBatch(t, rep, "reuse:"+readyMarkerGroup).Reuse.Artifact.SHA256)
+	if err != nil {
+		t.Fatalf("load published review copy: %v", err)
+	}
+	if art.RunID != prior.runID || art.RepoCommit != prior.commit || art.SourceSHA256 != prior.sourceSHA256 {
+		t.Errorf("review copy identity = %s/%s/%s, want the prior run %s/%s/%s",
+			art.RunID, art.RepoCommit, art.SourceSHA256, prior.runID, prior.commit, prior.sourceSHA256)
+	}
+	mutationCopy := filepath.Join(s.repo,
+		filepath.FromSlash(readyTranscriptPath(s, runID, "reused-mutation-"+readyVersionRow+".json")))
+	ev, err := report.LoadMutation(mutationCopy)
+	if err != nil {
+		t.Fatalf("load published mutation copy: %v", err)
+	}
+	if ev.RunID != prior.runID {
+		t.Errorf("mutation copy runId = %q, want the prior run %q", ev.RunID, prior.runID)
+	}
+	if len(ev.Sites) != 1 || ev.Sites[0].Site != readyVersionSite || ev.Sites[0].Outcome != "caught" {
+		t.Errorf("mutation copy sites = %+v, want the prior run's caught %s", ev.Sites, readyVersionSite)
+	}
+
+	// The consuming run's own ledger says where each answer came from.
+	state := readyResume(t, s, runID)
+	for _, want := range []struct {
+		kind runstate.Kind
+		id   string
+	}{
+		{runstate.KindReviewGroup, readyMarkerGroup},
+		{runstate.KindReviewGroup, readyVersionGroup},
+		{runstate.KindMutationRow, readyVersionRow},
+	} {
+		rec := ledgerRecord(t, state, want.kind, want.id)
+		detail := fmt.Sprintf("reused from %s seq %d", prior.runID, prior.seqs[want.id])
+		if rec.Status != runstate.StatusCompleted || rec.Detail != detail {
+			t.Errorf("%s %s = %s %q, want completed %q", want.kind, want.id, rec.Status, rec.Detail, detail)
+		}
 	}
 }
