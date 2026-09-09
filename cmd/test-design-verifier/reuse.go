@@ -155,24 +155,6 @@ func reuseHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer) *cliEr
 	if cliErr != nil {
 		return cliErr
 	}
-	// The repository is read the way trace and finalize read it: as a commit.
-	// An uncommitted change is a tree no comparison against the prior commit
-	// describes, so it is refused before anything is judged, with the reason
-	// every other op gives.
-	ctrl, err := worktree.NewController(req.RepoRoot)
-	if err != nil {
-		return &cliError{Code: "controller-failed", Message: fmt.Sprintf("%s: %v", op, err)}
-	}
-	before, err := ctrl.TakeSnapshot()
-	if err != nil {
-		return &cliError{Code: "snapshot-failed", Message: fmt.Sprintf("%s: %v", op, err)}
-	}
-	if !before.Clean() {
-		return &cliError{
-			Code:    "source-not-reproducible",
-			Message: fmt.Sprintf("%s: source not reproducible: %s", op, describeDirty(req.RepoRoot)),
-		}
-	}
 	repoCommit, cliErr := headCommit(op, req.RepoRoot)
 	if cliErr != nil {
 		return cliErr
@@ -200,6 +182,25 @@ func reuseHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer) *cliEr
 		}
 	}
 
+	// The repository is read the way trace and finalize read it: as a commit.
+	// An uncommitted change is a tree no comparison against the prior commit
+	// describes, so once this run's own gates have answered it is refused —
+	// before the prior run is opened and before any record is judged — with
+	// the reason every other op gives.
+	ctrl, err := worktree.NewController(req.RepoRoot)
+	if err != nil {
+		return &cliError{Code: "controller-failed", Message: fmt.Sprintf("%s: %v", op, err)}
+	}
+	before, err := ctrl.TakeSnapshot()
+	if err != nil {
+		return &cliError{Code: "snapshot-failed", Message: fmt.Sprintf("%s: %v", op, err)}
+	}
+	if !before.Clean() {
+		return &cliError{
+			Code:    "source-not-reproducible",
+			Message: fmt.Sprintf("%s: source not reproducible: %s", op, describeDirty(req.RepoRoot)),
+		}
+	}
 	prior, cliErr := openPriorRun(op, req, src)
 	if cliErr != nil {
 		return cliErr
