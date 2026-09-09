@@ -103,14 +103,68 @@ func reservePath(dir, prefix string) (string, error) {
 	return tmp, nil
 }
 
-// Prune drops the admin entries of worktrees whose directories no longer
-// exist, so an interrupted run's wreckage does not accumulate in the
-// verifier's own registry and a replacement worktree can be created in its
-// place. It touches the registry alone: the original repository's HEAD, index
-// and working tree are untouched.
-func (c *Controller) Prune() error {
-	if _, err := c.runGit("worktree", "prune"); err != nil {
-		return fmt.Errorf("prune worktrees of %s: %w", c.repoRoot, err)
+// Forget drops the registry entry of a worktree whose directory is gone — the
+// admin files under .git/worktrees that a directory swept away out from under
+// git leaves behind — through git worktree remove --force on that path alone.
+// It never prunes: the registry is the repository's, shared with every other
+// worktree of it, and another whose directory happens to be absent at the same
+// moment — one on an unmounted volume, say — keeps its entry. A path git does
+// not list reports ErrWorktreeNotRegistered; a path that still exists is
+// refused, since removing a present worktree is Remove's job. The original
+// repository's HEAD, index and working tree are untouched.
+func (c *Controller) Forget(path string) error {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return fmt.Errorf("forget worktree %s: %w", path, err)
+	}
+	if _, err := os.Lstat(abs); err == nil {
+		return fmt.Errorf("forget worktree %s: the path still exists; remove it instead", path)
+	}
+
+	porcelain, err := c.runGit("worktree", "list", "--porcelain")
+	if err != nil {
+		return fmt.Errorf("forget worktree %s: %w", path, err)
+	}
+	if !isListedWorktree(abs, porcelain) {
+		return fmt.Errorf("forget worktree %s: %w", path, ErrWorktreeNotRegistered)
+	}
+
+	if _, err := c.runGit("worktree", "remove", "--force", abs); err != nil {
+		return fmt.Errorf("forget worktree %s: %w", path, err)
 	}
 	return nil
+}
+
+// isListedWorktree reports whether git lists abs among the repository's
+// worktrees. Unlike isRegisteredWorktree it does not need the directory to
+// exist: git records a worktree by its real path, so both sides are compared
+// after resolving the longest prefix of them that still does — the same
+// forgiving match git applies to the path handed to worktree remove.
+func isListedWorktree(abs, porcelain string) bool {
+	want := resolveExistingPrefix(abs)
+	for _, entry := range worktreeListPaths(porcelain) {
+		if resolveExistingPrefix(entry) == want {
+			return true
+		}
+	}
+	return false
+}
+
+// resolveExistingPrefix resolves path's symlinks as far as the filesystem
+// allows: the longest existing ancestor is resolved and the missing tail
+// rejoined unchanged.
+func resolveExistingPrefix(path string) string {
+	current, tail := filepath.Clean(path), ""
+	for {
+		resolved, err := filepath.EvalSymlinks(current)
+		if err == nil {
+			return filepath.Join(resolved, tail)
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return filepath.Join(current, tail)
+		}
+		tail = filepath.Join(filepath.Base(current), tail)
+		current = parent
+	}
 }

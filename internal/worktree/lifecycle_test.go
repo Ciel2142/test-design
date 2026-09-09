@@ -1,6 +1,7 @@
 package worktree
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -349,7 +350,29 @@ func TestQuarantineMoveFailureReturnsOriginalPathWithNamedError(t *testing.T) {
 	}
 }
 
-func TestPruneDropsAVanishedWorktreeSoCreateRegistersAFreshOne(t *testing.T) {
+// vanishedWorktree creates a worktree of repo through ctrl and removes its
+// directory out from under git, the way a temp-directory sweep after a crash
+// does, leaving the admin entry registered.
+func vanishedWorktree(t *testing.T, ctrl *Controller, repo string) *Worktree {
+	t.Helper()
+	w, err := ctrl.Create("HEAD")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := os.RemoveAll(w.Path); err != nil {
+		t.Fatalf("RemoveAll: %v", err)
+	}
+	if listed := mustGit(t, repo, "worktree", "list", "--porcelain"); !strings.Contains(listed, w.Path) {
+		t.Fatalf("worktree list = %q, want the vanished worktree %s still registered", listed, w.Path)
+	}
+	return w
+}
+
+// TestForgetDropsOnlyTheNamedVanishedWorktree: the registry is the
+// repository's, not the verifier's, so forgetting one vanished worktree must
+// not act on any other whose directory happens to be absent at that moment —
+// a user's worktree on an unmounted volume would otherwise lose its entry.
+func TestForgetDropsOnlyTheNamedVanishedWorktree(t *testing.T) {
 	repo := newTestRepo(t)
 	ctrl, err := NewController(repo)
 	if err != nil {
@@ -359,33 +382,30 @@ func TestPruneDropsAVanishedWorktreeSoCreateRegistersAFreshOne(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TakeSnapshot before: %v", err)
 	}
-	gone, err := ctrl.Create("HEAD")
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	if err := os.RemoveAll(gone.Path); err != nil {
-		t.Fatalf("RemoveAll: %v", err)
-	}
-	if listed := mustGit(t, repo, "worktree", "list", "--porcelain"); !strings.Contains(listed, gone.Path) {
-		t.Fatalf("worktree list = %q, want the vanished worktree still registered before the prune", listed)
+	gone := vanishedWorktree(t, ctrl, repo)
+	bystander := vanishedWorktree(t, ctrl, repo)
+
+	if err := ctrl.Forget(gone.Path); err != nil {
+		t.Fatalf("Forget(%q): %v", gone.Path, err)
 	}
 
-	if err := ctrl.Prune(); err != nil {
-		t.Fatalf("Prune: %v", err)
+	listed := mustGit(t, repo, "worktree", "list", "--porcelain")
+	if strings.Contains(listed, gone.Path) {
+		t.Errorf("worktree list = %q, want the forgotten worktree's entry dropped", listed)
 	}
-	if listed := mustGit(t, repo, "worktree", "list", "--porcelain"); strings.Contains(listed, gone.Path) {
-		t.Errorf("worktree list = %q, want the vanished worktree's admin entry dropped", listed)
+	if !strings.Contains(listed, bystander.Path) {
+		t.Errorf("worktree list = %q, want the other vanished worktree %s still registered", listed, bystander.Path)
 	}
 
 	fresh, err := ctrl.Create("HEAD")
 	if err != nil {
-		t.Fatalf("Create after Prune: %v", err)
+		t.Fatalf("Create after Forget: %v", err)
 	}
 	if fresh.Path == gone.Path {
-		t.Fatalf("Create reused the vanished path %q, want a fresh one", fresh.Path)
+		t.Fatalf("Create reused the forgotten path %q, want a fresh one", fresh.Path)
 	}
 	if _, err := ctrl.Attach(fresh.Path); err != nil {
-		t.Errorf("Attach(%q) after Prune+Create: %v", fresh.Path, err)
+		t.Errorf("Attach(%q) after Forget+Create: %v", fresh.Path, err)
 	}
 
 	after, err := ctrl.TakeSnapshot()
@@ -393,6 +413,46 @@ func TestPruneDropsAVanishedWorktreeSoCreateRegistersAFreshOne(t *testing.T) {
 		t.Fatalf("TakeSnapshot after: %v", err)
 	}
 	if equal, differing := Compare(before, after); !equal {
-		t.Errorf("Compare() equal = false after Prune, want true; differing = %v", differing)
+		t.Errorf("Compare() equal = false after Forget, want true; differing = %v", differing)
+	}
+}
+
+func TestForgetRefusesAnUnregisteredPath(t *testing.T) {
+	repo := newTestRepo(t)
+	ctrl, err := NewController(repo)
+	if err != nil {
+		t.Fatalf("NewController: %v", err)
+	}
+	bystander := vanishedWorktree(t, ctrl, repo)
+
+	never := filepath.Join(ctrl.worktreesDir(), "wt-never-registered")
+	err = ctrl.Forget(never)
+	if !errors.Is(err, ErrWorktreeNotRegistered) {
+		t.Fatalf("Forget(%q) = %v, want ErrWorktreeNotRegistered", never, err)
+	}
+	if listed := mustGit(t, repo, "worktree", "list", "--porcelain"); !strings.Contains(listed, bystander.Path) {
+		t.Errorf("worktree list = %q, want the refusal to have touched no entry", listed)
+	}
+}
+
+func TestForgetRefusesAWorktreeWhoseDirectoryExists(t *testing.T) {
+	repo := newTestRepo(t)
+	ctrl, err := NewController(repo)
+	if err != nil {
+		t.Fatalf("NewController: %v", err)
+	}
+	w, err := ctrl.Create("HEAD")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if err := ctrl.Forget(w.Path); err == nil {
+		t.Fatalf("Forget(%q) = nil, want a refusal for a worktree that is still there", w.Path)
+	}
+	if _, err := os.Stat(w.Path); err != nil {
+		t.Errorf("worktree dir %q after the refused Forget: %v, want it untouched", w.Path, err)
+	}
+	if listed := mustGit(t, repo, "worktree", "list", "--porcelain"); !strings.Contains(listed, w.Path) {
+		t.Errorf("worktree list = %q, want the present worktree still registered", listed)
 	}
 }

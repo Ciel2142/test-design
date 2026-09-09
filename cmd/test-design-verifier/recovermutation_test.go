@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"test-design/internal/mutation"
+	"test-design/internal/worktree"
 )
 
 func recoverMutationRequestJSON(t *testing.T, repo, runID, runDir string) string {
@@ -354,5 +355,104 @@ func TestRecoverMutation_RecreatesAVanishedWorktree(t *testing.T) {
 	}
 	if lines := gitStatusLines(t, repo); len(lines) != 0 {
 		t.Errorf("git status = %v, want the original repository untouched", lines)
+	}
+}
+
+// TestRecoverMutation_RecreationForgetsOnlyTheRowsOwnWorktree: the registry
+// recover-mutation clears an entry from is the repository's own, shared with
+// every other worktree of it. Replacing the row's vanished workspace drops that
+// one entry and no other — another worktree whose directory is absent at the
+// same moment stays registered.
+func TestRecoverMutation_RecreationForgetsOnlyTheRowsOwnWorktree(t *testing.T) {
+	repo := fixtureRepo(t)
+	prep := interruptedRow(t, repo, "recover-forget-one")
+	if err := os.RemoveAll(prep.WorktreePath); err != nil {
+		t.Fatalf("RemoveAll: %v", err)
+	}
+	ctrl, err := worktree.NewController(repo)
+	if err != nil {
+		t.Fatalf("NewController: %v", err)
+	}
+	bystander, err := ctrl.Create(prep.RepoCommit)
+	if err != nil {
+		t.Fatalf("Create the bystander worktree: %v", err)
+	}
+	if err := os.RemoveAll(bystander.Path); err != nil {
+		t.Fatalf("RemoveAll the bystander: %v", err)
+	}
+
+	out := runRecoverMutation(t, repo, "recover-forget-one", prep.RunDir)
+
+	if !out.Recreated {
+		t.Errorf("recreated = false, want the vanished workspace recreated")
+	}
+	listed := mustGit(t, repo, "worktree", "list", "--porcelain")
+	if strings.Contains(listed, prep.WorktreePath) {
+		t.Errorf("worktree list = %q, want the row's vanished worktree forgotten", listed)
+	}
+	if !strings.Contains(listed, bystander.Path) {
+		t.Errorf("worktree list = %q, want the bystander's entry %s to survive the recreation", listed, bystander.Path)
+	}
+	if !strings.Contains(listed, out.WorktreePath) {
+		t.Errorf("worktree list = %q, want the recreated worktree registered", listed)
+	}
+}
+
+// TestRecoverMutation_AWorktreePathItCannotProveGoneIsRefused: only a path
+// that does not exist is a vanished workspace. One the verifier cannot stat,
+// or one that exists as something other than a directory, is refused rather
+// than replaced — nothing proved the workspace gone, and the marker stays.
+func TestRecoverMutation_AWorktreePathItCannotProveGoneIsRefused(t *testing.T) {
+	tests := []struct {
+		name string
+		path func(t *testing.T) string
+	}{
+		{"a path beneath a regular file", func(t *testing.T) string {
+			file := filepath.Join(t.TempDir(), "not-a-directory")
+			if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
+				t.Fatalf("WriteFile: %v", err)
+			}
+			return filepath.Join(file, "worktree")
+		}},
+		{"a regular file", func(t *testing.T) string {
+			file := filepath.Join(t.TempDir(), "worktree")
+			if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
+				t.Fatalf("WriteFile: %v", err)
+			}
+			return file
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := fixtureRepo(t)
+			prep := interruptedRow(t, repo, "recover-unprovable")
+			st, err := mutation.LoadState(prep.RunDir)
+			if err != nil {
+				t.Fatalf("LoadState: %v", err)
+			}
+			st.WorktreePath = tc.path(t)
+			if err := mutation.WriteState(prep.RunDir, st); err != nil {
+				t.Fatalf("WriteState: %v", err)
+			}
+			// The prepared workspace itself is still standing; the refusal must
+			// not add a replacement beside it.
+			before := verifierWorktrees(t)
+
+			got := refuseRecoverMutation(t, repo, "recover-unprovable", prep.RunDir)
+
+			if got.Code != "restore-failed" {
+				t.Errorf("error code = %q, want restore-failed (message %q)", got.Code, got.Message)
+			}
+			after, err := mutation.LoadState(prep.RunDir)
+			if err != nil {
+				t.Fatalf("LoadState after the refusal: %v", err)
+			}
+			if after.Started == nil || after.Started.Site != "site-b" || after.WorktreePath != st.WorktreePath {
+				t.Errorf("state after the refusal = %+v, want the marker and the path left as they were", after)
+			}
+			if after := verifierWorktrees(t); len(after) != len(before) {
+				t.Errorf("worktrees = %v, want the refusal to have created none beyond %v", after, before)
+			}
+		})
 	}
 }

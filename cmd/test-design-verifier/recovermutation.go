@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -155,12 +156,20 @@ func recoverMutationHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writ
 // restoreMutationWorkspace returns the workspace named by st to the pristine
 // checkout of st.RepoCommit and reports the path that survived, and whether it
 // had to be built anew. A directory that is still there is restored in place;
-// one that is gone is replaced, its stale registry entry pruned first. Every
-// failure is a refusal: the caller must not clear the marker over a workspace
-// nothing proved clean.
+// one that no longer exists is replaced, its own registry entry forgotten
+// first — never the registry pruned, which would drop every worktree of the
+// repository whose directory is absent at that moment. Only a path that does
+// not exist counts as vanished: one the verifier cannot stat is refused, since
+// nothing proved the workspace gone. Every failure is a refusal: the caller
+// must not clear the marker over a workspace nothing proved clean.
 func restoreMutationWorkspace(op string, ctrl *worktree.Controller, st *mutation.State) (string, bool, *cliError) {
-	if info, err := os.Stat(st.WorktreePath); err != nil || !info.IsDir() {
-		if err := ctrl.Prune(); err != nil {
+	if _, err := os.Stat(st.WorktreePath); err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			return "", false, &cliError{Code: "restore-failed", Message: fmt.Sprintf("%s: stat worktree %s: %v", op, st.WorktreePath, err)}
+		}
+		// A registry that already forgot the path has nothing left to forget;
+		// any other failure to clear the entry leaves nothing to create over.
+		if err := ctrl.Forget(st.WorktreePath); err != nil && !errors.Is(err, worktree.ErrWorktreeNotRegistered) {
 			return "", false, &cliError{Code: "recreate-failed", Message: fmt.Sprintf("%s: %v", op, err)}
 		}
 		wt, err := ctrl.Create(st.RepoCommit)
