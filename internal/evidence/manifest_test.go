@@ -74,7 +74,7 @@ func TestVerifyFileMissingFileWrapsFsErrNotExist(t *testing.T) {
 
 // --- DigestFiles ---
 
-func TestDigestFilesReturnsDigestsForPresentAndErrorStringsForMissing(t *testing.T) {
+func TestDigestFilesOmitsUnreadablePathsAndNamesThemAsProblems(t *testing.T) {
 	root := t.TempDir()
 	presentRel := filepath.Join("nested", "present.txt")
 	if err := os.MkdirAll(filepath.Join(root, "nested"), 0o755); err != nil {
@@ -97,14 +97,17 @@ func TestDigestFilesReturnsDigestsForPresentAndErrorStringsForMissing(t *testing
 	paths := []string{presentRel, missingRel}
 	digests, problems := DigestFiles(root, paths)
 
-	if len(digests) != 2 {
-		t.Fatalf("DigestFiles returned %d entries, want 2: %+v", len(digests), digests)
+	// The map carries digests and nothing else: an error string stored where a
+	// digest belongs is deterministic, so a later probe failing the same way
+	// would match it and let a run stand on a file nobody ever read.
+	if len(digests) != 1 {
+		t.Fatalf("DigestFiles returned %d entries, want only the readable path: %+v", len(digests), digests)
 	}
 	if got := digests[presentRel]; got != wantDigest {
 		t.Errorf("DigestFiles digest for %q = %q, want %q", presentRel, got, wantDigest)
 	}
-	if got := digests[missingRel]; got != wantMissingMsg {
-		t.Errorf("DigestFiles digest for %q = %q, want %q", missingRel, got, wantMissingMsg)
+	if got, listed := digests[missingRel]; listed {
+		t.Errorf("DigestFiles digest for %q = %q, want the unreadable path left out of the map", missingRel, got)
 	}
 
 	if len(problems) != 1 || problems[0] != wantMissingMsg {

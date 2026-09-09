@@ -42,18 +42,18 @@ func VerifyFile(path, want string) error {
 type FileDigest map[string]string
 
 // DigestFiles hashes root/<path> for every path. A path that is missing or
-// unreadable is reported as "<path>: <error>" in place of a digest, both as
-// the map value for that key and in the returned problem list (sorted).
-// Result keys are the given paths, unchanged.
+// unreadable is left out of the map and reported as "<path>: <error>" in the
+// returned problem list (sorted): the map never carries an error string where
+// a digest belongs, because an error string is deterministic and a later probe
+// failing the same way would match it. Result keys are the given paths,
+// unchanged.
 func DigestFiles(root string, paths []string) (FileDigest, []string) {
 	digests := make(FileDigest, len(paths))
 	var problems []string
 	for _, p := range paths {
-		sum, err := SHA256File(filepath.Join(root, p))
+		sum, err := SHA256File(filepath.Join(root, filepath.FromSlash(p)))
 		if err != nil {
-			msg := fmt.Sprintf("%s: %s", p, err)
-			digests[p] = msg
-			problems = append(problems, msg)
+			problems = append(problems, fmt.Sprintf("%s: %s", p, err))
 			continue
 		}
 		digests[p] = sum

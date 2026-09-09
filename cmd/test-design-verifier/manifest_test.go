@@ -349,3 +349,48 @@ func TestManifest_CompletionNeverWithdrawsAReasonCaptureRecorded(t *testing.T) {
 		t.Errorf("started manifest = %v, want completion to have left it alone", started.Incomplete)
 	}
 }
+
+// TestManifest_AReadThroughASymlinkOutsideTheRepositoryIsUnidentifiable holds
+// confinement to where the bytes actually are. A tracked symlink is a path the
+// repository carries whose content lives wherever the link points; when that is
+// outside the repository, the read is external state no later run can identify,
+// whether the critic reported reading it or was handed it as a bundle file.
+func TestManifest_AReadThroughASymlinkOutsideTheRepositoryIsUnidentifiable(t *testing.T) {
+	repo := fixtureRepo(t)
+	outside := filepath.Join(t.TempDir(), "notes.md")
+	writeRepoFile(t, filepath.Dir(outside), "notes.md", "outside the repository\n")
+	for _, link := range []string{"orders/link.md", "orders/link_test.go"} {
+		if err := os.Symlink(outside, filepath.Join(repo, filepath.FromSlash(link))); err != nil {
+			t.Fatalf("symlink %s: %v", link, err)
+		}
+	}
+	head := commitAll(t, repo, "track symlinks to a file outside the repository")
+	identity := runstate.Identity{RunID: "manifest-symlink", RepoRoot: repo, RepoCommit: head}
+
+	t.Run("a reported read", func(t *testing.T) {
+		started := &evidence.Manifest{
+			Version: evidence.ManifestVersion, RepoCommit: head,
+			Claims:     map[string]string{"SC-01": "claim"},
+			Bundle:     evidence.FileDigest{"orders/orders_test.go": "digest"},
+			Incomplete: []string{"reads-unrecorded"},
+		}
+		reads := []string{"orders/link.md"}
+		m := completeReviewManifest(repo, identity, started, &reads)
+		requireIncomplete(t, m, "unidentifiable-read:orders/link.md")
+		if len(m.Reads) != 0 {
+			t.Errorf("reads = %v, want no digest for bytes that live outside the repository", m.Reads)
+		}
+	})
+
+	t.Run("a bundled file", func(t *testing.T) {
+		dispatch := dispatchInputs{Rows: []dispatchRow{{RowID: "SC-01", File: "orders/link_test.go", ClaimSHA256: "claim"}}}
+		policy := &reviewPolicy{Critic: "coverage-critic", Instructions: []string{
+			writePolicyFile(t, "critic.md", "judge the assertion\n"),
+		}}
+		m := captureReviewManifest(repo, identity, &dispatch, []string{"SC-01"}, policy)
+		requireIncomplete(t, m, "unidentifiable-read:orders/link_test.go")
+		if got, listed := m.Bundle["orders/link_test.go"]; listed {
+			t.Errorf("bundle[orders/link_test.go] = %q, want the path left out", got)
+		}
+	})
+}

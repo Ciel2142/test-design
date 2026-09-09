@@ -2,6 +2,7 @@ package main
 
 import (
 	"maps"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -45,12 +46,21 @@ func captureReviewManifest(repoRoot string, identity runstate.Identity, dispatch
 		}
 	}
 	paths, _ := bundleFiles(dispatch, rows)
-	bundle, undigestable := digestUnder(repoRoot, paths)
 	policyID, problems := policyIdentity(policy)
-	// A file the critic would be handed but this run cannot digest — a path git
+	// A file the critic would be handed but this run cannot identify — a path
+	// whose bytes live outside the repository behind a symlink, a path git
 	// carries as a tree, a file that vanished since the trace — is a file
 	// nothing later can identify, and it is left out of the bundle rather than
 	// recorded as the error that reading it produced.
+	confined := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if !confinedInRepo(repoRoot, path) {
+			problems = append(problems, "unidentifiable-read:"+path)
+			continue
+		}
+		confined = append(confined, path)
+	}
+	bundle, undigestable := digestUnder(repoRoot, confined)
 	for _, path := range undigestable {
 		problems = append(problems, "unidentifiable-read:"+path)
 	}
@@ -126,9 +136,11 @@ func applyRepoState(m *evidence.Manifest, repoRoot string, identity runstate.Ide
 		// message is not surfaced here — a read this run cannot identify is
 		// one reason whatever made it unidentifiable. Being tracked is not
 		// enough either: git carries directories too, and a path with no
-		// digest is not a read a later run can compare.
+		// digest is not a read a later run can compare. Nor is the lexical
+		// answer enough: a tracked symlink is confined by name and read from
+		// wherever it points, so the bytes must resolve inside the tree too.
 		rel, cliErr := confinedRelPath("record-review", "reads", "unidentifiable-read", path)
-		if cliErr != nil || head == "" || !trackedAt(repoRoot, head, rel) {
+		if cliErr != nil || head == "" || !trackedAt(repoRoot, head, rel) || !confinedInRepo(repoRoot, rel) {
 			add("unidentifiable-read:" + path)
 			continue
 		}
@@ -144,23 +156,46 @@ func applyRepoState(m *evidence.Manifest, repoRoot string, identity runstate.Ide
 	m.Complete = len(reasons) == 0
 }
 
-// digestUnder hashes every path under repoRoot, keeping only what it could
-// read: a path it could not is returned by name rather than recorded with the
-// error in place of its digest. An error string is deterministic, so a manifest
-// that stored one would match a later probe that failed the same way and let a
-// run stand on a file neither of them ever read.
+// digestUnder hashes every path under repoRoot through evidence.DigestFiles,
+// naming the paths it could not read rather than the errors reading them
+// produced: an op reports a path as unidentifiable, and the error behind that
+// is nobody's input.
 func digestUnder(repoRoot string, paths []string) (evidence.FileDigest, []string) {
-	digests := evidence.FileDigest{}
+	digests, _ := evidence.DigestFiles(repoRoot, paths)
 	var undigestable []string
 	for _, path := range paths {
-		sum, err := evidence.SHA256File(filepath.Join(repoRoot, filepath.FromSlash(path)))
-		if err != nil {
+		if _, ok := digests[path]; !ok {
 			undigestable = append(undigestable, path)
-			continue
 		}
-		digests[path] = sum
 	}
 	return digests, undigestable
+}
+
+// confinedInRepo reports whether the bytes behind the repo-relative rel live
+// inside the repository once every symlink on the way is resolved. A path that
+// does not exist resolves to nothing and is not confined; a digest of it would
+// fail anyway, and the two answers agree.
+func confinedInRepo(repoRoot, rel string) bool {
+	root, err := resolveThroughSymlinks(repoRoot)
+	if err != nil {
+		return false
+	}
+	target, err := filepath.EvalSymlinks(filepath.Join(root, filepath.FromSlash(rel)))
+	if err != nil {
+		return false
+	}
+	return isWithinPath(root, target)
+}
+
+// runnerRelPath is the repository path of a file the trace bound relative to
+// the runner root: what git names the file, and so what a manifest is keyed
+// by and a change is classified against. A root of "." leaves the file as it
+// is.
+func runnerRelPath(runnerRoot, file string) string {
+	if file == "" {
+		return ""
+	}
+	return path.Clean(path.Join(filepath.ToSlash(runnerRoot), file))
 }
 
 // readsOf is the relayed read list, or none when the parent recorded none.
@@ -235,7 +270,9 @@ func contributorFiles(row dispatchRow) []string {
 // primary site and every contributor's — with the rows each file serves, in the
 // order the group named them. The manifest digests whole files, not the bound
 // ranges the dispatch document carries: a critic reads the file it is given,
-// and an edit anywhere in it is an edit to what was reviewed.
+// and an edit anywhere in it is an edit to what was reviewed. The dispatch
+// document binds files relative to the runner root; the bundle names them by
+// their repository path, which is what git and a later run's change list say.
 func bundleFiles(dispatch *dispatchInputs, rows []string) ([]string, map[string][]string) {
 	byID := dispatchRowsByID(dispatch)
 	served := map[string][]string{}
@@ -244,7 +281,8 @@ func bundleFiles(dispatch *dispatchInputs, rows []string) ([]string, map[string]
 		if !ok {
 			continue
 		}
-		for _, file := range append([]string{row.File}, contributorFiles(row)...) {
+		for _, bound := range append([]string{row.File}, contributorFiles(row)...) {
+			file := runnerRelPath(dispatch.Runner.Root, bound)
 			if file == "" || slices.Contains(served[file], id) {
 				continue
 			}
