@@ -490,6 +490,87 @@ func TestPublication_RecoversOnlyProvenOwnArtifacts(t *testing.T) {
 			t.Errorf("git status = %v, want only the report rewritten over its committed self: %v", lines, wantDirty)
 		}
 	})
+
+	// A restore is one path at a time, and the proof is an edit the gate never
+	// sees. A tracked file marked assume-unchanged is the operator's promise
+	// that git may ignore its local modification: status lists nothing, so
+	// recovery has nothing to refuse and the run's own restore goes ahead. A
+	// checkout of the whole tree — what a per-path restore must not become —
+	// would take that edit back along with the run's own files, silently.
+	t.Run("assumed-unchanged-edit-survives-restore", func(t *testing.T) {
+		const local = "cmd/ready/main.go"
+		edited := pubProofAppend(t, s, local, "\n// a local edit git was told to assume unchanged\n")
+		mustGit(t, s.repo, "update-index", "--assume-unchanged", local)
+		t.Cleanup(func() {
+			mustGit(t, s.repo, "update-index", "--no-assume-unchanged", local)
+			mustGit(t, s.repo, "checkout", "--", local)
+		})
+		wantDirty := []string{" M " + pubProofJSON, " M " + pubProofMD}
+		if lines := gitStatusLines(t, s.repo); !slices.Equal(lines, wantDirty) {
+			t.Fatalf("git status = %v, want the run's own report dirty and the assumed-unchanged edit invisible: %v", lines, wantDirty)
+		}
+
+		out := pubProofFinalize(t, s, runC, freshFinalizeBody())
+		wantRecovered := []recoveredFile{
+			{Path: pubProofJSON, Action: recoveryRestored},
+			{Path: pubProofMD, Action: recoveryRestored},
+		}
+		if !slices.Equal(out.Recovered, wantRecovered) {
+			t.Errorf("recovered = %+v, want %+v", out.Recovered, wantRecovered)
+		}
+		if got := readyDigest(t, filepath.Join(s.repo, filepath.FromSlash(local))); got != edited {
+			t.Errorf("%s digests to %s, want the local edit kept at %s: restoring the run's own files took back a file the run never wrote",
+				local, got, edited)
+		}
+		if lines := gitStatusLines(t, s.repo); !slices.Equal(lines, wantDirty) {
+			t.Errorf("git status = %v, want only the report rewritten over its committed self: %v", lines, wantDirty)
+		}
+	})
+
+	// Recovery removes files, never trees. The artifact directory is where an
+	// operator keeps the coverage document, other runs' transcripts and their
+	// own notes, and finalize is run from inside the repository as an operator
+	// runs it: from there the directory's relative name is a real path, and a
+	// recovery that cleared it would clear all of that. Neither neighbour is
+	// anything git sees — recovery refuses what it can see and cannot prove —
+	// so nothing but the recovery itself stands between them and deletion.
+	t.Run("artifact-directory-neighbours-survive", func(t *testing.T) {
+		t.Chdir(s.repo)
+		pubProofExclude(t, s, "notes.local.md")
+		pubProofExclude(t, s, "run-2020-01-01-0001/")
+		notes := repoPath(pubProofDir, "notes.local.md")
+		foreign := repoPath(pubProofDir, "transcripts", "run-2020-01-01-0001", "trace-evidence.json")
+		neighbours := map[string]string{
+			notes:   readyDigest(t, pubProofWrite(t, s, notes, "an operator's notes beside the coverage document\n")),
+			foreign: readyDigest(t, pubProofWrite(t, s, foreign, "{\"runId\":\"run-2020-01-01-0001\"}\n")),
+		}
+		wantDirty := []string{" M " + pubProofJSON, " M " + pubProofMD}
+		if lines := gitStatusLines(t, s.repo); !slices.Equal(lines, wantDirty) {
+			t.Fatalf("git status = %v, want the run's own report dirty and both neighbours ignored: %v", lines, wantDirty)
+		}
+
+		out := pubProofFinalize(t, s, runC, freshFinalizeBody())
+		wantRecovered := []recoveredFile{
+			{Path: pubProofJSON, Action: recoveryRestored},
+			{Path: pubProofMD, Action: recoveryRestored},
+		}
+		if !slices.Equal(out.Recovered, wantRecovered) {
+			t.Errorf("recovered = %+v, want %+v", out.Recovered, wantRecovered)
+		}
+		for path, want := range neighbours {
+			got, err := evidence.SHA256File(filepath.Join(s.repo, filepath.FromSlash(path)))
+			if err != nil {
+				t.Errorf("%s: %v; want a file the run never wrote left where it was", path, err)
+				continue
+			}
+			if got != want {
+				t.Errorf("%s digests to %s, want it untouched at %s", path, got, want)
+			}
+		}
+		if lines := gitStatusLines(t, s.repo); !slices.Equal(lines, wantDirty) {
+			t.Errorf("git status = %v, want only the report rewritten over its committed self: %v", lines, wantDirty)
+		}
+	})
 }
 
 // covers: SC-32
