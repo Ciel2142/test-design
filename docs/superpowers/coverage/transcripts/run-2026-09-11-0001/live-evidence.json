@@ -1,0 +1,110 @@
+{
+  "schemaVersion": "1",
+  "verifierVersion": "0.6.0",
+  "runId": "run-2026-09-11-0001",
+  "source": "docs/superpowers/coverage/2026-09-07-verification-workflow-redesign-coverage.md",
+  "sourceSha256": "ddf7a90910b294cb6b9aadc6d189bde21925a02e0388bcaaa565021f8358cf20",
+  "profilePath": ".test-design/live-profiles/workflow-redesign-local.json",
+  "rowVerdicts": [
+    {
+      "rowId": "SC-10",
+      "verdict": "LIVE-PASS"
+    }
+  ],
+  "startSteps": [
+    {
+      "expectation": "profile start command 1",
+      "command": [
+        "python3",
+        "fixtures/workflow-redesign-live/recipe.py",
+        "deploy",
+        "run-2026-09-11-0001"
+      ],
+      "exitStatus": 0,
+      "decisiveOutput": "{\"result\": \"deployed\", \"repoCommit\": \"ba67b0334e8d11848a56ace794bbbffe42ea8b1f\", \"artifactSha256\": \"982d3f73c03df8c9ee39d8d2ab13b2031fdc93ca107235fb4d912f25425fb0eb\", \"target\": \"/tmp/test-design-workflow-run-2026-09-11-0001/service.sock\"}\n",
+      "result": "pass"
+    }
+  ],
+  "healthSteps": [
+    {
+      "expectation": "profile health command 1",
+      "command": [
+        "python3",
+        "fixtures/workflow-redesign-live/recipe.py",
+        "ready",
+        "run-2026-09-11-0001"
+      ],
+      "exitStatus": 0,
+      "decisiveOutput": "{\"result\": \"ready\"}\n",
+      "result": "pass"
+    }
+  ],
+  "steps": [
+    {
+      "expectation": "against the already-deployed, already-ready run, the check walkthrough separately re-verifies the deployed revision/artifact/source identity is still the selected one (stale deployments are refused by this same code path), then exercises the changed business behavior: a three-item quote totals 375 cents, with the artifact/target/revision identity recorded in the result",
+      "command": [
+        "python3",
+        "fixtures/workflow-redesign-live/recipe.py",
+        "check",
+        "run-2026-09-11-0001"
+      ],
+      "exitStatus": 0,
+      "decisiveOutput": "{\"result\": \"business-pass\", \"repoCommit\": \"ba67b0334e8d11848a56ace794bbbffe42ea8b1f\", \"sourceSha256\": \"0720f347aa018055231c3ba6610b6767abf95fde9d161d057973b0799865b2b7\", \"artifactSha256\": \"982d3f73c03df8c9ee39d8d2ab13b2031fdc93ca107235fb4d912f25425fb0eb\", \"target\": \"/tmp/test-design-workflow-run-2026-09-11-0001/service.sock\", \"observed\": {\"quantity\": 3, \"totalCents\": 375, \"revision\": \"ba67b0334e8d11848a56ace794bbbffe42ea8b1f\"}}\n",
+      "result": "pass"
+    }
+  ],
+  "cleanupSteps": [
+    {
+      "expectation": "profile cleanup command 1",
+      "command": [
+        "python3",
+        "fixtures/workflow-redesign-live/recipe.py",
+        "cleanup",
+        "run-2026-09-11-0001"
+      ],
+      "exitStatus": 0,
+      "decisiveOutput": "{\"result\": \"cleanup-pass\", \"runID\": \"run-2026-09-11-0001\", \"absent\": true}\n",
+      "result": "pass"
+    }
+  ],
+  "cleanupOK": true,
+  "cleanupFailed": false,
+  "executionErrors": [],
+  "rawArtifacts": [
+    {
+      "path": "/private/var/folders/mj/95h4sfv90kdfh4l4qb32gjth0000gn/T/test-design-verifier-1473704747/runs/run-2026-09-11-0001/start-1/stdout.raw",
+      "sha256": "849ea66b45656e4aa4a891978f18027c8fec761cca53d886a09998737e0c2ca2"
+    },
+    {
+      "path": "/private/var/folders/mj/95h4sfv90kdfh4l4qb32gjth0000gn/T/test-design-verifier-1473704747/runs/run-2026-09-11-0001/start-1/stderr.raw",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/private/var/folders/mj/95h4sfv90kdfh4l4qb32gjth0000gn/T/test-design-verifier-1473704747/runs/run-2026-09-11-0001/health-1/stdout.raw",
+      "sha256": "9faf4854e5fea20c34e0c4b72a59cd601bacb47daec2fe663c5ff43aee260119"
+    },
+    {
+      "path": "/private/var/folders/mj/95h4sfv90kdfh4l4qb32gjth0000gn/T/test-design-verifier-1473704747/runs/run-2026-09-11-0001/health-1/stderr.raw",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/private/var/folders/mj/95h4sfv90kdfh4l4qb32gjth0000gn/T/test-design-verifier-1473704747/runs/run-2026-09-11-0001/step-1/stdout.raw",
+      "sha256": "e6af5c19efd3a706e9c9ef05f0cef9c9a530f611332fd77ab59ca6474e6520a1"
+    },
+    {
+      "path": "/private/var/folders/mj/95h4sfv90kdfh4l4qb32gjth0000gn/T/test-design-verifier-1473704747/runs/run-2026-09-11-0001/step-1/stderr.raw",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/private/var/folders/mj/95h4sfv90kdfh4l4qb32gjth0000gn/T/test-design-verifier-1473704747/runs/run-2026-09-11-0001/cleanup-1/stdout.raw",
+      "sha256": "07399a0dc2a9f0e437242843a7950b3542f3cd72f2696fc9df249ee511ea72d1"
+    },
+    {
+      "path": "/private/var/folders/mj/95h4sfv90kdfh4l4qb32gjth0000gn/T/test-design-verifier-1473704747/runs/run-2026-09-11-0001/cleanup-1/stderr.raw",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "startedAt": "2026-09-10T22:02:12.077901Z",
+  "finishedAt": "2026-09-10T22:02:13.662736Z",
+  "snapshotEqual": true
+}
