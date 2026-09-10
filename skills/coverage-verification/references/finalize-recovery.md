@@ -81,9 +81,10 @@ Every publication — successful, partial, or retried — is recorded in the run
 a `phase/publish` record: the measured revision, the run directory, the report's digest,
 whether it carries an acknowledgement, and every file the publication writes with the digest
 of the bytes it writes. The record names no artifacts of its own; those files are the record.
-It never enters the report: both `finalize` and `resume` skip it when accounting for what a
-run owes, so an open publication is never reported as a pending obligation, and never appears
-in `## Work`.
+It never enters the report: `finalize` never refuses `run-incomplete` because of it — finalize
+is about to redo it — and it never appears in `## Work`. `resume` does report an open
+publication, in its own `pending[]` list (`{phase, publish, started-not-completed}`) and its
+`publication` section, exactly like any other unfinished obligation.
 
 A publication is complete only once that record completes. A `finalize` that fails before
 writing anything, or after writing the report but before every file lands, leaves the record
