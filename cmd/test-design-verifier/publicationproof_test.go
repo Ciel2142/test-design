@@ -456,6 +456,15 @@ func TestPublication_RecoversOnlyProvenOwnArtifacts(t *testing.T) {
 	// not move.
 	t.Run("tracked-restored-untracked-removed", func(t *testing.T) {
 		published := pubProofPaths(readyResume(t, s, runC).Publication.Files)
+		// The committed copies are made to differ from what a republication
+		// writes, and to differ whatever the clock does: the report varies only
+		// in finishedAt, which RFC3339 resolves to one second, and its Markdown
+		// carries no timestamp at all, so two publications of an unchanged run
+		// are otherwise byte-identical. A trailing newline leaves the JSON
+		// valid, a trailing comment line leaves the Markdown valid, and both
+		// make the file finalize writes next a modification of a tracked one.
+		pubProofAppend(t, s, pubProofJSON, "\n")
+		pubProofAppend(t, s, pubProofMD, "\n<!-- the committed copy of this report -->\n")
 		mustGit(t, s.repo, append([]string{"add"}, published...)...)
 		mustGit(t, s.repo, "commit", "-q", "-m", "publish the recovered run's verification")
 		if lines := gitStatusLines(t, s.repo); len(lines) != 0 {
