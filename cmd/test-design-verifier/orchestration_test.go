@@ -36,42 +36,6 @@ func (l *orchLog) drive(kind runstate.Kind, id string) {
 	l.entries = append(l.entries, orchInvocation{string(kind), id})
 }
 
-// orchRequestJSON is a verify request over the orchestration subject plus
-// whatever fields the op being driven adds.
-func orchRequestJSON(t *testing.T, s *liveSubject, runID string, extra map[string]any) string {
-	t.Helper()
-	return opRequestJSON(t, s.repo, s.coverageSource, runID, extra)
-}
-
-// orchTrace runs the real trace op and holds the subject to the baseline it
-// pinned: a subject whose suite no longer matches its baseline would make every
-// later verdict a statement about something else.
-func orchTrace(t *testing.T, s *liveSubject, runID string) traceOutput {
-	t.Helper()
-	code, stdout, stderr := runVerifyOp(t, "trace", orchRequestJSON(t, s, runID, nil))
-	if code != exitOK {
-		t.Fatalf("trace exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
-	}
-	tr := decodeTraceOutput(t, stdout)
-	if tr.BaselineStatus != "ok" {
-		t.Fatalf("trace baselineStatus = %q, want ok", tr.BaselineStatus)
-	}
-	return tr
-}
-
-func orchRecordReview(t *testing.T, s *liveSubject, runID string, extra map[string]any) recordReviewOutput {
-	t.Helper()
-	code, stdout, stderr := runVerifyOp(t, "record-review", orchRequestJSON(t, s, runID, extra))
-	if code != exitOK {
-		t.Fatalf("record-review exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
-	}
-	var out recordReviewOutput
-	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
-		t.Fatalf("record-review stdout did not decode: %v\nstdout=%s", err, stdout)
-	}
-	return out
-}
-
 // orchReviewGroup opens groupID over rowID under policy, closes it with
 // verdict, and returns what the dispatch cost: one started call and the bytes
 // of every file its critic was handed. The sizes are read from the repository,
@@ -80,7 +44,9 @@ func orchReviewGroup(
 	t *testing.T, s *liveSubject, runID, groupID, rowID, verdict string, policy *reviewPolicy,
 ) (dispatches int, bundleBytes int64, bundleFiles int) {
 	t.Helper()
-	started := orchRecordReview(t, s, runID, map[string]any{
+	// The ready* drivers are generic over *liveSubject despite the name; this
+	// subject is driven through the same ones rather than a second copy.
+	started := readyRecordReview(t, s, runID, map[string]any{
 		"groupId": groupID, "status": "started", "rows": []string{rowID}, "policy": policy,
 	})
 	for _, file := range started.Bundle {
@@ -93,7 +59,7 @@ func orchReviewGroup(
 	// The critic's reads are recorded with the completion, which is where the
 	// manifest becomes complete: a group whose manifest stays incomplete is
 	// never adoptable, and the repair run below would adopt nothing at all.
-	completed := orchRecordReview(t, s, runID, map[string]any{
+	completed := readyRecordReview(t, s, runID, map[string]any{
 		"groupId": groupID, "status": "completed", "reads": []string{},
 		"verdicts": []map[string]string{{
 			"rowId": rowID, "verdict": verdict, "reason": "critic verdict for " + rowID,
@@ -185,28 +151,13 @@ func orchCaughtLimitRow(t *testing.T, s *liveSubject, runID string) {
 func orchEnvironmentalTagRow(t *testing.T, s *liveSubject, runID string) {
 	t.Helper()
 	preparedMutationFor(t, s.repo, s.coverageSource, runID, orchTagRow)
-	code, _, stderr := runVerifyOp(t, "record-attempt", orchRequestJSON(t, s, runID, map[string]any{
+	code, _, stderr := runVerifyOp(t, "record-attempt", readyRequestJSON(t, s, runID, map[string]any{
 		"layer": 4, "rowID": orchTagRow,
 		"refusal": "the mutation runner could not start in this environment",
 	}))
 	if code != exitOK {
 		t.Fatalf("record-attempt exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
 	}
-}
-
-func orchReuse(t *testing.T, s *liveSubject, runID, priorRunID string, policy *reviewPolicy) reuseOutput {
-	t.Helper()
-	code, stdout, stderr := runVerifyOp(t, "reuse", orchRequestJSON(t, s, runID, map[string]any{
-		"priorRunId": priorRunID, "policy": policy,
-	}))
-	if code != exitOK {
-		t.Fatalf("reuse exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
-	}
-	var out reuseOutput
-	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
-		t.Fatalf("reuse stdout did not decode: %v\nstdout=%s", err, stdout)
-	}
-	return out
 }
 
 func orchFinalize(t *testing.T, s *liveSubject, runID string) finalizeOutput {
@@ -267,7 +218,7 @@ func TestOrchestration_SummaryMatchesRetainedWork(t *testing.T) {
 	dispatchesA, bundleBytesA := 0, int64(0)
 
 	logA.drive(runstate.KindPhase, tracePhaseID)
-	traceA := orchTrace(t, s, runA)
+	traceA := readyTrace(t, s, runA)
 
 	for _, group := range []struct{ id, row, verdict string }{
 		{orchGreetGroup, orchGreetRow, "HOLDS"},
@@ -368,12 +319,12 @@ func TestOrchestration_SummaryMatchesRetainedWork(t *testing.T) {
 	dispatchesB, bundleBytesB := 0, int64(0)
 
 	logB.drive(runstate.KindPhase, tracePhaseID)
-	traceB := orchTrace(t, s, runB)
+	traceB := readyTrace(t, s, runB)
 	if traceB.RepoCommit != headA2 {
 		t.Fatalf("run B trace repoCommit = %q, want the repaired revision %q", traceB.RepoCommit, headA2)
 	}
 
-	adopting := orchReuse(t, s, runB, runA, policy)
+	adopting := readyReuse(t, s, runB, runA, policy)
 	const isolated = "isolated-change:gamma/gamma_test.go"
 	// Every record run A left is named before the sweep, so a sweep over a
 	// list reuse never filled would pass over nothing at all.
