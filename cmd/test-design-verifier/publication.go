@@ -168,7 +168,10 @@ func recoverOwnPublication(op, repoRoot string, rec *runstate.Record) ([]recover
 	}
 
 	// Verification runs to the end before anything is touched: one entry this
-	// run cannot prove it wrote leaves the whole tree as it stands.
+	// run cannot prove it wrote — or cannot decide what to do with — leaves the
+	// whole tree as it stands. What comes out of this loop is the complete
+	// plan, each entry already carrying the action it will be given.
+	planned := make([]recoveredFile, 0, len(entries))
 	for _, entry := range entries {
 		want, ours := recorded[entry.Path]
 		if !ours || !recoverableCode(entry.Code) {
@@ -188,31 +191,44 @@ func recoverOwnPublication(op, repoRoot string, rec *runstate.Record) ([]recover
 					op, entry.Path, got, want),
 			}
 		}
+		tracked, err := headTracked(repoRoot, entry.Path)
+		if err != nil {
+			return nil, &cliError{
+				Code: "recovery-failed",
+				Message: fmt.Sprintf("%s: whether HEAD carries %s could not be answered, and recovery will not remove a file on an unanswered question: %v. Nothing was touched; repair the repository and rerun finalize",
+					op, entry.Path, err),
+			}
+		}
+		action := recoveryRemoved
+		if tracked {
+			action = recoveryRestored
+		}
+		planned = append(planned, recoveredFile{Path: entry.Path, Action: action})
 	}
 
-	recovered := make([]recoveredFile, 0, len(entries))
+	recovered := make([]recoveredFile, 0, len(planned))
 	emptied := map[string]struct{}{}
-	for _, entry := range entries {
-		full := filepath.Join(repoRoot, filepath.FromSlash(entry.Path))
-		if trackedAt(repoRoot, "HEAD", entry.Path) {
+	for _, file := range planned {
+		full := filepath.Join(repoRoot, filepath.FromSlash(file.Path))
+		if file.Action == recoveryRestored {
 			// One path at a time: a checkout of the directory would take back
 			// files this run never wrote.
-			if _, err := gitOutput(repoRoot, "checkout", "--", entry.Path); err != nil {
+			if _, err := gitOutput(repoRoot, "checkout", "--", file.Path); err != nil {
 				return recovered, &cliError{
 					Code:    "recovery-failed",
-					Message: fmt.Sprintf("%s: restore %s: %v", op, entry.Path, err),
+					Message: fmt.Sprintf("%s: restore %s: %v", op, file.Path, err),
 				}
 			}
-			recovered = append(recovered, recoveredFile{Path: entry.Path, Action: recoveryRestored})
+			recovered = append(recovered, file)
 			continue
 		}
 		if err := os.Remove(full); err != nil {
 			return recovered, &cliError{
 				Code:    "recovery-failed",
-				Message: fmt.Sprintf("%s: remove %s: %v", op, entry.Path, err),
+				Message: fmt.Sprintf("%s: remove %s: %v", op, file.Path, err),
 			}
 		}
-		recovered = append(recovered, recoveredFile{Path: entry.Path, Action: recoveryRemoved})
+		recovered = append(recovered, file)
 		emptied[filepath.Dir(full)] = struct{}{}
 	}
 
@@ -229,6 +245,26 @@ func recoverOwnPublication(op, repoRoot string, rec *runstate.Record) ([]recover
 		_ = os.Remove(dir)
 	}
 	return recovered, nil
+}
+
+// headTracked reports whether HEAD carries path. It is asked with ls-tree
+// rather than with the package's plain trackedness query because recovery is
+// the one caller whose answer decides between putting a file back and deleting
+// it, and there the two failures must not look alike: `git cat-file -e` exits
+// 128 both for a path HEAD does not carry and for a repository that could not
+// be read at all, while ls-tree answers the first with an empty listing and the
+// second by failing. A question nobody answered is not an absence.
+func headTracked(repoRoot, path string) (bool, error) {
+	// core.quotePath=false keeps a non-ASCII path as the bytes it is, so the
+	// listing can be compared against the path that was asked for, and
+	// --literal-pathspecs keeps a run ID or a document stem carrying a glob
+	// character from asking about some other file: nothing here is a pattern.
+	out, err := gitOutput(repoRoot, "--literal-pathspecs", "-c", "core.quotePath=false",
+		"ls-tree", "--name-only", "HEAD", "--", path)
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(out) != "", nil
 }
 
 // notOwnPathRefusal names a dirty path recovery will not undo: one this run

@@ -473,3 +473,59 @@ func TestRecoverOwnPublication_KeepsAnIgnoredFileAndTheDirectoryHoldingIt(t *tes
 		t.Errorf("%s digest = %q, want the ignored file byte-identical (%q)", sentinel, got, sentinelDigest)
 	}
 }
+
+// TestRecoverOwnPublication_TrackednessDecidesOnlyWhenItIsAnswered guards the
+// one question in recovery whose answer decides between restoring a file and
+// deleting it. A git query that fails is not the same as one that says "HEAD
+// does not carry this", and reading the first as the second would delete a file
+// on no evidence, leaving a deletion the next run refuses to recover from.
+func TestRecoverOwnPublication_TrackednessDecidesOnlyWhenItIsAnswered(t *testing.T) {
+	t.Run("unanswerable refuses before anything is touched", func(t *testing.T) {
+		isolateEnv(t)
+		repo := t.TempDir()
+		// A repository with no commit at all: `git status` answers, so recovery
+		// gets as far as the question, and `git ls-tree HEAD` cannot answer it.
+		mustGit(t, repo, "init", "-q")
+		pubWrite(t, repo, pubJSON, "{\"finishedAt\":\"first\"}\n")
+		rec := pubRecord(t, evidence.FileRef{Path: pubJSON, SHA256: pubDigest(t, repo, pubJSON)})
+		before := pubTreeDigests(t, repo)
+
+		recovered, cliErr := recoverOwnPublication("finalize", repo, rec)
+
+		if cliErr == nil {
+			t.Fatalf("recoverOwnPublication = %+v, nil, want the recovery-failed refusal", recovered)
+		}
+		if cliErr.Code != "recovery-failed" {
+			t.Errorf("refusal code = %q, want %q; message=%s", cliErr.Code, "recovery-failed", cliErr.Message)
+		}
+		if !strings.Contains(cliErr.Message, pubJSON) {
+			t.Errorf("message = %q, want it to name %s", cliErr.Message, pubJSON)
+		}
+		if after := pubTreeDigests(t, repo); !reflect.DeepEqual(after, before) {
+			t.Errorf("tree digests = %+v, want the refusal to have touched nothing: %+v", after, before)
+		}
+	})
+
+	t.Run("answered tracked is restored, never removed", func(t *testing.T) {
+		repo := pubRepo(t)
+		pubWrite(t, repo, pubJSON, "{\"finishedAt\":\"first\"}\n")
+		mustGit(t, repo, "add", pubJSON)
+		mustGit(t, repo, "commit", "-q", "-m", "publish")
+		committed := pubDigest(t, repo, pubJSON)
+		pubWrite(t, repo, pubJSON, "{\"finishedAt\":\"second\"}\n")
+		rec := pubRecord(t, evidence.FileRef{Path: pubJSON, SHA256: pubDigest(t, repo, pubJSON)})
+
+		recovered, cliErr := recoverOwnPublication("finalize", repo, rec)
+
+		if cliErr != nil {
+			t.Fatalf("recoverOwnPublication: %s: %s", cliErr.Code, cliErr.Message)
+		}
+		want := []recoveredFile{{Path: pubJSON, Action: "restored"}}
+		if !reflect.DeepEqual(recovered, want) {
+			t.Fatalf("recovered = %+v, want %+v", recovered, want)
+		}
+		if got := pubDigest(t, repo, pubJSON); got != committed {
+			t.Errorf("%s digest = %q, want the committed bytes %q", pubJSON, got, committed)
+		}
+	})
+}
