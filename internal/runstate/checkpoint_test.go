@@ -1,7 +1,9 @@
 package runstate
 
 import (
+	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -102,6 +104,45 @@ func TestCheckpoint_InterruptedReplacementKeepsPriorCompletion(t *testing.T) {
 	}
 	if got := Current(l, KindReviewGroup, "g2"); got == nil || got.Status != StatusStarted {
 		t.Errorf("g2 = %+v, want it started", got)
+	}
+
+	// The prior completion survives the replacement itself, not only a failure
+	// before it. The checkpoint is replaced by renaming a finished temp file
+	// over it, so the bytes a reader already opened are never truncated and
+	// rewritten under it: a reader that opened the checkpoint before a save
+	// still reads the whole ledger it opened, whatever the save is doing.
+	held, err := os.Open(filepath.Join(dir, LedgerFile))
+	if err != nil {
+		t.Fatalf("open the checkpoint before the replacement: %v", err)
+	}
+	t.Cleanup(func() { held.Close() })
+
+	if _, err := fresh.Start(id, KindReviewGroup, "g3", map[string]any{"rows": []string{"sc-19"}}, "", ""); err != nil {
+		t.Fatalf("Start g3: %v", err)
+	}
+
+	data, err := io.ReadAll(held)
+	if err != nil {
+		t.Fatalf("read the checkpoint opened before the replacement: %v", err)
+	}
+	var opened Ledger
+	if err := json.Unmarshal(data, &opened); err != nil {
+		t.Fatalf("the checkpoint opened before the replacement no longer decodes: %v\nbytes=%s", err, data)
+	}
+	if len(opened.Records) != 2 {
+		t.Errorf("the reader that opened the checkpoint first sees %d records, want the 2 it opened: the replacement rewrote the file under it",
+			len(opened.Records))
+	}
+	if got := Current(&opened, KindReviewGroup, "g3"); got != nil {
+		t.Errorf("the reader that opened the checkpoint first sees g3 = %+v, want a record written after it opened to be invisible to it", got)
+	}
+
+	l, err = fresh.Load()
+	if err != nil {
+		t.Fatalf("Load after the replacement: %v", err)
+	}
+	if len(l.Records) != 3 {
+		t.Fatalf("records = %+v, want the replacement to have installed the started g3 record", l.Records)
 	}
 }
 

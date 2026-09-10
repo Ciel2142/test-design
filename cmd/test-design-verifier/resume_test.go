@@ -709,6 +709,38 @@ func TestResume_SelectsOnlyValidatedCompletions(t *testing.T) {
 	if out.Counts.Invalid != 5 {
 		t.Errorf("counts.invalid = %d, want 5: the four groups and row SC-10", out.Counts.Invalid)
 	}
+
+	// The line applies to the trace phase itself. A completed phase record whose
+	// evidence changed under it is not a validated completion either, so the two
+	// layers it feeds are owed nothing: their dispatch inputs still parse, and
+	// standing on them would judge every group and row against a phase the run
+	// can no longer vouch for.
+	traceData, err := os.ReadFile(gated.EvidencePath)
+	if err != nil {
+		t.Fatalf("read %s: %v", gated.EvidencePath, err)
+	}
+	if err := os.WriteFile(gated.EvidencePath, append(traceData, ' '), 0o644); err != nil {
+		t.Fatalf("write %s: %v", gated.EvidencePath, err)
+	}
+
+	out = runResume(t, repo, runID)
+	if out.Trace.Status != statusInvalid || out.Trace.Reason != "artifact-digest-mismatch:evidence" {
+		t.Errorf("trace = %+v, want status %s reason artifact-digest-mismatch:evidence", out.Trace, statusInvalid)
+	}
+	if rec := ledgerRecord(t, out, runstate.KindPhase, tracePhaseID); rec.Status != runstate.StatusCompleted {
+		t.Errorf("trace record status = %q, want the ledger to keep %q", rec.Status, runstate.StatusCompleted)
+	}
+	if out.Review.Reason != reasonTraceIncomplete || out.Mutation.Reason != reasonTraceIncomplete {
+		t.Errorf("review.reason = %q, mutation.reason = %q, want both %q: a phase resting on changed evidence is a completed record, not a validated completion",
+			out.Review.Reason, out.Mutation.Reason, reasonTraceIncomplete)
+	}
+	if len(out.Review.Groups) != 0 || len(out.Mutation.Rows) != 0 {
+		t.Errorf("review.groups = %+v, mutation.rows = %+v, want neither layer reported off an invalid trace", out.Review.Groups, out.Mutation.Rows)
+	}
+	wantTraceOwed := []resumePending{{Kind: runstate.KindPhase, ID: tracePhaseID, Reason: "artifact-digest-mismatch:evidence"}}
+	if !reflect.DeepEqual(out.Pending, wantTraceOwed) {
+		t.Errorf("pending = %+v, want only the trace phase owed again %+v", out.Pending, wantTraceOwed)
+	}
 }
 
 // reviewVerdictsAt reads the verdicts a group's evidence file carries.
@@ -790,6 +822,17 @@ func TestResume_PreservesFailedOutcomes(t *testing.T) {
 		rec := ledgerRecord(t, out, want.kind, want.id)
 		if rec.Status != runstate.StatusCompleted || rec.Outcome != want.outcome {
 			t.Errorf("%s/%s = %s/%s, want completed %s", want.kind, want.id, rec.Status, rec.Outcome, want.outcome)
+		}
+	}
+	// The answer resume reports is the answer the record carries. A summary
+	// that renamed a failure into a success would leave the failed record in
+	// the ledger and still tell the parent the layer holds.
+	if group := resumeGroupFor(t, out, "A"); group.Outcome != "blocked" {
+		t.Errorf("group A outcome = %q, want blocked: resume reports the outcome the record measured", group.Outcome)
+	}
+	for _, want := range answered[1:] {
+		if row := resumeRow(t, out, want.id); row.Outcome != want.outcome {
+			t.Errorf("%s outcome = %q, want %q: resume reports the outcome the record measured", want.id, row.Outcome, want.outcome)
 		}
 	}
 	wantPending := []resumePending{
