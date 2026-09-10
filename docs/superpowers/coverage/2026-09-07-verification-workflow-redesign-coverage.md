@@ -380,6 +380,7 @@ The production diff between baseline 1224011 and the measured head carries these
 | `internal/runstate/runstate.go:110-123` | Run ledger location: `TEST_DESIGN_STATE_DIR` overrides; the default is under the user cache directory. | 7 | `TestDefaultStateDir` (`internal/runstate`) |
 | `cmd/test-design-verifier/recordreview.go:104-151` | record-review refuses `invalid-group-id` for a group id that is not a plain name of letters, digits, dot, dash or underscore. | 7 | `TestRecordReview_RefusesAMalformedRequestBeforeTheLedger` |
 | `cmd/test-design-verifier/recordreview.go:443-470` | A scenario row belongs to at most one current review group: record-review and reuse refuse `row-already-grouped` unless the earlier group is superseded. | 8 | `TestRecordReview_GroupLifecycle`, `TestRecordReview_ConcurrentStartsKeepARowInOneGroup` |
+| `cmd/test-design-verifier/reuse.go` (`reuseBeforeAdopt`) | Test seam added with this amendment: a package-level hook that is nil in production and, when a test sets it, runs inside the reuse transaction after every prior record is verified and before the first is adopted. It changes no production behavior; it exists so `TestReuse_RejectsAlteredRetainedBytes` can alter a retained artifact at the moment adopt’s re-digest must refuse it (SC-27). | 8 | `TestReuse_RejectsAlteredRetainedBytes` |
 
 ## Source grounding
 
