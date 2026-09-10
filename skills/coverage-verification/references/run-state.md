@@ -117,13 +117,35 @@ Output (fields relevant here; `records[]` carries the raw ledger too):
   "review": {"complete": false, "groups": [{"id": "batch-1", "rows": ["SC-07"], "status": "completed", "outcome": "holds", "evidencePath": "...", "reason": ""}], "uncovered": ["SC-09"]},
   "live": {"required": true, "status": "started", "recoveryRequired": true},
   "mutation": {"complete": false, "rows": [{"rowId": "SC-07", "status": "started", "worktreePath": "...", "completedSites": ["site-1"], "interruptedSite": "site-2"}]},
-  "publication": {"status": "started", "outcome": "", "measuredCommit": "", "acknowledged": false, "files": [], "reason": "started-not-completed"},
+  "publication": {"status": "none", "outcome": "", "measuredCommit": "", "acknowledged": false, "files": [], "reason": ""},
   "pending": [
     {"kind": "review-group", "id": "", "reason": "uncovered: SC-09"},
-    {"kind": "mutation-row", "id": "SC-07", "reason": "started-not-completed"},
-    {"kind": "phase", "id": "publish", "reason": "started-not-completed"}
+    {"kind": "mutation-row", "id": "SC-07", "reason": "started-not-completed"}
   ],
-  "counts": {"started": 3, "completed": 2, "failed": 0, "superseded": 0, "invalid": 0, "pending": 3, "reused": 0}
+  "counts": {"started": 2, "completed": 2, "failed": 0, "superseded": 0, "invalid": 0, "pending": 2, "reused": 0}
+}
+```
+
+A publication never appears beside those entries: `finalize` opens the `phase/publish` record
+only once nothing else is owed, and it records the revision the report measures and every file
+the publication will write at the moment it starts. So an open publication is a run whose only
+pending entry is its own, with `measuredCommit` and `files` already filled:
+
+```json
+{
+  "publication": {
+    "status": "started",
+    "outcome": "",
+    "measuredCommit": "4c1f0b9e2a7d8c3f5b6a109e8d7c6b5a4f3e2d10",
+    "acknowledged": false,
+    "files": [
+      {"path": "docs/superpowers/coverage/2026-09-07-subject-verification.json", "sha256": "e9c6b698…"},
+      {"path": "docs/superpowers/coverage/2026-09-07-subject-verification.md", "sha256": "4dffe677…"},
+      {"path": "docs/superpowers/coverage/transcripts/run-2026-09-07-0001/trace-evidence.json", "sha256": "38b3700e…"}
+    ],
+    "reason": "started-not-completed"
+  },
+  "pending": [{"kind": "phase", "id": "publish", "reason": "started-not-completed"}]
 }
 ```
 

@@ -35,10 +35,13 @@ Two refusals are outcomes rather than errors:
   coverage source's live decision, not skipped and not partial.
 - `profile-unavailable` — the profile is missing, unreadable, or fails validation.
   `prepare-live` now records that attempt itself, completing `live-attempt/live` with outcome
-  `unavailable` before it creates a run dir or worktree — refusing `live-attempt-completed`
-  first when a completed record already stands without `repeat.reason`. The record is in the
-  ledger; finalize reads it. Continue the run; finalize records `live-profile-unavailable` and
-  the verdict becomes `PARTIAL`.
+  `unavailable`. The `live-attempt-completed` gate comes first, before anything is created:
+  a completed record already standing without `repeat.reason` refuses there, with no run dir
+  and no worktree. Past that gate the attempt document is written into the run dir
+  (`runs/<run-id>/live-attempt.json`), which is where the completed record points, and the
+  worktree the op had created is disposed on the way out. The record is in the ledger;
+  finalize reads it. Continue the run; finalize records `live-profile-unavailable` and the
+  verdict becomes `PARTIAL`.
 
 ### 2. Dispatch [live-runner](../../../agents/live-runner.md)
 

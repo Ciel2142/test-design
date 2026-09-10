@@ -2,8 +2,10 @@
 
 Layer 4 covers each active `risk=high` row whose layer-1 status is bound. Rows whose layer-1
 status is `gap` or `ambiguity` are **never** dispatched: there is no executable test to
-mutate, finalize derives `MUTATION-N/A (layer 1 gap)` for them itself, and recording a
-mutation record for one is refused `mutation-on-gap-row`.
+mutate, and finalize derives `MUTATION-N/A (layer 1 gap)` for them itself. Nothing refuses a
+mutation record for such a row while it is being recorded; `finalize` refuses the whole run
+`mutation-on-gap-row` when it computes the report over one, and the repair is a new run
+without that row's mutation work.
 
 ### 1. Prepare the row's worktree
 

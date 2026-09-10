@@ -191,7 +191,12 @@ was not — and republishes from the same ledger evidence, with no suite, critic
 mutation work repeated. An own path whose bytes are not what this run wrote refuses
 `publication-unverifiable` instead of being silently discarded; `recovery-failed` exists as
 an internal code for the (not expected in ordinary use) case where a proven-safe recovery
-step itself cannot complete. See the
+step itself cannot complete. The transaction that opens that record also holds the ledger it
+re-reads under the lock to the one the report was assembled from, refusing the new code
+`ledger-changed` — and writing nothing — when another caller repeated an obligation and
+answered it differently in between; the ledger is not in the repository, so the Git snapshot
+gate cannot see such a change. Rerunning `finalize` assembles the report from the ledger as it
+now stands. See the
 [finalize/recovery reference](../skills/coverage-verification/references/finalize-recovery.md)
 for the complete refusal table and the acknowledgement procedure.
 
