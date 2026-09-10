@@ -2301,6 +2301,67 @@ func TestLiveTruth_IncompleteOutputIsNotProof(t *testing.T) {
 	requireExecutionError(t, ev.ExecutionErrors, "step[5]:", "subprocess interrupted")
 	requireExecutionError(t, ev.ExecutionErrors, "step[6]:", "create raw capture")
 
+	// The executor never hands an interrupted result to the predicate judge:
+	// exec drops the result the moment ExecuteStep reports an error, which is
+	// why the three verdicts above are inconclusive. The judge's own refusal is
+	// the second line of that defence, and this run's captures are what prove
+	// it. Read as the result of a command that finished, every interrupted
+	// capture satisfies the deadline step's own predicate — the kill status —
+	// and the terminating step's own — no error line in what was captured;
+	// once the interruption the run recorded is attached, none of them may.
+	// The flooding step's own "ok" predicate is not judged here: which stream
+	// spent the budget is a race between the two copy goroutines, so what its
+	// stdout holds is not a stable premise.
+	t.Run("interrupted captures satisfy nothing", func(t *testing.T) {
+		satisfiable := []live.Predicate{
+			{Form: "exit-code", Value: "-1"},
+			{Form: "not-matches", Stream: "combined", Value: "ERROR"},
+		}
+		rawPath := func(index int, name string) string {
+			suffix := filepath.Join(fmt.Sprintf("step-%d", index), name)
+			for _, artifact := range ev.RawArtifacts {
+				if strings.HasSuffix(artifact.Path, suffix) {
+					return artifact.Path
+				}
+			}
+			t.Fatalf("rawArtifacts = %+v, want the capture %s the interrupted step left behind", ev.RawArtifacts, suffix)
+			return ""
+		}
+		recordedInterruption := func(index int) error {
+			position := fmt.Sprintf("step[%d]:", index)
+			for _, entry := range ev.ExecutionErrors {
+				if strings.HasPrefix(entry, position) {
+					return errors.New(entry)
+				}
+			}
+			t.Fatalf("executionErrors = %v, want an entry at %s", ev.ExecutionErrors, position)
+			return nil
+		}
+		for _, index := range []int{3, 4, 5} {
+			mode := walkthrough[index-1].mode
+			// -1 is the status ExecuteStep records for a process it had to
+			// kill; the captures are the files this run really wrote.
+			partial := &live.StepResult{
+				Started:      true,
+				ExitStatus:   -1,
+				StdoutPath:   rawPath(index, "stdout.raw"),
+				StderrPath:   rawPath(index, "stderr.raw"),
+				CombinedPath: rawPath(index, "combined.raw"),
+			}
+			// The premise first: the partial result, read as if the command
+			// had finished, satisfies both predicates. Refusing a result that
+			// fails on its own would prove nothing about the refusal.
+			if pass, failed := live.EvaluatePredicates(satisfiable, partial); !pass {
+				t.Fatalf("step %d (mode %s): the partial capture fails %+v on its own", index, mode, failed)
+			}
+			partial.Err = recordedInterruption(index)
+			pass, failed := live.EvaluatePredicates(satisfiable, partial)
+			if pass || len(failed) != len(satisfiable) {
+				t.Errorf("step %d (mode %s): EvaluatePredicates under %v = (%v, %+v), want (false, every predicate): an interrupted capture is not proof", index, mode, partial.Err, pass, failed)
+			}
+		}
+	})
+
 	// Cleanup takes longer than an ordinary command's whole deadline and still
 	// finishes: the allowance it runs under is its own, not the walkthrough's.
 	requireAbsent(t, "after execute-live returned", phaseRunRoot(runID))
