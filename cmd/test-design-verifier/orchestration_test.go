@@ -160,25 +160,6 @@ func orchEnvironmentalTagRow(t *testing.T, s *liveSubject, runID string) {
 	}
 }
 
-func orchFinalize(t *testing.T, s *liveSubject, runID string) finalizeOutput {
-	t.Helper()
-	code, stdout, stderr := runVerifyOp(t, "finalize",
-		finalizeRequestJSONFor(t, s.repo, s.coverageSource, runID, freshFinalizeBody()))
-	if code != exitOK {
-		t.Fatalf("finalize exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
-	}
-	return decodeFinalizeOutput(t, stdout)
-}
-
-// orchCommit stages and commits inside the temporary subject repository the
-// builder made, never this one, and returns the commit it wrote.
-func orchCommit(t *testing.T, s *liveSubject, message string) string {
-	t.Helper()
-	mustGit(t, s.repo, "add", "-A")
-	mustGit(t, s.repo, "commit", "-q", "-m", message)
-	return subjectHead(t, s.repo)
-}
-
 // orchWorkItem returns the published work item for (kind, id).
 func orchWorkItem(t *testing.T, rep *report.Report, kind runstate.Kind, id string) report.WorkItem {
 	t.Helper()
@@ -242,7 +223,7 @@ func TestOrchestration_SummaryMatchesRetainedWork(t *testing.T) {
 	logA.drive(runstate.KindMutationRow, orchTagRow)
 	orchEnvironmentalTagRow(t, s, runA)
 
-	outA := orchFinalize(t, s, runA)
+	outA := readyFinalize(t, s, runA)
 	if outA.Verdict != report.VerdictBlocked {
 		t.Fatalf("run A verdict = %q, want %s; reasons=%+v", outA.Verdict, report.VerdictBlocked, outA.Reasons)
 	}
@@ -310,9 +291,9 @@ func TestOrchestration_SummaryMatchesRetainedWork(t *testing.T) {
 	// The repair: run A's report is committed, and then one test file is made
 	// to assert more than it did. Nothing a critic read for the other four
 	// groups moved, so the second run has to buy only what really changed.
-	orchCommit(t, s, "publish run A's verification report")
+	revisionCommit(t, s, "publish run A's verification report")
 	writeSubjectFile(t, s.repo, "gamma/gamma_test.go", orchRepairedGammaTestSource)
-	headA2 := orchCommit(t, s, "strengthen the flag assertion")
+	headA2 := revisionCommit(t, s, "strengthen the flag assertion")
 
 	runB := liveRunID("orch-b")
 	logB := &orchLog{}
@@ -362,7 +343,7 @@ func TestOrchestration_SummaryMatchesRetainedWork(t *testing.T) {
 	logB.drive(runstate.KindLiveAttempt, liveAttemptID)
 	orchLiveJourney(t, s, runB, traceB.EvidencePath)
 
-	outB := orchFinalize(t, s, runB)
+	outB := readyFinalize(t, s, runB)
 	if outB.Verdict != report.VerdictPartial {
 		t.Fatalf("run B verdict = %q, want %s; reasons=%+v", outB.Verdict, report.VerdictPartial, outB.Reasons)
 	}
