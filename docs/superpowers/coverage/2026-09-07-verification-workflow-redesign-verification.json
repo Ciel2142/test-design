@@ -1,0 +1,1430 @@
+{
+  "schemaVersion": "1",
+  "verifierVersion": "0.6.0",
+  "runId": "run-2026-09-10-0001",
+  "source": "docs/superpowers/coverage/2026-09-07-verification-workflow-redesign-coverage.md",
+  "sourceSha256": "e43b07d54bbbe6c7f529a6e891d44bc7dbaa338f30e365dec5ceffb96f4e1566",
+  "headCommit": "ff7a8a3965eb08ea3142a2752c63fa2306824371",
+  "baselineCommit": "122401156dbf639afb5d7ce021e3a0ae2dbb0824",
+  "baselineStatus": "ok",
+  "approval": "go ahead\nuse subagents and worktrees where possible, and cheap models if not necessary for expensive to execute",
+  "verdict": "BLOCKED",
+  "acknowledged": false,
+  "reasons": [
+    {
+      "layer": "freshness",
+      "rowId": "",
+      "code": "stale",
+      "detail": "the coverage source is stale against the spec: internal/jvmrun/jvmrun.go:29-71: JVM report-glob confinement: confineGlob now validates every path segment and pattern validity, refusing globs previously accepted; ReportDirs removed; internal/jvmrun/jvmrun.go:110-214: JVM report collection: no longer RemoveAll's report directories, drops the mtime cutoff, walks under os.Root, refuses symlinked or non-regular report paths (report-glob-escapes-root) and errors on unreadable directories — runner behavior the source declares out of scope and unchanged; cmd/test-design-verifier/finalize.go:978-995: artifactStem accepts any non-empty .md basename, so finalize publishes for a source not named *-coverage.md instead of refusing source-name-unconventional; internal/live/transcript.go:29-51: redaction barrier now also scans the plan step's expectation text and substitutes [withheld by redaction barrier]; source says existing redaction remains unchanged; internal/subprocess/run.go:1-99: verifier's own subprocess policy: 30-minute suite timeout and 30-second git utility timeout with process-group kill, returned as infrastructure errors; internal/live/plan.go:86-94: live plan validation refuses a bound step with no predicates (missing-row-predicates); cmd/test-design-verifier/preflight.go:64-72: preflight resolves a relative --source against --repo instead of refusing source-outside-repo; internal/runstate/lock.go:1-45: ledger reads/writes take shared/exclusive flock on ledger.lock, a concurrent-parent safety guarantee the source scopes out; cmd/test-design-verifier/publication.go:359-430: finalize fingerprints the ledger and refuses ledger-changed when another caller altered it between assembly and publication; internal/runstate/runstate.go:110-123: run ledger location: TEST_DESIGN_STATE_DIR override, default under the user cache dir; cmd/test-design-verifier/recordreview.go:104-151: record-review refuses invalid-group-id for a group id that is not a plain name; cmd/test-design-verifier/recordreview.go:443-470: a scenario row may belong to only one current review group: row-already-grouped refusal at record-review and reuse"
+    },
+    {
+      "layer": "1",
+      "rowId": "",
+      "code": "ambiguity",
+      "detail": "internal/tags/extract_test.go:17: comment is inside a function body, not immediately above a test function"
+    },
+    {
+      "layer": "4",
+      "rowId": "SC-13",
+      "code": "MUTATION-UNAPPLIABLE",
+      "detail": "The row's Verification mutation (broaden the approved project recipe cleanup selector from the exact run resource to a shared prefix) applies only in fixtures/workflow-redesign-live/recipe.py:154, a Python fixture, not in any production .go file; the mutator enumerated exactly that one site and applied it (root = /tmp/test-design-workflow-<run_id stripped of trailing digits>), but a Go-runner row cannot be evaluated on a non-.go diff, so the site was not confirmed and evaluate-mutation was not called. Coverage-design defect: the mutation is phrased against the trusted recipe, outside the verifier's mutation surface."
+    },
+    {
+      "layer": "4",
+      "rowId": "SC-18",
+      "code": "MUTATION-SURVIVED",
+      "detail": "the tagged test did not fail at site-2"
+    },
+    {
+      "layer": "4",
+      "rowId": "SC-20",
+      "code": "MUTATION-SURVIVED",
+      "detail": "the tagged test did not fail at site-1; site-2; site-5; site-7; site-8"
+    },
+    {
+      "layer": "4",
+      "rowId": "SC-22",
+      "code": "MUTATION-SURVIVED",
+      "detail": "the tagged test did not fail at site-5"
+    },
+    {
+      "layer": "4",
+      "rowId": "SC-27",
+      "code": "MUTATION-SURVIVED",
+      "detail": "the tagged test did not fail at site-4"
+    },
+    {
+      "layer": "4",
+      "rowId": "SC-30",
+      "code": "MUTATION-UNAPPLIABLE",
+      "detail": "Confirmation failed at site-2 (cmd/test-design-verifier/resume.go:308, staleForRun): the applied diff `if false && measured == id.RepoCommit` removes the exemption for a HEAD that moved only because this run's own report was committed, so resume judges staleness against publication HEAD — that is SC-32's fault (publication commit advancing the measurement target), not SC-30's named mutation (routing a publication *failure* through all-layer invalidation instead of publication-only recovery). Sites 1 (pendingRefusal no longer skips the owed publish phase) and 3 (pendingObligations re-owes every completed record while a publication is started) did match and were caught; site-2 was evaluated before this thread's confirmation rejected it and survived, so the row's evidence at test-design-verifier-1175555114/runs/run-2026-09-10-0001/mutation-evidence.json is not used."
+    },
+    {
+      "layer": "4",
+      "rowId": "SC-31",
+      "code": "MUTATION-SURVIVED",
+      "detail": "the tagged test did not fail at site-1; site-4"
+    }
+  ],
+  "layers": {
+    "layer1": {
+      "status": "blocked",
+      "suite": {
+        "passed": 1485,
+        "failed": 0,
+        "skipped": 2
+      },
+      "findingCounts": {
+        "ambiguity": 1
+      },
+      "newFailures": 0
+    },
+    "layer2": {
+      "status": "pass",
+      "applicable": 36,
+      "holds": 36,
+      "weak": 0,
+      "vacuous": 0,
+      "missing": 0
+    },
+    "layer3": {
+      "status": "pass",
+      "applicable": 1,
+      "pass": 1,
+      "fail": 0,
+      "inconclusive": 0,
+      "na": 0
+    },
+    "layer4": {
+      "status": "blocked",
+      "applicable": 22,
+      "caught": 15,
+      "survived": 5,
+      "unappliable": 2,
+      "na": 0
+    }
+  },
+  "rows": [
+    {
+      "rowId": "SC-01",
+      "level": "integration",
+      "risk": "med",
+      "layer1": {
+        "status": "bound",
+        "scope": "test-design/cmd/test-design-verifier",
+        "name": "TestNextIDReservesRetiredHighestAndTraceExcludesRetired"
+      },
+      "layer2": {
+        "verdict": "HOLDS",
+        "batchId": "batch-1-real",
+        "dispatchId": "dispatch-1-real"
+      },
+      "layer3": "N/A",
+      "layer4": {
+        "status": "N/A"
+      }
+    },
+    {
+      "rowId": "SC-02",
+      "level": "integration",
+      "risk": "med",
+      "layer1": {
+        "status": "bound",
+        "scope": "test-design/cmd/test-design-verifier",
+        "name": "TestTraceCreditsOneTestForThreeRows"
+      },
+      "layer2": {
+        "verdict": "HOLDS",
+        "batchId": "batch-2",
+        "dispatchId": "dispatch-2"
+      },
+      "layer3": "N/A",
+      "layer4": {
+        "status": "N/A"
+      }
+    },
+    {
+      "rowId": "SC-03",
+      "level": "integration",
+      "risk": "high",
+      "layer1": {
+        "status": "bound",
+        "scope": "test-design/cmd/test-design-verifier",
+        "name": "TestTraceCombinesTwoTestsForOneRow"
+      },
+      "layer2": {
+        "verdict": "HOLDS",
+        "batchId": "batch-2",
+        "dispatchId": "dispatch-2"
+      },
+      "layer3": "N/A",
+      "layer4": {
+        "status": "MUTATION-CAUGHT"
+      }
+    },
+    {
+      "rowId": "SC-04",
+      "level": "integration",
+      "risk": "med",
+      "layer1": {
+        "status": "bound",
+        "scope": "test-design/cmd/test-design-verifier",
+        "name": "TestTraceWithholdsCreditForSkippedContributor"
+      },
+      "layer2": {
+        "verdict": "HOLDS",
+        "batchId": "batch-2",
+        "dispatchId": "dispatch-2"
+      },
+      "layer3": "N/A",
+      "layer4": {
+        "status": "N/A"
+      }
+    },
+    {
+      "rowId": "SC-05",
+      "level": "unit",
+      "risk": "med",
+      "layer1": {
+        "status": "bound",
+        "scope": "test-design/internal/report",
+        "name": "TestDeriveLayer2BlocksWeakVacuousMissing"
+      },
+      "layer2": {
+        "verdict": "HOLDS",
+        "batchId": "batch-2-real",
+        "dispatchId": "dispatch-2-real"
+      },
+      "layer3": "N/A",
+      "layer4": {
+        "status": "N/A"
+      }
+    },
+    {
+      "rowId": "SC-06",
+      "level": "unit",
+      "risk": "med",
+      "layer1": {
+        "status": "bound",
+        "scope": "test-design/internal/coverage",
+        "name": "TestValidateLiveDecisionIncompleteForms"
+      },
+      "layer2": {
+        "verdict": "HOLDS",
+        "batchId": "batch-3",
+        "dispatchId": "dispatch-3"
+      },
+      "layer3": "N/A",
+      "layer4": {
+        "status": "N/A"
+      }
+    },
+    {
+      "rowId": "SC-07",
+      "level": "unit",
+      "risk": "med",
+      "layer1": {
+        "status": "bound",
+        "scope": "test-design/internal/live",
+        "name": "TestApplicableRowsFollowRequiredJourneys"
+      },
+      "layer2": {
+        "verdict": "HOLDS",
+        "batchId": "batch-3-real",
+        "dispatchId": "dispatch-3-real"
+      },
+      "layer3": "N/A",
+      "layer4": {
+        "status": "N/A"
+      }
+    },
+    {
+      "rowId": "SC-08",
+      "level": "integration",
+      "risk": "med",
+      "layer1": {
+        "status": "bound",
+        "scope": "test-design/cmd/test-design-verifier",
+        "name": "TestLiveHandoff_GapRowExecutesAndStaysTraceGap"
+      },
+      "layer2": {
+        "verdict": "HOLDS",
+        "batchId": "batch-3",
+        "dispatchId": "dispatch-3"
+      },
+      "layer3": "N/A",
+      "layer4": {
+        "status": "N/A"
+      }
+    },
+    {
+      "rowId": "SC-09",
+      "level": "integration",
+      "risk": "med",
+      "layer1": {
+        "status": "bound",
+        "scope": "test-design/cmd/test-design-verifier",
+        "name": "TestLiveHandoff_ResolvedProfileAcceptedAndResourceRemoved"
+      },
+      "layer2": {
+        "verdict": "HOLDS",
+        "batchId": "batch-4",
+        "dispatchId": "dispatch-4"
+      },
+      "layer3": "N/A",
+      "layer4": {
+        "status": "N/A"
+      }
+    },
+    {
+      "rowId": "SC-10",
+      "level": "smoke",
+      "risk": "med",
+      "layer1": {
+        "status": "bound",
+        "scope": "test-design/cmd/test-design-verifier",
+        "name": "TestLiveTruth_DeployedRevisionJourney"
+      },
+      "layer2": {
+        "verdict": "HOLDS",
+        "batchId": "batch-4",
+        "dispatchId": "dispatch-4"
+      },
+      "layer3": "LIVE-PASS",
+      "layer4": {
+        "status": "N/A"
+      }
+    },
+    {
+      "rowId": "SC-11",
+      "level": "integration",
+      "risk": "high",
+      "layer1": {
+        "status": "bound",
+        "scope": "test-design/cmd/test-design-verifier",
+        "name": "TestLiveTruth_ReadinessGatesBusinessAssertions"
+      },
+      "layer2": {
+        "verdict": "HOLDS",
+        "batchId": "batch-4",
+        "dispatchId": "dispatch-4"
+      },
+      "layer3": "N/A",
+      "layer4": {
+        "status": "MUTATION-CAUGHT"
+      }
+    },
+    {
+      "rowId": "SC-12",
+      "level": "integration",
+      "risk": "high",
+      "layer1": {
+        "status": "bound",
+        "scope": "test-design/cmd/test-design-verifier",
+        "name": "TestLiveTruth_OwnedCleanupAfterFailedPhase"
+      },
+      "layer2": {
+        "verdict": "HOLDS",
+        "batchId": "batch-4",
+        "dispatchId": "dispatch-4"
+      },
+      "layer3": "N/A",
+      "layer4": {
+        "status": "MUTATION-CAUGHT"
+      }
+    },
+    {
+      "rowId": "SC-13",
+      "level": "integration",
+      "risk": "high",
+      "layer1": {
+        "status": "bound",
+        "scope": "test-design/cmd/test-design-verifier",
+        "name": "TestLiveTruth_CleanupConfinedToRun"
+      },
+      "layer2": {
+        "verdict": "HOLDS",
+        "batchId": "batch-4",
+        "dispatchId": "dispatch-4"
+      },
+      "layer3": "N/A",
+      "layer4": {
+        "status": "MUTATION-UNAPPLIABLE"
+      }
+    },
+    {
+      "rowId": "SC-14",
+      "level": "unit",
+      "risk": "high",
+      "layer1": {
+        "status": "bound",
+        "scope": "test-design/cmd/test-design-verifier",
+        "name": "TestExecuteLive_SanitizedEnvOmitsUnapprovedCredential"
+      },
+      "layer2": {
+        "verdict": "HOLDS",
+        "batchId": "batch-4-real",
+        "dispatchId": "dispatch-4-real"
+      },
+      "layer3": "N/A",
+      "layer4": {
+        "status": "MUTATION-CAUGHT"
+      }
+    },
+    {
+      "rowId": "SC-15",
+      "level": "integration",
+      "risk": "high",
+      "layer1": {
+        "status": "bound",
+        "scope": "test-design/cmd/test-design-verifier",
+        "name": "TestLiveTruth_UnboundAssertionFailureBlocks"
+      },
+      "layer2": {
+        "verdict": "HOLDS",
+        "batchId": "batch-5",
+        "dispatchId": "dispatch-5"
+      },
+      "layer3": "N/A",
+      "layer4": {
+        "status": "MUTATION-CAUGHT"
+      }
+    },
+    {
+      "rowId": "SC-16",
+      "level": "unit",
+      "risk": "high",
+      "layer1": {
+        "status": "bound",
+        "scope": "test-design/cmd/test-design-verifier",
+        "name": "TestExecuteLive_MergeVerdictKeepsEarlierFailure"
+      },
+      "layer2": {
+        "verdict": "HOLDS",
+        "batchId": "batch-5-real",
+        "dispatchId": "dispatch-5-real"
+      },
+      "layer3": "N/A",
+      "layer4": {
+        "status": "MUTATION-CAUGHT"
+      }
+    },
+    {
+      "rowId": "SC-17",
+      "level": "integration",
+      "risk": "high",
+      "layer1": {
+        "status": "bound",
+        "scope": "test-design/cmd/test-design-verifier",
+        "name": "TestLiveTruth_EveryCleanupFailureRetained"
+      },
+      "layer2": {
+        "verdict": "HOLDS",
+        "batchId": "batch-5",
+        "dispatchId": "dispatch-5"
+      },
+      "layer3": "N/A",
+      "layer4": {
+        "status": "MUTATION-CAUGHT"
+      }
+    },
+    {
+      "rowId": "SC-18",
+      "level": "integration",
+      "risk": "high",
+      "layer1": {
+        "status": "bound",
+        "scope": "test-design/cmd/test-design-verifier",
+        "name": "TestLiveTruth_IncompleteOutputIsNotProof"
+      },
+      "layer2": {
+        "verdict": "HOLDS",
+        "batchId": "batch-5",
+        "dispatchId": "dispatch-5"
+      },
+      "layer3": "N/A",
+      "layer4": {
+        "status": "MUTATION-SURVIVED",
+        "sites": [
+          "site-2"
+        ]
+      }
+    },
+    {
+      "rowId": "SC-19",
+      "level": "integration",
+      "risk": "med",
+      "layer1": {
+        "status": "bound",
+        "scope": "test-design/cmd/test-design-verifier",
+        "name": "TestLiveHandoff_FinalizeAcceptsRealLiveEvidence"
+      },
+      "layer2": {
+        "verdict": "HOLDS",
+        "batchId": "batch-5",
+        "dispatchId": "dispatch-5"
+      },
+      "layer3": "N/A",
+      "layer4": {
+        "status": "N/A"
+      }
+    },
+    {
+      "rowId": "SC-20",
+      "level": "integration",
+      "risk": "high",
+      "layer1": {
+        "status": "bound",
+        "scope": "test-design/cmd/test-design-verifier",
+        "name": "TestResume_SelectsOnlyValidatedCompletions"
+      },
+      "layer2": {
+        "verdict": "HOLDS",
+        "batchId": "batch-6",
+        "dispatchId": "dispatch-6"
+      },
+      "layer3": "N/A",
+      "layer4": {
+        "status": "MUTATION-SURVIVED",
+        "sites": [
+          "site-1",
+          "site-2",
+          "site-5",
+          "site-7",
+          "site-8"
+        ]
+      }
+    },
+    {
+      "rowId": "SC-21",
+      "level": "integration",
+      "risk": "high",
+      "layer1": {
+        "status": "bound",
+        "scope": "test-design/internal/runstate",
+        "name": "TestCheckpoint_InterruptedReplacementKeepsPriorCompletion"
+      },
+      "layer2": {
+        "verdict": "HOLDS",
+        "batchId": "batch-6-real",
+        "dispatchId": "dispatch-6-real"
+      },
+      "layer3": "N/A",
+      "layer4": {
+        "status": "MUTATION-CAUGHT"
+      }
+    },
+    {
+      "rowId": "SC-22",
+      "level": "integration",
+      "risk": "high",
+      "layer1": {
+        "status": "bound",
+        "scope": "test-design/cmd/test-design-verifier",
+        "name": "TestResume_PreservesFailedOutcomes"
+      },
+      "layer2": {
+        "verdict": "HOLDS",
+        "batchId": "batch-6",
+        "dispatchId": "dispatch-6"
+      },
+      "layer3": "N/A",
+      "layer4": {
+        "status": "MUTATION-SURVIVED",
+        "sites": [
+          "site-5"
+        ]
+      }
+    },
+    {
+      "rowId": "SC-23",
+      "level": "integration",
+      "risk": "high",
+      "layer1": {
+        "status": "bound",
+        "scope": "test-design/cmd/test-design-verifier",
+        "name": "TestRestart_RecoversLiveStateBeforeRepeating"
+      },
+      "layer2": {
+        "verdict": "HOLDS",
+        "batchId": "batch-6",
+        "dispatchId": "dispatch-6"
+      },
+      "layer3": "N/A",
+      "layer4": {
+        "status": "MUTATION-CAUGHT"
+      }
+    },
+    {
+      "rowId": "SC-24",
+      "level": "integration",
+      "risk": "high",
+      "layer1": {
+        "status": "bound",
+        "scope": "test-design/cmd/test-design-verifier",
+        "name": "TestRestart_RestoresMutationWorkspaceBeforeMeasuring"
+      },
+      "layer2": {
+        "verdict": "HOLDS",
+        "batchId": "batch-6",
+        "dispatchId": "dispatch-6"
+      },
+      "layer3": "N/A",
+      "layer4": {
+        "status": "MUTATION-CAUGHT"
+      }
+    },
+    {
+      "rowId": "SC-25",
+      "level": "integration",
+      "risk": "med",
+      "layer1": {
+        "status": "bound",
+        "scope": "test-design/cmd/test-design-verifier",
+        "name": "TestReuse_MatchesCompleteInputsBeforeReuse"
+      },
+      "layer2": {
+        "verdict": "HOLDS",
+        "batchId": "batch-7",
+        "dispatchId": "dispatch-7"
+      },
+      "layer3": "N/A",
+      "layer4": {
+        "status": "N/A"
+      }
+    },
+    {
+      "rowId": "SC-26",
+      "level": "integration",
+      "risk": "high",
+      "layer1": {
+        "status": "bound",
+        "scope": "test-design/cmd/test-design-verifier",
+        "name": "TestReuse_IsolatedRepairInvalidatesOnlyItsGroup"
+      },
+      "layer2": {
+        "verdict": "HOLDS",
+        "batchId": "batch-7",
+        "dispatchId": "dispatch-7"
+      },
+      "layer3": "N/A",
+      "layer4": {
+        "status": "MUTATION-CAUGHT"
+      }
+    },
+    {
+      "rowId": "SC-27",
+      "level": "integration",
+      "risk": "high",
+      "layer1": {
+        "status": "bound",
+        "scope": "test-design/cmd/test-design-verifier",
+        "name": "TestReuse_RejectsAlteredRetainedBytes"
+      },
+      "layer2": {
+        "verdict": "HOLDS",
+        "batchId": "batch-7-real",
+        "dispatchId": "dispatch-7-real"
+      },
+      "layer3": "N/A",
+      "layer4": {
+        "status": "MUTATION-SURVIVED",
+        "sites": [
+          "site-4"
+        ]
+      }
+    },
+    {
+      "rowId": "SC-28",
+      "level": "integration",
+      "risk": "high",
+      "layer1": {
+        "status": "bound",
+        "scope": "test-design/cmd/test-design-verifier",
+        "name": "TestReuse_PreservesOriginalProvenanceInReport"
+      },
+      "layer2": {
+        "verdict": "HOLDS",
+        "batchId": "batch-7",
+        "dispatchId": "dispatch-7"
+      },
+      "layer3": "N/A",
+      "layer4": {
+        "status": "MUTATION-CAUGHT"
+      }
+    },
+    {
+      "rowId": "SC-29",
+      "level": "integration",
+      "risk": "high",
+      "layer1": {
+        "status": "bound",
+        "scope": "test-design/cmd/test-design-verifier",
+        "name": "TestReuse_NewRevisionGetsFreshSuiteAndLive"
+      },
+      "layer2": {
+        "verdict": "HOLDS",
+        "batchId": "batch-8-real",
+        "dispatchId": "dispatch-8-real"
+      },
+      "layer3": "N/A",
+      "layer4": {
+        "status": "MUTATION-CAUGHT"
+      }
+    },
+    {
+      "rowId": "SC-30",
+      "level": "integration",
+      "risk": "high",
+      "layer1": {
+        "status": "bound",
+        "scope": "test-design/cmd/test-design-verifier",
+        "name": "TestPublication_RetriesFromRetainedEvidence"
+      },
+      "layer2": {
+        "verdict": "HOLDS",
+        "batchId": "batch-9-real",
+        "dispatchId": "dispatch-9-real"
+      },
+      "layer3": "N/A",
+      "layer4": {
+        "status": "MUTATION-UNAPPLIABLE"
+      }
+    },
+    {
+      "rowId": "SC-31",
+      "level": "integration",
+      "risk": "high",
+      "layer1": {
+        "status": "bound",
+        "scope": "test-design/cmd/test-design-verifier",
+        "name": "TestPublication_RecoversOnlyProvenOwnArtifacts"
+      },
+      "layer2": {
+        "verdict": "HOLDS",
+        "batchId": "batch-9",
+        "dispatchId": "dispatch-9"
+      },
+      "layer3": "N/A",
+      "layer4": {
+        "status": "MUTATION-SURVIVED",
+        "sites": [
+          "site-1",
+          "site-4"
+        ]
+      }
+    },
+    {
+      "rowId": "SC-32",
+      "level": "integration",
+      "risk": "high",
+      "layer1": {
+        "status": "bound",
+        "scope": "test-design/cmd/test-design-verifier",
+        "name": "TestPublication_CommitKeepsMeasuredRevision"
+      },
+      "layer2": {
+        "verdict": "HOLDS",
+        "batchId": "batch-9",
+        "dispatchId": "dispatch-9"
+      },
+      "layer3": "N/A",
+      "layer4": {
+        "status": "MUTATION-CAUGHT"
+      }
+    },
+    {
+      "rowId": "SC-33",
+      "level": "integration",
+      "risk": "med",
+      "layer1": {
+        "status": "bound",
+        "scope": "test-design/cmd/test-design-verifier",
+        "name": "TestReuse_LegacyRecordsAreHistoricalNotReusable"
+      },
+      "layer2": {
+        "verdict": "HOLDS",
+        "batchId": "batch-10-real",
+        "dispatchId": "dispatch-10-real"
+      },
+      "layer3": "N/A",
+      "layer4": {
+        "status": "N/A"
+      }
+    },
+    {
+      "rowId": "SC-34",
+      "level": "unit",
+      "risk": "med",
+      "layer1": {
+        "status": "bound",
+        "scope": "test-design/internal/report",
+        "name": "TestLayer2_CompleteReviewFinalizesWithoutCanaryBookkeeping"
+      },
+      "layer2": {
+        "verdict": "HOLDS",
+        "batchId": "batch-11",
+        "dispatchId": "dispatch-11"
+      },
+      "layer3": "N/A",
+      "layer4": {
+        "status": "N/A"
+      }
+    },
+    {
+      "rowId": "SC-35",
+      "level": "unit",
+      "risk": "high",
+      "layer1": {
+        "status": "bound",
+        "scope": "test-design/internal/report",
+        "name": "TestLayer4_HighRiskObligationSurvivesCanaryRemoval"
+      },
+      "layer2": {
+        "verdict": "HOLDS",
+        "batchId": "batch-11-real",
+        "dispatchId": "dispatch-11-real"
+      },
+      "layer3": "N/A",
+      "layer4": {
+        "status": "MUTATION-CAUGHT"
+      }
+    },
+    {
+      "rowId": "SC-36",
+      "level": "integration",
+      "risk": "med",
+      "layer1": {
+        "status": "bound",
+        "scope": "test-design/cmd/test-design-verifier",
+        "name": "TestOrchestration_SummaryMatchesRetainedWork"
+      },
+      "layer2": {
+        "verdict": "HOLDS",
+        "batchId": "batch-11",
+        "dispatchId": "dispatch-11"
+      },
+      "layer3": "N/A",
+      "layer4": {
+        "status": "N/A"
+      }
+    }
+  ],
+  "batches": [
+    {
+      "batchId": "batch-1",
+      "dispatchId": "dispatch-1",
+      "runId": "run-2026-09-10-0001",
+      "rows": [
+        "SC-01"
+      ],
+      "canary": {
+        "rowId": "SC-01",
+        "kind": "synthesized",
+        "weakening": "boundary loosened: `unprefixed.Next != 3` replaced with `unprefixed.Next < 2`, so a NextID that ignores the retired SC-02 (returning 2) still passes",
+        "caught": true
+      },
+      "voided": false,
+      "verdicts": []
+    },
+    {
+      "batchId": "batch-1-real",
+      "dispatchId": "dispatch-1-real",
+      "runId": "run-2026-09-10-0001",
+      "rows": [
+        "SC-01"
+      ],
+      "inheritsFrom": "batch-1",
+      "voided": false,
+      "verdicts": [
+        {
+          "rowId": "SC-01",
+          "verdict": "HOLDS",
+          "reason": "fixture registers SC-01 active and SC-02 retired (in the ## Retired list, so `claimOwner` marks it `Active: false`); `Registry.NextID(\"\")` currently scans all owners and returns 3. Skipping inactive owners drops SC-02, highest becomes 1, next-id returns 2, and `if unprefixed.Next != 3 { t.Errorf(...) }` at cmd/test-design-verifier/nextidtrace_test.go:107 flips. The unprefixed area still appears in `Areas()` (which counts retired IDs), so the preceding `entryFor` lookup does not mask the failure."
+        }
+      ]
+    },
+    {
+      "batchId": "batch-2",
+      "dispatchId": "dispatch-2",
+      "runId": "run-2026-09-10-0001",
+      "rows": [
+        "SC-02",
+        "SC-03",
+        "SC-04",
+        "SC-05"
+      ],
+      "canary": {
+        "rowId": "SC-05",
+        "kind": "synthesized",
+        "weakening": "blocking-outcome assertions dropped: wantVerdict(BLOCKED) and wantReason(layer 2, SC-03, verdict) removed; the copy asserts only the recorded Layer2.Verdict string (copied from the batch regardless of the blocking branch) plus a non-existent Layer2.Reason field, so removing the weak/vacuous/missing blocking branch still passes",
+        "caught": true
+      },
+      "voided": false,
+      "verdicts": [
+        {
+          "rowId": "SC-02",
+          "verdict": "HOLDS",
+          "reason": "restoring the len(activeIDs) > 2 rejection drops the one site citing SC-01..SC-03 with a continue, so trace.Join emits no bindings: `len(ev.RowResults) != 3` becomes 0 and t.Fatalf fires; `len(ev.Findings) != 0` also flips (three \"no test cites\" gaps plus the overclaim)"
+        },
+        {
+          "rowId": "SC-03",
+          "verdict": "HOLDS",
+          "reason": "restoring the default multi-site branch turns each two-site row into an ambiguity finding with no RowResult; the `f.Kind == \"ambiguity\"` loop errors and mustRowResult(SC-01) fails fatally on 0 results, so the passed/failed collapse and contributor assertions never even run"
+        },
+        {
+          "rowId": "SC-04",
+          "verdict": "HOLDS",
+          "reason": "under the mutation SC-01 collapses over [passed, passed] instead of [skipped, passed], so `skipped.Status != \"skipped\"` (want skipped, got passed) flips; the SC-02 row assertions survive but the SC-01 status assertion alone binds the row"
+        }
+      ]
+    },
+    {
+      "batchId": "batch-2-real",
+      "dispatchId": "dispatch-2-real",
+      "runId": "run-2026-09-10-0001",
+      "rows": [
+        "SC-05"
+      ],
+      "inheritsFrom": "batch-2",
+      "voided": false,
+      "verdicts": [
+        {
+          "rowId": "SC-05",
+          "verdict": "HOLDS",
+          "reason": "greenInputs() is all-green (PASS, zero reasons); the test rewrites batch-2's SC-03 verdict to WEAK/VACUOUS/MISSING and asserts a layer-2 reason keyed {layer:\"2\", row:\"SC-03\", code:<verdict>} whose Detail carries the critic reason, plus overall BLOCKED. Removing the `case \"WEAK\", \"VACUOUS\", \"MISSING\"` branch in deriveLayer2 (internal/report/verdict.go:280-285) either lets the verdict fall through to the HOLDS no-op (report becomes PASS, wantVerdict fatals) or into the default branch (code becomes \"invalid-verdict\" with a different detail, so wantReason fatals and the Detail check fails). No variant of the mutation survives all three assertions."
+        }
+      ]
+    },
+    {
+      "batchId": "batch-3",
+      "dispatchId": "dispatch-3",
+      "runId": "run-2026-09-10-0001",
+      "rows": [
+        "SC-06",
+        "SC-07",
+        "SC-08"
+      ],
+      "canary": {
+        "rowId": "SC-07",
+        "kind": "synthesized",
+        "weakening": "exact expected-set string comparison replaced by strings.Contains(got, \"SC-2/smoke\") containment for every positive case, so a smoke/e2e-only gate that ignores journeys still passes",
+        "caught": true
+      },
+      "voided": false,
+      "verdicts": [
+        {
+          "rowId": "SC-06",
+          "verdict": "HOLDS",
+          "reason": "the \"no section at all\" case asserts a *LiveDecisionError with Code \"missing\" for a source whose LiveDecision is nil; defaulting an absent/incomplete decision to N/A makes ValidateLiveDecision return nil, errors.As fails and the subtest fatals (the \"not-applicable without a reason\" case flips the same way for the incomplete form)"
+        },
+        {
+          "rowId": "SC-08",
+          "verdict": "HOLDS",
+          "reason": "handoffPlan binds SC-02, the row layer 1 reports as a gap (gaps map still computed at executelive.go:190); reinstating the gap-row-bound rejection in Plan.Validate makes execute-live exit non-OK, so runLivePipeline's execute-live exit-code Fatalf fires before the LIVE-PASS/Layer1Gap assertions are ever reached"
+        }
+      ]
+    },
+    {
+      "batchId": "batch-3-real",
+      "dispatchId": "dispatch-3-real",
+      "runId": "run-2026-09-10-0001",
+      "rows": [
+        "SC-07"
+      ],
+      "inheritsFrom": "batch-3",
+      "voided": false,
+      "verdicts": [
+        {
+          "rowId": "SC-07",
+          "verdict": "HOLDS",
+          "reason": "the mutation (keep only the smoke/e2e level gate, dropping `journeyed[row.ID] ||` at applicable.go:52) makes the \"required journeys widen the set\" case return \"SC-2/smoke, SC-4/e2e\" instead of the asserted \"SC-1/unit, SC-2/smoke, SC-3/integration, SC-4/e2e\" (SC-1 unit and SC-3 integration disappear), and the \"retired and unknown\" case loses SC-3/integration too; both exact-string comparisons flip. The retired SC-90 and unknown SC-77 in journeys are also checked against the exact output, so the \"not credited\" half is bound as well."
+        }
+      ]
+    },
+    {
+      "batchId": "batch-4",
+      "dispatchId": "dispatch-4",
+      "runId": "run-2026-09-10-0001",
+      "rows": [
+        "SC-09",
+        "SC-10",
+        "SC-11",
+        "SC-12",
+        "SC-13",
+        "SC-14"
+      ],
+      "canary": {
+        "rowId": "SC-14",
+        "kind": "synthesized",
+        "weakening": "absence assertions replaced by presence assertions: the step reads the allowlisted PATH (exit 0) instead of the withheld canary (exit 1), the exact `len(run.env) == 1` check becomes a ContainsFunc presence check for PATH=, and the empty-allowlist case is dropped, so returning the complete parent environment still passes",
+        "caught": true
+      },
+      "voided": false,
+      "verdicts": [
+        {
+          "rowId": "SC-09",
+          "verdict": "HOLDS",
+          "reason": "the mutation makes execute-live's ValidateResolved demand a literal {run-id} in resourcePrefixes; the prepared descriptor holds \"scratch-handoff-resource\", so execute-live returns descriptor-invalid (nonzero) and runLivePipeline's \"execute-live exit code\" Fatalf fires before any later assertion"
+        },
+        {
+          "rowId": "SC-10",
+          "verdict": "HOLDS",
+          "reason": "omitting the verifier start loop leaves ev.StartSteps empty, so the first subtest's `len(ev.StartSteps) != 1` Fatalf fires; if instead recipe deploy skips over an existing root, the second subtest's `StartSteps[0].Result != \"fail\"` Fatalf and the Decisive-contains-root check flip, since the stale deployment is then reused"
+        },
+        {
+          "rowId": "SC-11",
+          "verdict": "HOLDS",
+          "reason": "with walkthroughRan forced true the plan step runs after the failed start/health phases, so requireBusinessNeverRan's `len(ev.Steps) != 0` and the phase-log \"check\" line assertions fail in the first four subtests, and phaseRow's verdict is no longer LIVE-INCONCLUSIVE"
+        },
+        {
+          "rowId": "SC-12",
+          "verdict": "HOLDS",
+          "reason": "an early return before the cleanup section skips both plan-cleanup and runProfileCleanup: subtest 1's UnboundFailures no longer holds the plan-cleanup entry (DeepEqual fails), and requireOwnedCleanup's requireAbsent on the run root, the CleanupOK=true checks and the \"cleanup\" phase-log line all flip"
+        },
+        {
+          "rowId": "SC-13",
+          "verdict": "HOLDS",
+          "reason": "the sentinel sits at redesignRunRoot(runA)+\"-sentinel\", i.e. under the exact prefix a broadened selector would sweep; requireSentinelIntact's os.Stat(keep) fails after run A's cleanup, and a wider prefix also removes run B's state.json/service.sock"
+        }
+      ]
+    },
+    {
+      "batchId": "batch-4-real",
+      "dispatchId": "dispatch-4-real",
+      "runId": "run-2026-09-10-0001",
+      "rows": [
+        "SC-14"
+      ],
+      "inheritsFrom": "batch-4",
+      "voided": false,
+      "verdicts": [
+        {
+          "rowId": "SC-14",
+          "verdict": "HOLDS",
+          "reason": "the mutation (SanitizedEnv or newLiveRun returning the full os.Environ() instead of the allowlist projection) puts every parent variable into run.env, which is exactly what cmd/test-design-verifier/executelive.go:707 hands to the child; `len(run.env) != 1 || !HasPrefix(run.env[0], \"PATH=\")` flips immediately (os.Environ() under t.Setenv holds PATH, HOME, the canary and more), `len(empty.env) != 0` flips for the empty allowlist, and downstream `/usr/bin/printenv LIVE_FIXTURE_CANARY` then exits 0 with the canary on stdout, so `run.verdicts[\"SC-1\"] != verdictPass`, `ExitStatus != 1`, and assertNoCanaryUnder all fail as well — this is real state (the env slice and captured artifacts), not a mock"
+        }
+      ]
+    },
+    {
+      "batchId": "batch-5",
+      "dispatchId": "dispatch-5",
+      "runId": "run-2026-09-10-0001",
+      "rows": [
+        "SC-15",
+        "SC-16",
+        "SC-17",
+        "SC-18",
+        "SC-19"
+      ],
+      "canary": {
+        "rowId": "SC-16",
+        "kind": "synthesized",
+        "weakening": "order-sensitive table cases removed: [fail,pass], [fail,inconclusive] and [inconclusive,pass] replaced by [pass,pass], [pass,inconclusive] and [fail], so every expected verdict equals the last step's verdict and a last-write-wins merge still passes",
+        "caught": true
+      },
+      "voided": false,
+      "verdicts": [
+        {
+          "rowId": "SC-15",
+          "verdict": "HOLDS",
+          "reason": "asserts `reflect.DeepEqual(ev.UnboundFailures, want)` for a step with no SC bindings (and for plan-cleanup, start, health); `recordUnboundFailure` is called only from the `len(step.SCBindings) == 0` branch of `runPlanStep` (executelive.go:593-598) and from `runPhaseCommand`, so confining it to the bindings loop leaves `UnboundFailures` empty and the DeepEqual fails; the finalize gate at executelive.go:388 would also stop producing BLOCKED, flipping the verdict assertion too"
+        },
+        {
+          "rowId": "SC-17",
+          "verdict": "HOLDS",
+          "reason": "first subtest has cleanup command 1 fail and command 2 (the checker) pass, then asserts `requireCleanupState(t, execOut, ev, false, true)`; computing success solely from the last command makes `failed=false` and `cleanupOK=true` in `runCleanupCommands`/`provedRemoval`, so both the op-output and evidence checks in that helper flip (and the PARTIAL/`live-cleanup-failed` finalize assertions with them)"
+        },
+        {
+          "rowId": "SC-18",
+          "verdict": "HOLDS",
+          "reason": "asserts `len(ev.Steps) == 2` (fatal) and `requireExecutionError` for step[3..6]; `exec` only records an error and returns nil `res` when `ExecuteStep` errors (executelive.go:711-714), so converting timeout/limit/interrupt/capture errors to completed results reduces those steps into `ev.Steps` (count > 2) and drops the execution errors; SC-03's `exit-code -1` predicate would also settle to LIVE-PASS instead of the asserted LIVE-INCONCLUSIVE"
+        },
+        {
+          "rowId": "SC-19",
+          "verdict": "HOLDS",
+          "reason": "reads the evidence file back and asserts `ev.RepoCommit == subject.head`; the value comes from `RepoCommit: st.RepoCommit` at executelive.go:283 in the serialized `liveEvidence`, so omitting it decodes as \"\" and the final `t.Errorf` fires"
+        }
+      ]
+    },
+    {
+      "batchId": "batch-5-real",
+      "dispatchId": "dispatch-5-real",
+      "runId": "run-2026-09-10-0001",
+      "rows": [
+        "SC-16"
+      ],
+      "inheritsFrom": "batch-5",
+      "voided": false,
+      "verdicts": [
+        {
+          "rowId": "SC-16",
+          "verdict": "HOLDS",
+          "reason": "the \"failure then success\" subcase asserts run.verdicts[\"SC-1\"] == LIVE-FAIL after [failing, passing]; with mergeVerdict replaced by unconditional last-write-wins the passing step's LIVE-PASS overwrites the earlier LIVE-FAIL and t.Errorf fires (the \"failure then inconclusive\" subcase flips the same way to LIVE-INCONCLUSIVE). Both steps do reach mergeVerdict: execute with an empty Profile has no start/health commands, so walkthroughRan is true and every pl.Steps entry goes through runPlanStep(..., true) at executelive.go:550 → mergeVerdict at :611."
+        }
+      ]
+    },
+    {
+      "batchId": "batch-6",
+      "dispatchId": "dispatch-6",
+      "runId": "run-2026-09-10-0001",
+      "rows": [
+        "SC-20",
+        "SC-21",
+        "SC-22",
+        "SC-23",
+        "SC-24"
+      ],
+      "canary": {
+        "rowId": "SC-21",
+        "kind": "synthesized",
+        "weakening": "interruption seam removed: the checkpointWrite override that fails mid-write and the interrupted Start g2 are deleted, leaving only happy-path persistence assertions that a direct truncating write also satisfies",
+        "caught": true
+      },
+      "voided": false,
+      "verdicts": [
+        {
+          "rowId": "SC-20",
+          "verdict": "HOLDS",
+          "reason": "group B is asserted `started` (line 65) while its record exists but is uncompleted, and after the evidence byte is flipped group A is asserted `invalid` with reason artifact-digest-mismatch:evidence plus review.complete=false (lines 146-161); accepting record existence flips the B assertion, accepting any unvalidated completion flips the A ones"
+        },
+        {
+          "rowId": "SC-22",
+          "verdict": "HOLDS",
+          "reason": "ledgerRecord reads out.Records (the ledger verbatim) and asserts Outcome == blocked/survived/environmental (line 308) and Counts.Failed == 3 (line 319); restoring completed records as success flips both, since IsFailedOutcome would then count zero"
+        },
+        {
+          "rowId": "SC-23",
+          "verdict": "HOLDS",
+          "reason": "skipping recovery makes r.recover false so recovery() returns nil, hitting the `ev.Recovery == nil` Fatalf (line 430); the phase-log assertion also flips because the first `cleanup` before the second `deploy` disappears (line 452-455)"
+        },
+        {
+          "rowId": "SC-24",
+          "verdict": "HOLDS",
+          "reason": "requireRestoredWorkspace asserts empty `git status --ignored` and residue.txt absent after recover-mutation (line 625); resuming from loaded state without RestoreAll leaves the killed site's mutant and residue in place, and the vanished-workspace subtest's `Recreated` / distinct-path assertions (lines 647-651) and the broken-gitdir `restore-failed` refusal (line 682) flip as well"
+        }
+      ]
+    },
+    {
+      "batchId": "batch-6-real",
+      "dispatchId": "dispatch-6-real",
+      "runId": "run-2026-09-10-0001",
+      "rows": [
+        "SC-21"
+      ],
+      "inheritsFrom": "batch-6",
+      "voided": false,
+      "verdicts": [
+        {
+          "rowId": "SC-21",
+          "verdict": "HOLDS",
+          "reason": "the seam writes half the bytes then returns `interrupted`; with a direct O_TRUNC write over ledger.json the checkpoint is left holding a truncated JSON prefix, so `fresh.Load()` returns the \"malformed JSON\" error from `loadLedger` and `t.Fatalf(\"Load after the interrupted replacement...\")` fires (a mutant that bypasses `checkpointWrite` entirely instead trips the `!errors.Is(err, interrupted)` Fatalf at the g2 Start). Either way the assertion that the prior completed g1 record is still readable flips."
+        }
+      ]
+    },
+    {
+      "batchId": "batch-7",
+      "dispatchId": "dispatch-7",
+      "runId": "run-2026-09-10-0001",
+      "rows": [
+        "SC-25",
+        "SC-26",
+        "SC-27",
+        "SC-28"
+      ],
+      "canary": {
+        "rowId": "SC-27",
+        "kind": "synthesized",
+        "weakening": "tamper steps removed: no artifact is truncated, deleted or rewritten between adoption and publication and no refusal (artifact-digest-mismatch / artifact-missing / reused-artifact-changed) is asserted; the copy asserts only untampered adoption, file presence and a transcript digest that trivially equals the recorded one, so trusting path/envelope without re-hashing still passes",
+        "caught": true
+      },
+      "voided": false,
+      "verdicts": [
+        {
+          "rowId": "SC-25",
+          "verdict": "HOLDS",
+          "reason": "\"unchanged\" asserts G-orders/G-pay refused \"manifest-incomplete:unidentifiable-read:/tmp/outside.txt\" and \"manifest-incomplete:reads-unrecorded\" with counts {Reused:2,Refused:2}, and the claim / exempt-read / runner / toolchain / policy / no-policy cases each expect a Mismatch-derived refusal (claim-changed:SC-11, context-changed:<notes>, runner-changed, toolchain-changed, policy-changed, policy-unspecified) while the test-body bytes are untouched; comparing only TestSourceSHA256 adopts every one of those, so proofRefused's Reason/Reused checks flip"
+        },
+        {
+          "rowId": "SC-26",
+          "verdict": "HOLDS",
+          "reason": "\"production\" (orders/orders.go, no manifest owner) and \"unknown\" (shipping/helpers_test.go, no owner) both call proofEveryRecordRefused, which demands all 3 groups and all 3 rows refused with the widened reason and Counts{Refused:6}; restricting invalidation to the edited file's group leaves SC-10/SC-07 and the non-owning groups adopted, so the Refused:6 count and the per-decision Reason checks flip"
+        },
+        {
+          "rowId": "SC-28",
+          "verdict": "HOLDS",
+          "reason": "asserts batch.RunID == prior.runID, ref.PriorRunID/PriorRepoCommit == prior.runID/prior.commit (while rep.HeadCommit is expected to be prior.headAfter, a different commit), and loads the published review/mutation copies asserting art.RunID/art.RepoCommit and ev.RunID equal the prior run; stamping the envelope with the consuming run and HEAD flips those (or fails LoadReviewArtifact's digest check → Fatalf)"
+        }
+      ]
+    },
+    {
+      "batchId": "batch-7-real",
+      "dispatchId": "dispatch-7-real",
+      "runId": "run-2026-09-10-0001",
+      "rows": [
+        "SC-27"
+      ],
+      "inheritsFrom": "batch-7",
+      "voided": false,
+      "verdicts": [
+        {
+          "rowId": "SC-27",
+          "verdict": "HOLDS",
+          "reason": "`readyRefused(t, out.Review, readyMarkerGroup, \"artifact-digest-mismatch:\"+artifactEvidence)` binds to `runstate.Verify` re-hashing the retained bytes (prod-diff lines 10603-10609, called from the review-group refusal at 6204); trusting the envelope instead makes the truncated artifact adopt or refuse under a different reason, and the exact-reason compare flips. Independently, in \"tampered-at-finalize\" the `cliErr == nil` Fatalf and the `codeReusedArtifactChanged` check bind to `report.VerifyEvidenceDigest` in `stageReusedArtifacts` (line 2050) re-hashing the staged copy after the between-hook appends a byte; without it finalize publishes and both assertions fail. The trailing SHA comparisons survive, since the transcript ref carries the recorded digest and the bytes are restored, but the earlier assertions already bite."
+        }
+      ]
+    },
+    {
+      "batchId": "batch-8",
+      "dispatchId": "dispatch-8",
+      "runId": "run-2026-09-10-0001",
+      "rows": [
+        "SC-29"
+      ],
+      "canary": {
+        "rowId": "SC-29",
+        "kind": "synthesized",
+        "weakening": "trace/live freshness assertions dropped: out.Trace/out.Live never-adopted checks, the resumed live-attempt pending check, and the BLOCKED verdict with red / LIVE-FAIL reasons are removed, leaving only review/mutation adoption decisions and headCommit checks that a reuse adopting prior trace or live results still satisfies",
+        "caught": true
+      },
+      "voided": false,
+      "verdicts": []
+    },
+    {
+      "batchId": "batch-8-real",
+      "dispatchId": "dispatch-8-real",
+      "runId": "run-2026-09-10-0001",
+      "rows": [
+        "SC-29"
+      ],
+      "inheritsFrom": "batch-8",
+      "voided": false,
+      "verdicts": [
+        {
+          "rowId": "SC-29",
+          "verdict": "HOLDS",
+          "reason": "\"isolated\" asserts out.Trace.Reused==false with Reason \"fresh-required\" and the same for out.Live (reuse.go:251-252 are the hardcoded decisions the mutation would replace with adopted prior records), plus that resume still reports the live attempt as required with status none and pending never-started; letting reuse adopt run A's trace/live across the revision flips the Trace/Live checks directly and the resume checks if the adoption lands in the ledger. \"production\" further pins trace/live repoCommit to headB2, LIVE-FAIL, and refuses run A's live evidence path at finalize with envelope-not-accepted, so a prior pass cannot mask the failure at the new target."
+        }
+      ]
+    },
+    {
+      "batchId": "batch-9",
+      "dispatchId": "dispatch-9",
+      "runId": "run-2026-09-10-0001",
+      "rows": [
+        "SC-30",
+        "SC-31",
+        "SC-32"
+      ],
+      "canary": {
+        "rowId": "SC-30",
+        "kind": "synthesized",
+        "weakening": "retry path removed: the destination-only repair and the second finalize run are deleted along with the Recovered / Publication completed / verification-records-unchanged assertions, so the copy asserts only the refusal shape and never observes whether the retry repeats verification work",
+        "caught": true
+      },
+      "voided": false,
+      "verdicts": [
+        {
+          "rowId": "SC-31",
+          "verdict": "HOLDS",
+          "reason": "ignored-sentinel-survives: recursive deletion of transcripts/<runC>/ removes scratch.log, so readyDigest(t, full) after the re-finalize hits t.Fatalf on the missing file. unrelated-dirty-refused: a repository reset wipes notes.txt and the go.mod edit, so finalize is accepted and pubProofRefusal's t.Fatalf(\"finalize was accepted\") fires; the noteDigest / go.mod digest-preservation checks flip as well."
+        },
+        {
+          "rowId": "SC-32",
+          "verdict": "HOLDS",
+          "reason": "after committing only the published paths (HEAD = afterPublish), the test asserts out.MeasuredCommit == measured, the published report's HeadCommit == measured, and state.Publication.MeasuredCommit == measured; choosing publication HEAD as the measurement target makes all three equal afterPublish != measured. The later \"head-moved\" refusal after the ready/version.go commit would also be accepted instead of refused, tripping pubProofRefusal's t.Fatalf."
+        }
+      ]
+    },
+    {
+      "batchId": "batch-9-real",
+      "dispatchId": "dispatch-9-real",
+      "runId": "run-2026-09-10-0001",
+      "rows": [
+        "SC-30"
+      ],
+      "inheritsFrom": "batch-9",
+      "voided": false,
+      "verdicts": [
+        {
+          "rowId": "SC-30",
+          "verdict": "HOLDS",
+          "reason": "after the publish-failed refusal it asserts pubProofVerificationRecords(state) equals beforeA (raw ledger Seq/Kind/ID/Status/Outcome, publish phase excluded) and that the rerun pubProofFinalize exits OK with VerdictPass and records still equal to beforeA; all-layer invalidation either rewrites/appends verification records (line 43/65 flip) or leaves review/mutation pending so finalize.go pendingRefusal refuses the rerun and pubProofFinalize t.Fatalf fires — no path survives it"
+        }
+      ]
+    },
+    {
+      "batchId": "batch-10",
+      "dispatchId": "dispatch-10",
+      "runId": "run-2026-09-10-0001",
+      "rows": [
+        "SC-33"
+      ],
+      "canary": {
+        "rowId": "SC-33",
+        "kind": "synthesized",
+        "weakening": "refusal assertions dropped: proofRefused(...) with the legacy-no-manifest / manifest-version-unsupported reason and the Refused/Reused counts check replaced by a bare presence check that a decision for G-ship exists, so an admission that synthesizes a manifest and adopts the legacy record still passes",
+        "caught": true
+      },
+      "voided": false,
+      "verdicts": []
+    },
+    {
+      "batchId": "batch-10-real",
+      "dispatchId": "dispatch-10-real",
+      "runId": "run-2026-09-10-0001",
+      "rows": [
+        "SC-33"
+      ],
+      "inheritsFrom": "batch-10",
+      "voided": false,
+      "verdicts": [
+        {
+          "rowId": "SC-33",
+          "verdict": "HOLDS",
+          "reason": "The `no-manifest` subtest drives `readPriorGroup` (cmd/test-design-verifier/reuse.go:493-495, 511-514) with `inputs.Manifest == nil`; constructing a manifest from current inputs instead of refusing would either adopt G-ship (repo unchanged since the prior run) or refuse it under a different reason, and `proofRefused` asserts `Reason == \"legacy-no-manifest\"` exactly with `Reused == false`, so that assertion flips; on adoption `Counts.Refused != 1 || Counts.Reused != 0` and the `resumed.Review.Uncovered` contains-ship-rows check flip as well."
+        }
+      ]
+    },
+    {
+      "batchId": "batch-11",
+      "dispatchId": "dispatch-11",
+      "runId": "run-2026-09-10-0001",
+      "rows": [
+        "SC-34",
+        "SC-35",
+        "SC-36"
+      ],
+      "canary": {
+        "rowId": "SC-35",
+        "kind": "synthesized",
+        "weakening": "obligation assertions dropped: the layer4Applicable(active, nil) high-risk check and the \"missing\" subtest (nil Mutations must refuse missing-verdict naming SC-02) are removed; only the survived/caught outcome subtests remain, which pass with explicitly supplied mutation entries even when r.Risk == \"high\" no longer makes the row applicable",
+        "caught": true
+      },
+      "voided": false,
+      "verdicts": [
+        {
+          "rowId": "SC-34",
+          "verdict": "HOLDS",
+          "reason": "greenBatches() carries neither a canary nor an inheritsFrom (the Batch struct no longer has those fields); a reinstated validateCanaryBookkeeping refuses the first canary-free batch with CodeCanaryBookkeeping, Compute returns the error, and mustCompute t.Fatalf's before wantVerdict(PASS) is even reached"
+        },
+        {
+          "rowId": "SC-36",
+          "verdict": "HOLDS",
+          "reason": "removing `if adopted { item.Source = report.WorkReused }` in assembleRun makes every run-B item fresh; rep.Work.Counts comes from WorkCountsOf(run.work) so it becomes {Fresh:9 Reused:0 Failed:0 Incomplete:1} and the `repB.Work.Counts != want{3,6,0,1}` assertion fails, freshB no longer DeepEquals logB.entries, and `greet.Source != report.WorkReused` t.Fatalf's"
+        }
+      ]
+    },
+    {
+      "batchId": "batch-11-real",
+      "dispatchId": "dispatch-11-real",
+      "runId": "run-2026-09-10-0001",
+      "rows": [
+        "SC-35"
+      ],
+      "inheritsFrom": "batch-11",
+      "voided": false,
+      "verdicts": [
+        {
+          "rowId": "SC-35",
+          "verdict": "HOLDS",
+          "reason": "the top-level direct assertion `layer4Applicable(active, nil)` wants exactly [SC-02]; with `r.Risk == \"high\"` removed and no supplied entries, it returns nil (len 0), so t.Fatalf fires. Independently, the \"missing\" subtest sets Mutations=nil and expects a CodeMissingVerdict RefusalError naming SC-02 — under the mutation validateLayer4 (internal/report/validate.go:327-363) has an empty mutRows, Compute returns a report instead of an error, and errors.As fails."
+        }
+      ]
+    }
+  ],
+  "transcripts": [
+    {
+      "path": "docs/superpowers/coverage/transcripts/run-2026-09-10-0001/live-evidence.json",
+      "sha256": "68c5ddf301771e5750d6ce782e2ecf971ad448b2adef686fd5976434e4ced765"
+    },
+    {
+      "path": "docs/superpowers/coverage/transcripts/run-2026-09-10-0001/mutation-SC-03.json",
+      "sha256": "fa1dff087933286bc2c01420af30a45f5c9e587d00e3d217832a72dd09033df2"
+    },
+    {
+      "path": "docs/superpowers/coverage/transcripts/run-2026-09-10-0001/mutation-SC-11.json",
+      "sha256": "cf8543a90c7dc7757825007888bfbbdb302b1d6fbd3c82dad939b39b0ed6bb4c"
+    },
+    {
+      "path": "docs/superpowers/coverage/transcripts/run-2026-09-10-0001/mutation-SC-12.json",
+      "sha256": "f97901b63084dc94b107bab21dd274f31da4a9523e5de7a614d5037a27404dc3"
+    },
+    {
+      "path": "docs/superpowers/coverage/transcripts/run-2026-09-10-0001/mutation-SC-14.json",
+      "sha256": "4cb29d5106005002039aa16bd3e92a3fc2b3645b68c93b8ffc9e5b11eead4e86"
+    },
+    {
+      "path": "docs/superpowers/coverage/transcripts/run-2026-09-10-0001/mutation-SC-15.json",
+      "sha256": "a5557b2213f2072cc89aa3f387406b298658bcd96ba297a24897b471fbe5e220"
+    },
+    {
+      "path": "docs/superpowers/coverage/transcripts/run-2026-09-10-0001/mutation-SC-16.json",
+      "sha256": "8aeb2c5e777e9a8e074fa9d647de40bbea961183445780fcc43f19ab18f5cea4"
+    },
+    {
+      "path": "docs/superpowers/coverage/transcripts/run-2026-09-10-0001/mutation-SC-17.json",
+      "sha256": "14504cb0b294cf1a0dc5ff698202ab272de67cd414edea0792052d49ce744c41"
+    },
+    {
+      "path": "docs/superpowers/coverage/transcripts/run-2026-09-10-0001/mutation-SC-18.json",
+      "sha256": "7236696617dd2c930aaedf15df98d18286bbf41a22dc8266e0caf94991638408"
+    },
+    {
+      "path": "docs/superpowers/coverage/transcripts/run-2026-09-10-0001/mutation-SC-20.json",
+      "sha256": "feef57d2c336cbbb3cd2e09da64398234c5d9b12ca6a13946c5dba80282902a0"
+    },
+    {
+      "path": "docs/superpowers/coverage/transcripts/run-2026-09-10-0001/mutation-SC-21.json",
+      "sha256": "17428684417b202687129e2a13bde79479226e10a3afc5d9dee30f90480384e6"
+    },
+    {
+      "path": "docs/superpowers/coverage/transcripts/run-2026-09-10-0001/mutation-SC-22.json",
+      "sha256": "c46daf09d9d0edebe136ed7bbeecf8d21996e1d9dddd3439a1a7743df09c3544"
+    },
+    {
+      "path": "docs/superpowers/coverage/transcripts/run-2026-09-10-0001/mutation-SC-23.json",
+      "sha256": "62043864e101f1ddd00373937c81ea6fb4d516c7eb0b95aa46fcf67885f5b522"
+    },
+    {
+      "path": "docs/superpowers/coverage/transcripts/run-2026-09-10-0001/mutation-SC-24.json",
+      "sha256": "705bf9994dded9400010070961772456f71adfee013b2c5482e2e30170f79f68"
+    },
+    {
+      "path": "docs/superpowers/coverage/transcripts/run-2026-09-10-0001/mutation-SC-26.json",
+      "sha256": "3ff1664d6d72ea5429d56fb1b26feddaca763c87b2b80c8e6152d435afe7d376"
+    },
+    {
+      "path": "docs/superpowers/coverage/transcripts/run-2026-09-10-0001/mutation-SC-27.json",
+      "sha256": "858d7c6030e578faf16465a19d73daff18e1136dd88a8f94164153ce9df72a25"
+    },
+    {
+      "path": "docs/superpowers/coverage/transcripts/run-2026-09-10-0001/mutation-SC-28.json",
+      "sha256": "ccdf1c342cd5b5c096e5382a2fef6570a8d4e51375c49296a9092b9304a01a88"
+    },
+    {
+      "path": "docs/superpowers/coverage/transcripts/run-2026-09-10-0001/mutation-SC-29.json",
+      "sha256": "f6c190c1727807ad7be16ac9a35ed0f7d15493efd5a4b1070655c3303a399b32"
+    },
+    {
+      "path": "docs/superpowers/coverage/transcripts/run-2026-09-10-0001/mutation-SC-31.json",
+      "sha256": "0367f8de77638b49c0ac0cc1662bec34e598a06935591e11a3d4ac056cd1d6cb"
+    },
+    {
+      "path": "docs/superpowers/coverage/transcripts/run-2026-09-10-0001/mutation-SC-32.json",
+      "sha256": "5fea644e43522ef34daa25b118fe9fde0b3649a7a9539f3c5dc5e3da2ec6eb00"
+    },
+    {
+      "path": "docs/superpowers/coverage/transcripts/run-2026-09-10-0001/mutation-SC-35.json",
+      "sha256": "2519b07d4fcc34089627c060b3db7c657e58cb5b20b490a15ddebcdf122d6d63"
+    },
+    {
+      "path": "docs/superpowers/coverage/transcripts/run-2026-09-10-0001/trace-evidence.json",
+      "sha256": "0df36f43608cf82cc02803a6cd963e1d803cdac4f5d22a86ebdeb3802ae15c2a"
+    }
+  ],
+  "toolVersions": {
+    "go": "go1.26.3"
+  },
+  "finishedAt": "2026-09-10T17:26:18Z"
+}
