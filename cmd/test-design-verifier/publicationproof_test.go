@@ -344,6 +344,55 @@ func TestPublication_RetriesFromRetainedEvidence(t *testing.T) {
 			t.Errorf("records = %+v, want the retry to have redone no verification work: %+v", records, beforeB)
 		}
 	})
+
+	// An open publication owes the publication and nothing else. A run whose
+	// live decision is required and whose journey already passed is not asked
+	// for that layer again because its report could not be written: the retry
+	// stands on the completed attempt, and a layer re-offered here would be a
+	// live environment driven twice for one verdict.
+	t.Run("live-answered", func(t *testing.T) {
+		live := readySubject(t, "required")
+		runID := liveRunID("pub-live")
+
+		tr, _, exec := runLivePipeline(t, live, runID, revisionLivePlan(runID), nil)
+		if got := rowVerdict(t, exec.RowVerdicts, readyMarkerRow).Verdict; got != "LIVE-PASS" {
+			t.Fatalf("live verdict for %s = %q, want LIVE-PASS", readyMarkerRow, got)
+		}
+		readyGroups(t, live, runID, readDispatchInputs(t, tr.DispatchPath), reusePolicy(t))
+		readyCaughtVersionRow(t, live, runID)
+		before := pubProofVerificationRecords(readyResume(t, live, runID))
+
+		planted := pubProofPlantDir(t, live, pubProofJSON)
+		pubProofRefusal(t, live, runID, freshFinalizeBody(), "publish-failed")
+
+		state := readyResume(t, live, runID)
+		if state.Publication.Status != string(runstate.StatusStarted) {
+			t.Fatalf("publication = %+v, want a record left started", state.Publication)
+		}
+		if !state.Live.Required || state.Live.Status != string(runstate.StatusCompleted) || state.Live.Reason != "" {
+			t.Fatalf("live = %+v, want the required layer completed with nothing against it", state.Live)
+		}
+		wantOwed := []resumePending{{Kind: runstate.KindPhase, ID: publishPhaseID, Reason: reasonNotCompleted}}
+		if !slices.Equal(state.Pending, wantOwed) {
+			t.Errorf("pending = %+v, want only the publication owed %+v: an open publication does not re-owe an answered layer",
+				state.Pending, wantOwed)
+		}
+
+		if err := os.RemoveAll(planted); err != nil {
+			t.Fatalf("remove the planted directory: %v", err)
+		}
+		out := pubProofFinalize(t, live, runID, freshFinalizeBody())
+		if out.Verdict != report.VerdictPass {
+			t.Errorf("verdict = %q, want %s; reasons=%+v", out.Verdict, report.VerdictPass, out.Reasons)
+		}
+		after := readyResume(t, live, runID)
+		if after.Publication.Status != string(runstate.StatusCompleted) || after.Publication.Outcome != "ok" {
+			t.Errorf("publication = %+v, want a completed record", after.Publication)
+		}
+		if records := pubProofVerificationRecords(after); !slices.Equal(records, before) {
+			t.Errorf("records = %+v, want the retry to have redone no verification work: %+v", records, before)
+		}
+	})
 }
 
 // covers: SC-31

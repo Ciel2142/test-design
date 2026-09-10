@@ -683,6 +683,37 @@ func TestReuse_IsolatedRepairInvalidatesOnlyItsGroup(t *testing.T) {
 		}
 	})
 
+	// A test file two groups were both handed is nobody's own. Ownership is
+	// read from the manifests, so a file more than one of them names cannot be
+	// attributed to one of them, and an unattributable change widens exactly
+	// like a production one rather than being pinned on whichever group the
+	// manifests happen to list first.
+	t.Run("shared between groups", func(t *testing.T) {
+		const runID = "reuse-proof-boundary-shared"
+		t.Cleanup(func() { proofResetTo(t, repo, base) })
+
+		// payments_test.go holds SC-05, SC-06 and SC-07 for G-pay and SC-01 and
+		// SC-08 for G-orders, so both groups' bundles name it.
+		const shared = "payments/payments_test.go"
+		appendToRepoFile(t, repo, shared, "\n// a repair to the file both groups were handed\n")
+		commitAll(t, repo, "repair a test file two groups were handed")
+
+		out := proofTraceAndReuse(t, repo, runID, priorRunID, policy)
+
+		if len(out.ChangedPaths) != 1 {
+			t.Fatalf("changedPaths = %+v, want only the repaired test file", out.ChangedPaths)
+		}
+		changed := out.ChangedPaths[0]
+		if changed.Path != shared || !slices.Equal(changed.Groups, []string{"G-orders", "G-pay"}) {
+			t.Fatalf("changedPaths[0] = %+v, want %s owned by both G-orders and G-pay", changed, shared)
+		}
+		if changed.Class != changeShared {
+			t.Errorf("changedPaths[0] class = %q, want %q: a file two groups were handed is not one group's own",
+				changed.Class, changeShared)
+		}
+		proofEveryRecordRefused(t, out, "module-changed:"+shared)
+	})
+
 	t.Run("production", func(t *testing.T) {
 		const runID = "reuse-proof-boundary-production"
 		t.Cleanup(func() { proofResetTo(t, repo, base) })
