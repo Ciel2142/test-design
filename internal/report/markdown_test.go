@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"test-design/internal/coverage"
+	"test-design/internal/evidence"
 )
 
 func mustRender(t *testing.T, r *Report) string {
@@ -37,6 +38,7 @@ func TestRenderMarkdownSectionOrder(t *testing.T) {
 		"## Layer 2 — adversarial read",
 		"## Layer 3 — live",
 		"## Layer 4 — mutation",
+		"## Work",
 		"## Transcripts",
 		"## What must happen before this branch can finish",
 	}
@@ -175,8 +177,9 @@ func TestRenderMarkdownLayer3NAIsOneLine(t *testing.T) {
 	if strings.Count(l3, "\n") > 4 {
 		t.Errorf("Layer 3 n/a section should be a single summary line, got:\n%s", l3)
 	}
-	if !strings.Contains(l3, "n/a") {
-		t.Errorf("Layer 3 n/a section should state n/a status; got:\n%s", l3)
+	const want = "Status: n/a — no applicable live rows (live decision not-applicable)."
+	if !strings.Contains(l3, want) {
+		t.Errorf("Layer 3 n/a section should state the exact n/a sentence %q; got:\n%s", want, l3)
 	}
 }
 
@@ -266,6 +269,167 @@ func TestRenderMarkdownLayer4SurvivingSites(t *testing.T) {
 	}
 }
 
+func TestWorkCountsOf(t *testing.T) {
+	items := []WorkItem{
+		{Source: WorkFresh, Standing: StandingOK},
+		{Source: WorkFresh, Standing: StandingFailed},
+		{Source: WorkReused, Standing: StandingOK},
+		{Source: WorkReused, Standing: StandingIncomplete},
+		{Source: WorkFresh, Standing: StandingIncomplete},
+		{Source: WorkReused, Standing: StandingFailed},
+	}
+	got := WorkCountsOf(items)
+	want := WorkCounts{Fresh: 3, Reused: 3, Failed: 2, Incomplete: 2}
+	if got != want {
+		t.Errorf("WorkCountsOf = %+v, want %+v", got, want)
+	}
+}
+
+// workFixtureItems mixes every Kind, Source and Standing this wave defines so
+// a single fixture exercises the full new vocabulary: a fresh ok phase, a
+// reused ok review-group (carrying a full Reuse reference and basis), a fresh
+// failed live-attempt, and a reused incomplete mutation-row.
+func workFixtureItems() []WorkItem {
+	return []WorkItem{
+		{
+			Kind: "phase", ID: "trace", Rows: []string{},
+			Source: WorkFresh, Outcome: "ok", Standing: StandingOK,
+			Artifact: TranscriptRef{Path: "transcripts/run-1/trace-evidence.json", SHA256: "trace-sha"},
+		},
+		{
+			Kind: "review-group", ID: "g1", Rows: []string{"SC-01", "SC-02"},
+			Source: WorkReused, Outcome: "holds", Standing: StandingOK,
+			Artifact: TranscriptRef{Path: "transcripts/run-1/reused-g1.json", SHA256: "g1-sha"},
+			Reuse: &evidence.ReuseReference{
+				PriorRunID:      "run-0",
+				PriorRepoCommit: "head-0",
+				PriorSeq:        3,
+				Outcome:         "holds",
+				Artifact:        evidence.FileRef{Path: "transcripts/run-0/review-g1.json", SHA256: "g1-sha"},
+				Basis: evidence.ReuseBasis{
+					PriorCommit:  "head-0",
+					ChangedPaths: []string{"pkg/a.go"},
+					ClaimRows:    []string{"SC-01", "SC-02"},
+					ContextFiles: 2,
+					Policy:       "matched",
+					Toolchain:    "matched",
+				},
+			},
+		},
+		{
+			Kind: "live-attempt", ID: "live", Rows: []string{},
+			Source: WorkFresh, Outcome: "fail", Standing: StandingFailed,
+			Artifact: TranscriptRef{Path: "transcripts/run-1/live-evidence.json", SHA256: "live-sha"},
+		},
+		{
+			Kind: "mutation-row", ID: "SC-03", Rows: []string{"SC-03"},
+			Source: WorkReused, Outcome: "environmental", Standing: StandingIncomplete,
+			Artifact: TranscriptRef{Path: "transcripts/run-1/reused-mutation-attempt-SC-03.json", SHA256: "sc03-sha"},
+			Reuse: &evidence.ReuseReference{
+				PriorRunID:      "run-0",
+				PriorRepoCommit: "head-0",
+				PriorSeq:        5,
+				Outcome:         "environmental",
+				Artifact:        evidence.FileRef{Path: "transcripts/run-0/mutation-attempt-SC-03.json", SHA256: "sc03-sha"},
+				Basis: evidence.ReuseBasis{
+					PriorCommit:  "head-0",
+					ChangedPaths: []string{},
+					ClaimRows:    []string{"SC-03"},
+					ContextFiles: 0,
+					Policy:       "not-applicable",
+					Toolchain:    "matched",
+				},
+			},
+		},
+	}
+}
+
+func TestRenderMarkdownWorkCountsAndTable(t *testing.T) {
+	r := mustCompute(t, greenInputs())
+	items := workFixtureItems()
+	r.Work = WorkSummary{Items: items, Counts: WorkCountsOf(items)}
+
+	md := mustRender(t, r)
+	if !strings.Contains(md, "Fresh 2 · Reused 2 · Failed 1 · Incomplete 1") {
+		t.Errorf("markdown missing Work counts line; got:\n%s", md)
+	}
+	if !strings.Contains(md, "| phase | trace | - | fresh | ok | ok | `transcripts/run-1/trace-evidence.json` |") {
+		t.Errorf("markdown missing fresh phase Work row; got:\n%s", md)
+	}
+	if !strings.Contains(md, "| review-group | g1 | SC-01, SC-02 | reused | holds | ok | `transcripts/run-1/reused-g1.json` |") {
+		t.Errorf("markdown missing reused review-group Work row; got:\n%s", md)
+	}
+	if !strings.Contains(md, "| live-attempt | live | - | fresh | fail | failed | `transcripts/run-1/live-evidence.json` |") {
+		t.Errorf("markdown missing fresh live-attempt Work row; got:\n%s", md)
+	}
+	if !strings.Contains(md, "| mutation-row | SC-03 | SC-03 | reused | environmental | incomplete | `transcripts/run-1/reused-mutation-attempt-SC-03.json` |") {
+		t.Errorf("markdown missing reused mutation-row Work row; got:\n%s", md)
+	}
+}
+
+func TestRenderMarkdownWorkReusedBullet(t *testing.T) {
+	r := mustCompute(t, greenInputs())
+	items := []WorkItem{workFixtureItems()[1]} // the reused review-group g1
+	r.Work = WorkSummary{Items: items, Counts: WorkCountsOf(items)}
+
+	md := mustRender(t, r)
+	want := "- review-group g1: reused from run run-0 seq 3 at head-0; " +
+		"basis: prior commit head-0, 1 changed paths, claims SC-01,SC-02, 2 context files, policy matched, toolchain matched"
+	if !strings.Contains(md, want) {
+		t.Errorf("markdown missing reused-item bullet %q; got:\n%s", want, md)
+	}
+}
+
+func TestRenderMarkdownWorkEmpty(t *testing.T) {
+	r := mustCompute(t, greenInputs())
+	r.Work = WorkSummary{Items: []WorkItem{}}
+
+	md := mustRender(t, r)
+	if !strings.Contains(md, "## Work") {
+		t.Fatalf("markdown missing ## Work heading; got:\n%s", md)
+	}
+	if !strings.Contains(md, "Fresh 0 · Reused 0 · Failed 0 · Incomplete 0") {
+		t.Errorf("markdown missing empty Work counts line; got:\n%s", md)
+	}
+	work := md[strings.Index(md, "## Work"):strings.Index(md, "## Transcripts")]
+	if got := strings.Count(work, "\n| "); got != 2 {
+		t.Errorf("empty Work section should render only the header and separator rows (2 lines starting \"| \"), got %d; section:\n%s", got, work)
+	}
+}
+
+func TestWorkSummaryItemsAndWorkItemRowsSerializeAsEmptyArrayNeverNull(t *testing.T) {
+	r := mustCompute(t, greenInputs())
+	r.Work = WorkSummary{Items: []WorkItem{{
+		Kind: "phase", ID: "trace", // Rows left nil
+		Source: WorkFresh, Outcome: "ok", Standing: StandingOK,
+		Artifact: TranscriptRef{Path: "p", SHA256: "s"},
+	}}}
+	data, err := json.Marshal(r)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	raw := string(data)
+	if strings.Contains(raw, `"rows":null`) {
+		t.Errorf("WorkItem.Rows serialized as null:\n%s", raw)
+	}
+	if !strings.Contains(raw, `"rows":[]`) {
+		t.Errorf("WorkItem.Rows did not serialize as []:\n%s", raw)
+	}
+
+	empty := WorkSummary{} // Items left nil
+	data2, err := json.Marshal(empty)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	raw2 := string(data2)
+	if strings.Contains(raw2, `"items":null`) {
+		t.Errorf("WorkSummary.Items serialized as null:\n%s", raw2)
+	}
+	if !strings.Contains(raw2, `"items":[]`) {
+		t.Errorf("WorkSummary.Items did not serialize as []:\n%s", raw2)
+	}
+}
+
 func TestRenderMarkdownTranscripts(t *testing.T) {
 	r := mustCompute(t, greenInputs())
 	r.Transcripts = []TranscriptRef{{Path: "transcripts/run-1/trace-evidence.json", SHA256: "abc123"}}
@@ -345,6 +509,13 @@ func vocabularyTokens(r *Report) []string {
 		"LIVE-PASS", "LIVE-FAIL", "LIVE-INCONCLUSIVE", "LIVE-N/A (layer 1 gap)", "N/A (profile unavailable)", "N/A",
 		"MUTATION-CAUGHT", "MUTATION-SURVIVED", "MUTATION-UNAPPLIABLE", "MUTATION-N/A (layer 1 gap)", "MUTATION-N/A (environmental)",
 		"freshness",
+		// Work vocabulary. "ok" and "failed" are deliberately excluded: "ok" is
+		// a substring of the unrelated row level "smoke", and "failed" already
+		// appears as a hardcoded label in the Layer 1 suite-counts line, so
+		// either would false-fail this check against fixtures that carry no
+		// Work data at all.
+		"phase", "review-group", "live-attempt", "mutation-row",
+		"fresh", "reused", "incomplete",
 	}
 	for _, rn := range r.Reasons {
 		tokens = append(tokens, rn.Code)
@@ -395,5 +566,11 @@ func TestRenderMarkdownVocabularyIsJSONSourcedOnly(t *testing.T) {
 		in.Trace.BaselineStatus = "missing"
 		in.Acknowledgement = "PARTIAL accepted by igi — no baseline on this branch"
 		assertMarkdownVocabularyIsInJSON(t, mustCompute(t, in))
+	})
+	t.Run("reused work items", func(t *testing.T) {
+		r := mustCompute(t, greenInputs())
+		items := workFixtureItems()
+		r.Work = WorkSummary{Items: items, Counts: WorkCountsOf(items)}
+		assertMarkdownVocabularyIsInJSON(t, r)
 	})
 }

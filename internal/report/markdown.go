@@ -14,6 +14,7 @@ func RenderMarkdown(r *Report) ([]byte, error) {
 	writeMarkdownLayer2(&b, r)
 	writeMarkdownLayer3(&b, r)
 	writeMarkdownLayer4(&b, r)
+	writeMarkdownWork(&b, r)
 	writeMarkdownTranscripts(&b, r)
 	writeMarkdownReasons(&b, r)
 
@@ -103,7 +104,7 @@ func writeMarkdownLayer3(b *strings.Builder, r *Report) {
 	s := r.Layers.Layer3
 	if s.Status == statusNA {
 		if s.Applicable == 0 {
-			fmt.Fprintf(b, "Status: %s — no smoke/e2e rows.\n\n", s.Status)
+			fmt.Fprintf(b, "Status: %s — no applicable live rows (live decision not-applicable).\n\n", s.Status)
 		} else {
 			fmt.Fprintf(b, "Status: %s — %d applicable rows, all layer-1 gaps.\n\n", s.Status, s.Applicable)
 		}
@@ -134,6 +135,42 @@ func writeMarkdownLayer4(b *strings.Builder, r *Report) {
 		fmt.Fprintf(b, "| %s | %s | %s |\n", escapeCell(row.RowID), escapeCell(row.Layer4.Status), escapeCell(sites))
 	}
 	b.WriteString("\n")
+}
+
+func writeMarkdownWork(b *strings.Builder, r *Report) {
+	b.WriteString("## Work\n\n")
+	c := r.Work.Counts
+	fmt.Fprintf(b, "Fresh %d · Reused %d · Failed %d · Incomplete %d\n\n", c.Fresh, c.Reused, c.Failed, c.Incomplete)
+
+	b.WriteString("| Kind | ID | Rows | Source | Outcome | Standing | Artifact |\n")
+	b.WriteString("| --- | --- | --- | --- | --- | --- | --- |\n")
+	for _, item := range r.Work.Items {
+		rows := "-"
+		if len(item.Rows) > 0 {
+			rows = strings.Join(item.Rows, ", ")
+		}
+		fmt.Fprintf(b, "| %s | %s | %s | %s | %s | %s | `%s` |\n",
+			escapeCell(item.Kind), escapeCell(item.ID), escapeCell(rows),
+			escapeCell(item.Source), escapeCell(item.Outcome), escapeCell(item.Standing),
+			escapeCell(item.Artifact.Path))
+	}
+	b.WriteString("\n")
+
+	wrote := false
+	for _, item := range r.Work.Items {
+		if item.Reuse == nil {
+			continue
+		}
+		ref := item.Reuse
+		fmt.Fprintf(b, "- %s %s: reused from run %s seq %d at %s; basis: prior commit %s, %d changed paths, claims %s, %d context files, policy %s, toolchain %s\n",
+			item.Kind, item.ID, ref.PriorRunID, ref.PriorSeq, ref.PriorRepoCommit,
+			ref.Basis.PriorCommit, len(ref.Basis.ChangedPaths), strings.Join(ref.Basis.ClaimRows, ","),
+			ref.Basis.ContextFiles, ref.Basis.Policy, ref.Basis.Toolchain)
+		wrote = true
+	}
+	if wrote {
+		b.WriteString("\n")
+	}
 }
 
 func writeMarkdownTranscripts(b *strings.Builder, r *Report) {

@@ -3,6 +3,8 @@
 package report
 
 import (
+	"encoding/json"
+
 	"test-design/internal/coverage"
 	"test-design/internal/evidence"
 )
@@ -246,6 +248,83 @@ type TranscriptRef struct {
 	SHA256 string `json:"sha256"`
 }
 
+const (
+	WorkFresh          = "fresh"
+	WorkReused         = "reused"
+	StandingOK         = "ok"
+	StandingFailed     = "failed"
+	StandingIncomplete = "incomplete"
+)
+
+// WorkItem is one obligation the run answered: which record, where its
+// answer came from, how it stands, and the published transcript that
+// proves it.
+type WorkItem struct {
+	Kind     string                   `json:"kind"` // phase | review-group | live-attempt | mutation-row
+	ID       string                   `json:"id"`
+	Rows     []string                 `json:"rows"`     // review groups: the group's rows; mutation rows: [rowId]; else []
+	Source   string                   `json:"source"`   // fresh | reused
+	Outcome  string                   `json:"outcome"`  // the record's outcome
+	Standing string                   `json:"standing"` // ok | failed | incomplete
+	Artifact TranscriptRef            `json:"artifact"` // repo-relative published path and sha256
+	Reuse    *evidence.ReuseReference `json:"reuse,omitempty"`
+}
+
+// MarshalJSON normalizes a nil Rows to an empty array before encoding so the
+// field is never emitted as null.
+func (w WorkItem) MarshalJSON() ([]byte, error) {
+	type alias WorkItem
+	a := alias(w)
+	if a.Rows == nil {
+		a.Rows = []string{}
+	}
+	return json.Marshal(a)
+}
+
+type WorkCounts struct {
+	Fresh      int `json:"fresh"`
+	Reused     int `json:"reused"`
+	Failed     int `json:"failed"`
+	Incomplete int `json:"incomplete"`
+}
+
+type WorkSummary struct {
+	Items  []WorkItem `json:"items"`
+	Counts WorkCounts `json:"counts"`
+}
+
+// MarshalJSON normalizes a nil Items to an empty array before encoding so
+// the field is never emitted as null.
+func (s WorkSummary) MarshalJSON() ([]byte, error) {
+	type alias WorkSummary
+	a := alias(s)
+	if a.Items == nil {
+		a.Items = []WorkItem{}
+	}
+	return json.Marshal(a)
+}
+
+// WorkCountsOf tallies items: Fresh/Reused by Source, Failed/Incomplete by
+// Standing.
+func WorkCountsOf(items []WorkItem) WorkCounts {
+	var c WorkCounts
+	for _, it := range items {
+		switch it.Source {
+		case WorkFresh:
+			c.Fresh++
+		case WorkReused:
+			c.Reused++
+		}
+		switch it.Standing {
+		case StandingFailed:
+			c.Failed++
+		case StandingIncomplete:
+			c.Incomplete++
+		}
+	}
+	return c
+}
+
 type Layer1Summary struct {
 	Status        string         `json:"status"`
 	Suite         SuiteCounts    `json:"suite"`
@@ -303,6 +382,7 @@ type Report struct {
 	Layers          LayerSummary      `json:"layers"`
 	Rows            []RowReport       `json:"rows"`
 	Batches         []BatchReport     `json:"batches"`
+	Work            WorkSummary       `json:"work"`
 	Transcripts     []TranscriptRef   `json:"transcripts"`
 	ToolVersions    map[string]string `json:"toolVersions"`
 	FinishedAt      string            `json:"finishedAt"`

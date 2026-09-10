@@ -1,6 +1,6 @@
 {
   "schemaVersion": "1",
-  "verifierVersion": "1.1.0",
+  "verifierVersion": "1.2.0",
   "runId": "run-2026-07-30-0001",
   "source": "docs/superpowers/coverage/2026-07-30-order-creation-coverage.md",
   "sourceSha256": "9f2b6c1e4a7d8f0351c6a9e2d4b7f8091a2c3d4e5f60718293a4b5c6d7e8f901",
@@ -66,10 +66,10 @@
     "layer3": {
       "status": "blocked",
       "applicable": 2,
-      "pass": 0,
+      "pass": 1,
       "fail": 1,
       "inconclusive": 0,
-      "na": 1
+      "na": 0
     },
     "layer4": {
       "status": "blocked",
@@ -92,8 +92,7 @@
       },
       "layer2": {
         "verdict": "HOLDS",
-        "batchId": "batch-2",
-        "dispatchId": "dispatch-2"
+        "batchId": "batch-2"
       },
       "layer3": "N/A",
       "layer4": {
@@ -111,8 +110,7 @@
       },
       "layer2": {
         "verdict": "VACUOUS",
-        "batchId": "batch-1",
-        "dispatchId": "dispatch-1"
+        "batchId": "batch-1"
       },
       "layer3": "N/A",
       "layer4": {
@@ -130,8 +128,7 @@
       },
       "layer2": {
         "verdict": "HOLDS",
-        "batchId": "batch-1",
-        "dispatchId": "dispatch-1"
+        "batchId": "batch-1"
       },
       "layer3": "N/A",
       "layer4": {
@@ -152,8 +149,7 @@
       },
       "layer2": {
         "verdict": "HOLDS",
-        "batchId": "batch-1",
-        "dispatchId": "dispatch-1"
+        "batchId": "batch-1"
       },
       "layer3": "LIVE-FAIL",
       "layer4": {
@@ -169,10 +165,9 @@
       },
       "layer2": {
         "verdict": "MISSING",
-        "batchId": "batch-1",
-        "dispatchId": "dispatch-1"
+        "batchId": "batch-1"
       },
-      "layer3": "LIVE-N/A (layer 1 gap)",
+      "layer3": "LIVE-PASS",
       "layer4": {
         "status": "MUTATION-N/A (layer 1 gap)"
       }
@@ -181,7 +176,6 @@
   "batches": [
     {
       "batchId": "batch-1",
-      "dispatchId": "dispatch-1",
       "runId": "run-2026-07-30-0001",
       "rows": [
         "SC-01",
@@ -190,13 +184,6 @@
         "SC-04",
         "SC-05"
       ],
-      "canary": {
-        "rowId": "SC-01",
-        "kind": "synthesized",
-        "weakening": "the boundary assertion on the rejected quantity replaced with a non-negative bound, which holds either side of the row's Verification mutation",
-        "caught": true
-      },
-      "voided": false,
       "verdicts": [
         {
           "rowId": "SC-02",
@@ -222,13 +209,10 @@
     },
     {
       "batchId": "batch-2",
-      "dispatchId": "dispatch-2",
       "runId": "run-2026-07-30-0001",
       "rows": [
         "SC-01"
       ],
-      "inheritsFrom": "batch-1",
-      "voided": false,
       "verdicts": [
         {
           "rowId": "SC-01",
@@ -238,6 +222,99 @@
       ]
     }
   ],
+  "work": {
+    "items": [
+      {
+        "kind": "phase",
+        "id": "trace",
+        "rows": [],
+        "source": "fresh",
+        "outcome": "ok",
+        "standing": "ok",
+        "artifact": {
+          "path": "docs/superpowers/coverage/transcripts/run-2026-07-30-0001/trace-evidence.json",
+          "sha256": "4f2d3a6e1c507a8b3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f6071829304"
+        }
+      },
+      {
+        "kind": "review-group",
+        "id": "batch-1",
+        "rows": [
+          "SC-02",
+          "SC-03",
+          "SC-04",
+          "SC-05"
+        ],
+        "source": "fresh",
+        "outcome": "blocked",
+        "standing": "failed",
+        "artifact": {
+          "path": "docs/superpowers/coverage/transcripts/run-2026-07-30-0001/review-batch-1.json",
+          "sha256": "5a3c9e0f1b2d4768c0a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f607"
+        }
+      },
+      {
+        "kind": "review-group",
+        "id": "batch-2",
+        "rows": [
+          "SC-01"
+        ],
+        "source": "fresh",
+        "outcome": "holds",
+        "standing": "ok",
+        "artifact": {
+          "path": "docs/superpowers/coverage/transcripts/run-2026-07-30-0001/review-batch-2.json",
+          "sha256": "6b4dae1023c5879d1c2d3e4f5061728394a5b6c7d8e9f0a1b2c3d4e5f6071829"
+        }
+      },
+      {
+        "kind": "live-attempt",
+        "id": "live",
+        "rows": [],
+        "source": "fresh",
+        "outcome": "fail",
+        "standing": "failed",
+        "artifact": {
+          "path": "docs/superpowers/coverage/transcripts/run-2026-07-30-0001/live-evidence.json",
+          "sha256": "1c9a0f3b8d27465e0a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f6071"
+        }
+      },
+      {
+        "kind": "mutation-row",
+        "id": "SC-01",
+        "rows": [
+          "SC-01"
+        ],
+        "source": "fresh",
+        "outcome": "caught",
+        "standing": "ok",
+        "artifact": {
+          "path": "docs/superpowers/coverage/transcripts/run-2026-07-30-0001/mutation-SC-01.json",
+          "sha256": "2d0b1e4c9a38576f1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f607182"
+        }
+      },
+      {
+        "kind": "mutation-row",
+        "id": "SC-03",
+        "rows": [
+          "SC-03"
+        ],
+        "source": "fresh",
+        "outcome": "survived",
+        "standing": "failed",
+        "artifact": {
+          "path": "docs/superpowers/coverage/transcripts/run-2026-07-30-0001/mutation-SC-03.json",
+          "sha256": "3e1c2f5d0b49687a2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293"
+        }
+      }
+    ],
+    "counts": {
+      "fresh": 6,
+      "reused": 0,
+      "failed": 3,
+      "incomplete": 0
+    }
+  },
   "transcripts": [
     {
       "path": "docs/superpowers/coverage/transcripts/run-2026-07-30-0001/live-evidence.json",
@@ -250,6 +327,14 @@
     {
       "path": "docs/superpowers/coverage/transcripts/run-2026-07-30-0001/mutation-SC-03.json",
       "sha256": "3e1c2f5d0b49687a2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293"
+    },
+    {
+      "path": "docs/superpowers/coverage/transcripts/run-2026-07-30-0001/review-batch-1.json",
+      "sha256": "5a3c9e0f1b2d4768c0a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f607"
+    },
+    {
+      "path": "docs/superpowers/coverage/transcripts/run-2026-07-30-0001/review-batch-2.json",
+      "sha256": "6b4dae1023c5879d1c2d3e4f5061728394a5b6c7d8e9f0a1b2c3d4e5f6071829"
     },
     {
       "path": "docs/superpowers/coverage/transcripts/run-2026-07-30-0001/trace-evidence.json",
