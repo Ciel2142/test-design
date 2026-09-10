@@ -444,10 +444,17 @@ func supersededRecord(t *testing.T, out resumeOutput, kind runstate.Kind, id str
 // group whose evidence changed under it stops standing the moment it does. The
 // protocol around that line is proved with it — a completed group is completed
 // once, verdicts belong to the group that owns their rows, and a group that was
-// never opened cannot be closed.
+// never opened cannot be closed, a completion that leaves a row unanswered
+// does not close a group, and a group judged against dispatch inputs the run
+// no longer hands out stops standing. The mutation layer holds the same line:
+// a required row whose evidence changed under it is not a completion the
+// layer may stand on.
 // covers: SC-20
 func TestResume_SelectsOnlyValidatedCompletions(t *testing.T) {
-	repo := fixtureRepo(t)
+	// SC-01's test is gated behind fixtureGateVar so a repeated trace can hand
+	// out different dispatch inputs at the same commit; with the gate unset the
+	// fixture behaves as the plain one.
+	repo := fixtureRepoWith(t, gatedFixtureEdit(t))
 	const runID = "resume-validated-completions"
 
 	code, stdout, stderr := runVerifyOp(t, "trace", verifyRequestJSON(t, repo, runID))
@@ -530,10 +537,24 @@ func TestResume_SelectsOnlyValidatedCompletions(t *testing.T) {
 	}
 
 	verdictsA := soundVerdicts(t, dispatch, "SC-01", "SC-02")
+	// A second completion of A carries a different answer, so anything it
+	// wrote would be visible: the refusal has to land before A's evidence is
+	// touched, and the first result stands in what resume reports.
 	if got := refuseRecordReview(t, repo, runID, map[string]any{
-		"groupId": "A", "status": "completed", "verdicts": verdictsA,
+		"groupId": "A", "status": "completed",
+		"verdicts": []map[string]string{
+			{"rowId": "SC-01", "verdict": "WEAK", "reason": "a second critic disagreed"},
+			{"rowId": "SC-02", "verdict": "HOLDS"},
+		},
 	}); got.Code != "duplicate-completion" {
 		t.Errorf("completing A twice = %q, want duplicate-completion (message %q)", got.Code, got.Message)
+	}
+	out = runResume(t, repo, runID)
+	if group := resumeGroupFor(t, out, "A"); group.Status != string(runstate.StatusCompleted) || group.Reason != "" || group.Outcome != "holds" {
+		t.Errorf("group A after the refused duplicate = %+v, want the first completion standing: completed holds with nothing against it", group)
+	}
+	if got := reviewVerdictsAt(t, groupA.EvidencePath); !reflect.DeepEqual(got, []reviewVerdict{{RowID: "SC-01", Verdict: "HOLDS"}, {RowID: "SC-02", Verdict: "HOLDS"}}) {
+		t.Errorf("A's evidence verdicts = %+v, want the first result's HOLDS verdicts untouched by the refused duplicate", got)
 	}
 	if got := refuseRecordReview(t, repo, runID, map[string]any{
 		"groupId": "B", "status": "completed", "verdicts": verdictsA,
@@ -544,6 +565,16 @@ func TestResume_SelectsOnlyValidatedCompletions(t *testing.T) {
 		"groupId": "D", "status": "completed", "verdicts": soundVerdicts(t, dispatch, "SC-06"),
 	}); got.Code != "review-group-not-started" {
 		t.Errorf("completing an unopened D = %q, want review-group-not-started (message %q)", got.Code, got.Message)
+	}
+	// A completion that answers only one of B's rows is not B's answer: it is
+	// refused by name and B stays the open group it was.
+	if got := refuseRecordReview(t, repo, runID, map[string]any{
+		"groupId": "B", "status": "completed", "verdicts": soundVerdicts(t, dispatch, "SC-03"),
+	}); got.Code != "missing-verdict" {
+		t.Errorf("completing B without SC-04's verdict = %q, want missing-verdict (message %q)", got.Code, got.Message)
+	}
+	if group := resumeGroupFor(t, runResume(t, repo, runID), "B"); group.Status != string(runstate.StatusStarted) || group.Reason != "" || group.Outcome != "" {
+		t.Errorf("group B after the refused partial completion = %+v, want it still open with no outcome", group)
 	}
 
 	completeReviewGroup(t, repo, runID, "B", dispatch, "SC-03", "SC-04")
@@ -589,6 +620,109 @@ func TestResume_SelectsOnlyValidatedCompletions(t *testing.T) {
 	if out.Review.Complete {
 		t.Error("review.complete = true, want false: a group resting on changed evidence is not a validated completion")
 	}
+
+	// The mutation layer's counterpart. SC-10 is finished on a second site and
+	// SC-07 is answered by a refused attempt: both rows the dispatch requires
+	// are completed, so the layer is complete — until one of those completions
+	// stops standing, when a completed record is no longer enough.
+	mutateOrdersGuard(t, prep.WorktreePath, `	return fmt.Errorf("always rejected")`)
+	code, stdout, stderr = runVerifyOp(t, "evaluate-mutation",
+		evaluateMutationRequestJSON(t, repo, runID, prep.RunDir, "site-b", true))
+	if code != exitOK {
+		t.Fatalf("evaluate-mutation site-b exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+	var evaluated evaluateMutationOutput
+	if err := json.Unmarshal([]byte(stdout), &evaluated); err != nil {
+		t.Fatalf("evaluate-mutation stdout did not decode: %v\nstdout=%s", err, stdout)
+	}
+	if code, _, stderr := runVerifyOp(t, "record-attempt", requestWith(t, repo, runID, map[string]any{
+		"layer": 4, "rowID": "SC-07", "refusal": "mutation runner unavailable on this machine",
+	})); code != exitOK {
+		t.Fatalf("record-attempt exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+	out = runResume(t, repo, runID)
+	if !out.Mutation.Complete {
+		t.Errorf("mutation.complete = false, want true once both required rows are validated completions (rows %+v)", out.Mutation.Rows)
+	}
+	for id, outcome := range map[string]string{"SC-10": "survived", "SC-07": "environmental"} {
+		if row := resumeRow(t, out, id); row.Status != string(runstate.StatusCompleted) || row.Reason != "" || row.Outcome != outcome {
+			t.Errorf("%s = %+v, want a valid completed row with outcome %s", id, row, outcome)
+		}
+	}
+
+	if filepath.Dir(evaluated.EvidencePath) != prep.RunDir {
+		t.Fatalf("SC-10 evidence = %q, want it inside the row's run dir %q", evaluated.EvidencePath, prep.RunDir)
+	}
+	data, err = os.ReadFile(evaluated.EvidencePath)
+	if err != nil {
+		t.Fatalf("read %s: %v", evaluated.EvidencePath, err)
+	}
+	if err := os.WriteFile(evaluated.EvidencePath, append(data, ' '), 0o644); err != nil {
+		t.Fatalf("write %s: %v", evaluated.EvidencePath, err)
+	}
+	out = runResume(t, repo, runID)
+	if row := resumeRow(t, out, "SC-10"); row.Status != statusInvalid || row.Reason != "artifact-digest-mismatch:evidence" {
+		t.Errorf("SC-10 = %+v, want status %s reason artifact-digest-mismatch:evidence", row, statusInvalid)
+	}
+	if rec := ledgerRecord(t, out, runstate.KindMutationRow, "SC-10"); rec.Status != runstate.StatusCompleted {
+		t.Errorf("SC-10 record status = %q, want the ledger to keep %q", rec.Status, runstate.StatusCompleted)
+	}
+	if out.Mutation.Complete {
+		t.Error("mutation.complete = true, want false: a required row resting on changed evidence is a completed record, not a validated completion")
+	}
+	if out.Counts.Invalid != 2 {
+		t.Errorf("counts.invalid = %d, want 2: group A and row SC-10", out.Counts.Invalid)
+	}
+
+	// A repeated trace that hands out different dispatch inputs — SC-01's test
+	// gated off at the same commit — leaves every completed group judged
+	// against sources the run no longer hands out. Each is reported invalid
+	// for that reason and offered again, and the review layer is not settled
+	// by groups that merely exist as completed records.
+	t.Setenv(fixtureGateVar, "1")
+	gated := repeatTrace(t, repo, runID, "SC-01's test gated off")
+	if got := dispatchRowFor(t, readDispatchInputs(t, gated.DispatchPath), "SC-01").Status; got != "gap" {
+		t.Fatalf("SC-01 status = %q under the gate, want gap: the repeated trace did not change the dispatch inputs", got)
+	}
+	out = runResume(t, repo, runID)
+	if out.Trace.Status != string(runstate.StatusCompleted) || out.Trace.Reason != "" {
+		t.Errorf("trace = %+v, want the repeated phase completed and valid", out.Trace)
+	}
+	for _, id := range []string{"B", "C", "E"} {
+		if group := resumeGroupFor(t, out, id); group.Status != statusInvalid || group.Reason != reasonInputsChanged {
+			t.Errorf("group %s = %+v, want status %s reason %s after the dispatch inputs changed", id, group, statusInvalid, reasonInputsChanged)
+		}
+	}
+	// C held, so it is owed again; B and E are blocked by their gap rows'
+	// MISSING verdicts, and a completed failure is an answer that is never
+	// offered again, whatever its standing.
+	owed := resumePending{Kind: runstate.KindReviewGroup, ID: "C", Reason: reasonInputsChanged}
+	if !slices.Contains(out.Pending, owed) {
+		t.Errorf("pending = %+v, want %+v offered again", out.Pending, owed)
+	}
+	if group := resumeGroupFor(t, out, "A"); group.Status != statusInvalid {
+		t.Errorf("group A = %+v, want it still invalid", group)
+	}
+	if out.Review.Complete {
+		t.Error("review.complete = true, want false: groups judged against inputs the run no longer hands out are not validated completions")
+	}
+	if out.Counts.Invalid != 5 {
+		t.Errorf("counts.invalid = %d, want 5: the four groups and row SC-10", out.Counts.Invalid)
+	}
+}
+
+// reviewVerdictsAt reads the verdicts a group's evidence file carries.
+func reviewVerdictsAt(t *testing.T, path string) []reviewVerdict {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	var doc reviewEvidence
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("review evidence %s did not decode: %v", path, err)
+	}
+	return doc.Verdicts
 }
 
 // TestResume_PreservesFailedOutcomes holds a run to the answers it already
@@ -728,6 +862,50 @@ func TestResume_PreservesFailedOutcomes(t *testing.T) {
 	if fresh.Counts.Completed != 0 {
 		t.Errorf("counts.completed = %d, want 0", fresh.Counts.Completed)
 	}
+
+	// The live layer's answer, over a subject whose live decision is required:
+	// a refused live attempt completes the layer unavailable, and the restart
+	// keeps it a failure — counted as one, never reported as a verified layer.
+	t.Run("a refused live attempt stays unavailable", func(t *testing.T) {
+		subject := newRecordAttemptLiveSubject(t)
+		liveRun := liveRunID("resume-failed-live")
+		const refusal = "no live environment is configured for this run"
+		if code, _, stderr := runVerifyOp(t, "record-attempt", opRequestJSON(t, subject.repo, subject.coverageSource, liveRun, map[string]any{
+			"layer": 3, "refusal": refusal,
+		})); code != exitOK {
+			t.Fatalf("record-attempt exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+		}
+
+		code, stdout, stderr := runVerifyOp(t, "resume", liveRequestJSON(t, subject.repo, subject.coverageSource, liveRun))
+		if code != exitOK {
+			t.Fatalf("resume exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+		}
+		var live resumeOutput
+		if err := json.Unmarshal([]byte(stdout), &live); err != nil {
+			t.Fatalf("resume stdout did not decode: %v\nstdout=%s", err, stdout)
+		}
+		if !live.Live.Required {
+			t.Fatalf("live.required = false, want true for a document whose live decision is required")
+		}
+		if live.Live.Status != string(runstate.StatusCompleted) || live.Live.Outcome != "unavailable" || live.Live.Reason != "" {
+			t.Errorf("live = %+v, want completed unavailable with nothing against it", live.Live)
+		}
+		rec := ledgerRecord(t, live, runstate.KindLiveAttempt, liveAttemptID)
+		if rec.Status != runstate.StatusCompleted || rec.Outcome != "unavailable" {
+			t.Errorf("live-attempt record = %s/%s, want completed unavailable", rec.Status, rec.Outcome)
+		}
+		if !runstate.IsFailedOutcome(rec.Kind, rec.Outcome) {
+			t.Errorf("live-attempt outcome %q is not a failed outcome, want the refused attempt kept as a failure", rec.Outcome)
+		}
+		if live.Counts.Failed != 1 || live.Counts.Completed != 1 {
+			t.Errorf("counts = %+v, want the one completed record counted as the one failure", live.Counts)
+		}
+		for _, pending := range live.Pending {
+			if pending.Kind == runstate.KindLiveAttempt {
+				t.Errorf("pending = %+v, want the answered live layer not offered again", live.Pending)
+			}
+		}
+	})
 }
 
 // TestResume_AnUnfinishedPublicationIsStillOwed reads the run's publication
