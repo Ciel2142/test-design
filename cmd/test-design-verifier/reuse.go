@@ -101,6 +101,12 @@ type reusedMutationInputs struct {
 	Reuse    *evidence.ReuseReference `json:"reuse"`
 }
 
+// reuseBeforeAdopt runs inside the reuse transaction after every prior record
+// has been verified and before the first is adopted; it is nil in production
+// and exists so a test can change a retained artifact at the moment adopt's
+// re-digest must catch it.
+var reuseBeforeAdopt func()
+
 func newReuseFlags() *flag.FlagSet {
 	fs := flag.NewFlagSet("reuse", flag.ContinueOnError)
 	addRequestFlag(fs)
@@ -232,6 +238,9 @@ func reuseHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer) *cliEr
 		}
 		run.dispatch, run.digest = dispatch, digest
 		run.claims = claimsOf(dispatch)
+		if reuseBeforeAdopt != nil {
+			reuseBeforeAdopt()
+		}
 
 		review, err := run.reviewDecisions(l)
 		if err != nil {

@@ -662,6 +662,49 @@ func TestReuse_RejectsAlteredRetainedBytes(t *testing.T) {
 		readyWriteArtifact(t, mutationPath, evidenceBytes)
 	})
 
+	// Verification is not adoption. A review group's bytes are hashed when the
+	// prior run is opened; adopt hashes them again as it completes this run's
+	// record, and a digest that no longer answers to the one the reference was
+	// built from abandons the whole transaction: the refusal names the file,
+	// nothing is written for any record, and with the bytes restored the same
+	// run adopts everything against the digest the original still carries.
+	t.Run("tampered-during-adoption", func(t *testing.T) {
+		runID := liveRunID("rdy-alt-adopt")
+		readyTrace(t, s, runID)
+		original := readyArtifactBytes(t, reviewPath)
+		t.Cleanup(func() { reuseBeforeAdopt = nil })
+		reuseBeforeAdopt = func() {
+			readyWriteArtifact(t, reviewPath, append(slices.Clone(original), '\n'))
+		}
+		code, stdout, stderr := runVerifyOp(t, "reuse", readyRequestJSON(t, s, runID, map[string]any{
+			"priorRunId": prior.runID, "policy": prior.policy,
+		}))
+		reuseBeforeAdopt = nil
+		if code != exitError {
+			t.Fatalf("reuse exit code = %d, want %d: %s changed while it was being adopted; stdout=%s",
+				code, exitError, reviewPath, stdout)
+		}
+		got := decodeCLIError(t, stderr)
+		if !strings.Contains(got.Message, "changed while it was being adopted") || !strings.Contains(got.Message, readyMarkerGroup) {
+			t.Errorf("refusal = %+v, want it to name %s as changed while it was being adopted", got, readyMarkerGroup)
+		}
+		state := readyResume(t, s, runID)
+		for _, rec := range state.Records {
+			if rec.Kind == runstate.KindReviewGroup || rec.Kind == runstate.KindMutationRow {
+				t.Errorf("ledger holds %s/%s (%s) after the abandoned reuse, want nothing adopted", rec.Kind, rec.ID, rec.Status)
+			}
+		}
+
+		readyWriteArtifact(t, reviewPath, original)
+		out := readyReuse(t, s, runID, prior.runID, prior.policy)
+		marker := readyReused(t, out.Review, readyMarkerGroup)
+		readyReused(t, out.Review, readyVersionGroup)
+		readyReused(t, out.Mutation, readyVersionRow)
+		if want := readyDigest(t, reviewPath); marker.Reference == nil || marker.Reference.Artifact.SHA256 != want {
+			t.Errorf("adopted %s reference = %+v, want its artifact digest %s", readyMarkerGroup, marker.Reference, want)
+		}
+	})
+
 	// Adoption is not the last time the bytes are read. Finalize re-hashes every
 	// adopted artifact immediately before it publishes, so bytes that changed
 	// after the ledger was read leave nothing published at all; with them
