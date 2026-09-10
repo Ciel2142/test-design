@@ -264,18 +264,11 @@ func findingKindPrecedence(kind string) int {
 }
 
 func deriveLayer2(rs *reasonSet, in *Inputs, active []coverage.Row) map[string]CriticRef {
-	voided := voidedBatches(in.Batches)
 	refs := make(map[string]CriticRef, len(active))
 	reasons := make(map[string]string, len(active))
 	for _, b := range in.Batches {
-		if voided[b.BatchID] {
-			continue
-		}
-		if b.CanaryUnavailableReason != "" {
-			rs.add(sevPartial, layer2, "", "critic-canary-unavailable", "batch %s: %s", b.BatchID, b.CanaryUnavailableReason)
-		}
 		for _, v := range b.Verdicts {
-			refs[v.RowID] = CriticRef{Verdict: v.Verdict, BatchID: b.BatchID, DispatchID: b.DispatchID}
+			refs[v.RowID] = CriticRef{Verdict: v.Verdict, BatchID: b.BatchID}
 			reasons[v.RowID] = v.Reason
 		}
 	}
@@ -502,25 +495,15 @@ func layer2Summary(rs *reasonSet, refs map[string]CriticRef, active []coverage.R
 }
 
 func deriveBatches(batches []Batch) []BatchReport {
-	voided := voidedBatches(batches)
 	out := make([]BatchReport, 0, len(batches))
 	for _, b := range batches {
-		report := BatchReport{
-			BatchID:                 b.BatchID,
-			DispatchID:              b.DispatchID,
-			RunID:                   b.RunID,
-			Rows:                    b.Rows,
-			InheritsFrom:            b.InheritsFrom,
-			CanaryUnavailableReason: b.CanaryUnavailableReason,
-			Voided:                  voided[b.BatchID],
-			Verdicts:                b.Verdicts,
-			Reuse:                   b.Reuse,
-		}
-		if b.Canary != nil {
-			canary := *b.Canary
-			report.Canary = &canary
-		}
-		out = append(out, report)
+		out = append(out, BatchReport{
+			BatchID:  b.BatchID,
+			RunID:    b.RunID,
+			Rows:     b.Rows,
+			Verdicts: b.Verdicts,
+			Reuse:    b.Reuse,
+		})
 	}
 	return out
 }

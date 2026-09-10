@@ -145,13 +145,6 @@ type StaleFinding struct {
 	Behavior string `json:"behavior"`
 }
 
-type Canary struct {
-	RowID     string `json:"rowId"`
-	Kind      string `json:"kind"`
-	Weakening string `json:"weakening"`
-	Caught    bool   `json:"caught"`
-}
-
 type CriticVerdict struct {
 	RowID   string `json:"rowId"`
 	Verdict string `json:"verdict"`
@@ -172,15 +165,10 @@ type ReviewArtifact struct {
 }
 
 type Batch struct {
-	BatchID                 string          `json:"batchId"`
-	DispatchID              string          `json:"dispatchId"`
-	RunID                   string          `json:"runId"`
-	Rows                    []string        `json:"rows"`
-	Canary                  *Canary         `json:"canary,omitempty"`
-	InheritsFrom            string          `json:"inheritsFrom,omitempty"`
-	CanaryUnavailableReason string          `json:"canaryUnavailableReason,omitempty"`
-	Voided                  bool            `json:"voided,omitempty"`
-	Verdicts                []CriticVerdict `json:"verdicts"`
+	BatchID  string          `json:"batchId"`
+	RunID    string          `json:"runId"`
+	Rows     []string        `json:"rows"`
+	Verdicts []CriticVerdict `json:"verdicts"`
 	// Reuse is set when this batch was adopted from an earlier run; it names
 	// that run's identity, sequence number, outcome and retained artifact.
 	Reuse *evidence.ReuseReference `json:"reuse,omitempty"`
@@ -225,9 +213,8 @@ type LayerVerdict struct {
 }
 
 type CriticRef struct {
-	Verdict    string `json:"verdict"`
-	BatchID    string `json:"batchId,omitempty"`
-	DispatchID string `json:"dispatchId,omitempty"`
+	Verdict string `json:"verdict"`
+	BatchID string `json:"batchId,omitempty"`
 }
 
 type MutationRef struct {
@@ -247,16 +234,11 @@ type RowReport struct {
 }
 
 type BatchReport struct {
-	BatchID                 string                   `json:"batchId"`
-	DispatchID              string                   `json:"dispatchId"`
-	RunID                   string                   `json:"runId"`
-	Rows                    []string                 `json:"rows"`
-	Canary                  *Canary                  `json:"canary,omitempty"`
-	InheritsFrom            string                   `json:"inheritsFrom,omitempty"`
-	CanaryUnavailableReason string                   `json:"canaryUnavailableReason,omitempty"`
-	Voided                  bool                     `json:"voided"`
-	Verdicts                []CriticVerdict          `json:"verdicts"`
-	Reuse                   *evidence.ReuseReference `json:"reuse,omitempty"`
+	BatchID  string                   `json:"batchId"`
+	RunID    string                   `json:"runId"`
+	Rows     []string                 `json:"rows"`
+	Verdicts []CriticVerdict          `json:"verdicts"`
+	Reuse    *evidence.ReuseReference `json:"reuse,omitempty"`
 }
 
 type TranscriptRef struct {

@@ -76,37 +76,24 @@ func writeMarkdownLayer2(b *strings.Builder, r *Report) {
 	fmt.Fprintf(b, "Status: %s · Applicable %d · Holds %d · Weak %d · Vacuous %d · Missing %d\n\n",
 		s.Status, s.Applicable, s.Holds, s.Weak, s.Vacuous, s.Missing)
 
-	b.WriteString("| Row | Layer 2 | Batch | Dispatch |\n")
-	b.WriteString("| --- | --- | --- | --- |\n")
+	b.WriteString("| Row | Layer 2 | Batch |\n")
+	b.WriteString("| --- | --- | --- |\n")
 	for _, row := range r.Rows {
-		fmt.Fprintf(b, "| %s | %s | %s | %s |\n",
-			escapeCell(row.RowID), escapeCell(row.Layer2.Verdict), escapeCell(row.Layer2.BatchID), escapeCell(row.Layer2.DispatchID))
+		fmt.Fprintf(b, "| %s | %s | %s |\n",
+			escapeCell(row.RowID), escapeCell(row.Layer2.Verdict), escapeCell(row.Layer2.BatchID))
 	}
 	b.WriteString("\n")
 
-	b.WriteString("| Batch | Dispatch | Rows | Canary Row | Canary Kind | Weakening | Caught | Inherits From | Voided |\n")
-	b.WriteString("| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n")
+	b.WriteString("| Batch | Run | Rows | Reused from |\n")
+	b.WriteString("| --- | --- | --- | --- |\n")
 	for _, batch := range r.Batches {
-		canaryRow, canaryKind, weakening, caught := "-", "-", "-", "-"
-		if batch.Canary != nil {
-			canaryRow = batch.Canary.RowID
-			canaryKind = batch.Canary.Kind
-			weakening = batch.Canary.Weakening
-			caught = fmt.Sprintf("%t", batch.Canary.Caught)
+		reusedFrom := "-"
+		if batch.Reuse != nil {
+			reusedFrom = fmt.Sprintf("%s seq %d", batch.Reuse.PriorRunID, batch.Reuse.PriorSeq)
 		}
-		inheritsFrom := batch.InheritsFrom
-		if inheritsFrom == "" {
-			inheritsFrom = "-"
-		}
-		fmt.Fprintf(b, "| %s | %s | %s | %s | %s | %s | %s | %s | %t |\n",
-			escapeCell(batch.BatchID), escapeCell(batch.DispatchID), escapeCell(strings.Join(batch.Rows, ", ")),
-			escapeCell(canaryRow), escapeCell(canaryKind), escapeCell(weakening), escapeCell(caught),
-			escapeCell(inheritsFrom), batch.Voided)
-	}
-	for _, batch := range r.Batches {
-		if batch.CanaryUnavailableReason != "" {
-			fmt.Fprintf(b, "\nCanary unavailable (%s): %s\n", batch.BatchID, batch.CanaryUnavailableReason)
-		}
+		fmt.Fprintf(b, "| %s | %s | %s | %s |\n",
+			escapeCell(batch.BatchID), escapeCell(batch.RunID), escapeCell(strings.Join(batch.Rows, ", ")),
+			escapeCell(reusedFrom))
 	}
 	b.WriteString("\n")
 }

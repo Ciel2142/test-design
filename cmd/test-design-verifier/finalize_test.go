@@ -133,15 +133,11 @@ func holdingBatches(runID string, active []coverage.Row) []report.Batch {
 	}
 	return []report.Batch{
 		{
-			BatchID: "cb1", DispatchID: "d1", RunID: runID, Rows: []string{first},
-			Canary: &report.Canary{RowID: first, Kind: "synthesized", Weakening: "dropped the boundary assertion", Caught: true},
-		},
-		{
-			BatchID: "b1", DispatchID: "d2", RunID: runID, Rows: []string{first}, InheritsFrom: "cb1",
+			BatchID: "b1", RunID: runID, Rows: []string{first},
 			Verdicts: []report.CriticVerdict{{RowID: first, Verdict: "HOLDS"}},
 		},
 		{
-			BatchID: "b2", DispatchID: "d3", RunID: runID, Rows: rest, InheritsFrom: "cb1",
+			BatchID: "b2", RunID: runID, Rows: rest,
 			Verdicts: verdicts,
 		},
 	}
@@ -301,12 +297,8 @@ func TestFinalize_DecodesRequestDocument(t *testing.T) {
 		t.Fatalf("layer2.batches = %+v, want one batch", req.Layer2.Batches)
 	}
 	b := req.Layer2.Batches[0]
-	if b.BatchID != "b1" || b.DispatchID != "d1" || b.RunID != "run-9" || b.InheritsFrom != "cb0" || !b.Voided {
+	if b.BatchID != "b1" || b.RunID != "run-9" {
 		t.Errorf("batch = %+v, want every batch field decoded", b)
-	}
-	if b.Canary == nil || b.Canary.RowID != "SC-01" || b.Canary.Kind != "synthesized" ||
-		b.Canary.Weakening != "dropped assert" || !b.Canary.Caught {
-		t.Errorf("canary = %+v, want every canary field decoded", b.Canary)
 	}
 	if len(b.Verdicts) != 1 || b.Verdicts[0].Verdict != "WEAK" || b.Verdicts[0].Reason != "asserts nothing" {
 		t.Errorf("verdicts = %+v", b.Verdicts)

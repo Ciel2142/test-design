@@ -38,25 +38,22 @@ func baseBatches() []Batch {
 			BatchID: "cb1",
 			RunID:   "run-1",
 			Rows:    []string{"SC-02"},
-			Canary:  &Canary{RowID: "SC-02", Kind: "natural", Caught: true},
 			Verdicts: []CriticVerdict{
 				{RowID: "SC-02", Verdict: "WEAK"},
 			},
 		},
 		{
-			BatchID:      "b1",
-			RunID:        "run-1",
-			Rows:         []string{"SC-01"},
-			InheritsFrom: "cb1",
+			BatchID: "b1",
+			RunID:   "run-1",
+			Rows:    []string{"SC-01"},
 			Verdicts: []CriticVerdict{
 				{RowID: "SC-01", Verdict: "HOLDS"},
 			},
 		},
 		{
-			BatchID:      "b2",
-			RunID:        "run-1",
-			Rows:         []string{"SC-03"},
-			InheritsFrom: "cb1",
+			BatchID: "b2",
+			RunID:   "run-1",
+			Rows:    []string{"SC-03"},
 			Verdicts: []CriticVerdict{
 				{RowID: "SC-03", Verdict: "HOLDS"},
 			},
@@ -192,11 +189,10 @@ func TestValidateUnknownRowRetiredInMutations(t *testing.T) {
 func TestValidateDuplicateVerdictLayer2(t *testing.T) {
 	in := baseInputs()
 	in.Batches = append(in.Batches, Batch{
-		BatchID:      "b3",
-		RunID:        "run-1",
-		Rows:         []string{"SC-01"},
-		InheritsFrom: "cb1",
-		Verdicts:     []CriticVerdict{{RowID: "SC-01", Verdict: "WEAK"}},
+		BatchID:  "b3",
+		RunID:    "run-1",
+		Rows:     []string{"SC-01"},
+		Verdicts: []CriticVerdict{{RowID: "SC-01", Verdict: "WEAK"}},
 	})
 	wantRefusal(t, Validate(in), CodeDuplicateVerdict)
 }
@@ -207,97 +203,10 @@ func TestValidateMissingVerdictLayer2(t *testing.T) {
 	wantRefusal(t, Validate(in), CodeMissingVerdict)
 }
 
-func TestValidateVoidedVerdictLayer2(t *testing.T) {
-	in := baseInputs()
-	in.Batches[1].Voided = true
-	wantRefusal(t, Validate(in), CodeVoidedVerdict)
-}
-
-func TestValidateVoidedVerdictTransitiveOneLevel(t *testing.T) {
-	in := baseInputs()
-	base := baseBatches()
-	in.Batches = []Batch{
-		{BatchID: "root", RunID: "run-1", Voided: true},
-		{
-			BatchID:      "b1",
-			RunID:        "run-1",
-			Rows:         []string{"SC-01"},
-			InheritsFrom: "root",
-			Verdicts:     []CriticVerdict{{RowID: "SC-01", Verdict: "HOLDS"}},
-		},
-		base[0],
-		base[2],
-	}
-	re := wantRefusal(t, Validate(in), CodeVoidedVerdict)
-	if !strings.Contains(re.Detail, "SC-01") {
-		t.Errorf("Detail = %q, want it to name row SC-01, whose only batch (b1) is voided purely via inheritsFrom root", re.Detail)
-	}
-}
-
-func TestValidateVoidedVerdictTransitiveTwoLevelChain(t *testing.T) {
-	in := baseInputs()
-	base := baseBatches()
-	in.Batches = []Batch{
-		{BatchID: "root", RunID: "run-1", Voided: true},
-		{BatchID: "mid", RunID: "run-1", InheritsFrom: "root"},
-		{
-			BatchID:      "b1",
-			RunID:        "run-1",
-			Rows:         []string{"SC-01"},
-			InheritsFrom: "mid",
-			Verdicts:     []CriticVerdict{{RowID: "SC-01", Verdict: "HOLDS"}},
-		},
-		base[0],
-		base[2],
-	}
-	re := wantRefusal(t, Validate(in), CodeVoidedVerdict)
-	if !strings.Contains(re.Detail, "SC-01") {
-		t.Errorf("Detail = %q, want it to name row SC-01, whose only batch (b1) is voided via a two-level inheritsFrom chain (b1 -> mid -> root)", re.Detail)
-	}
-}
-
 func TestValidateGapRowMustCarryMissingLayer2(t *testing.T) {
 	in := baseInputs()
 	in.Trace.Findings = []TraceFinding{{Kind: "gap", RowID: "SC-01", Detail: "no tagged test"}}
 	wantRefusal(t, Validate(in), CodeMissingVerdict)
-}
-
-func TestValidateUncaughtCanaryNotVoided(t *testing.T) {
-	in := baseInputs()
-	in.Batches[0].Canary.Caught = false
-	wantRefusal(t, Validate(in), CodeUncaughtCanaryNotVoided)
-}
-
-func TestValidateCanaryBookkeepingCanaryFreeWithoutInheritsFrom(t *testing.T) {
-	in := baseInputs()
-	in.Batches[1].InheritsFrom = ""
-	wantRefusal(t, Validate(in), CodeCanaryBookkeeping)
-}
-
-func TestValidateCanaryBookkeepingInheritsFromNonCaughtBatch(t *testing.T) {
-	in := baseInputs()
-	in.Batches[1].InheritsFrom = "b2"
-	wantRefusal(t, Validate(in), CodeCanaryBookkeeping)
-}
-
-func TestValidateCanaryBookkeepingSynthesizedEmptyWeakening(t *testing.T) {
-	in := baseInputs()
-	in.Batches[0].Canary.Kind = "synthesized"
-	in.Batches[0].Canary.Weakening = ""
-	wantRefusal(t, Validate(in), CodeCanaryBookkeeping)
-}
-
-func TestValidateCanaryBookkeepingSynthesizedMissingRealSourceVerdict(t *testing.T) {
-	in := baseInputs()
-	in.Batches[0].Canary.Kind = "synthesized"
-	in.Batches[0].Canary.Weakening = "off-by-one"
-	wantRefusal(t, Validate(in), CodeCanaryBookkeeping)
-}
-
-func TestValidateCanaryBookkeepingNaturalCaughtHolds(t *testing.T) {
-	in := baseInputs()
-	in.Batches[0].Verdicts[0].Verdict = "HOLDS"
-	wantRefusal(t, Validate(in), CodeCanaryBookkeeping)
 }
 
 func TestValidateUnexpectedLiveEvidence(t *testing.T) {
@@ -309,7 +218,6 @@ func TestValidateUnexpectedLiveEvidence(t *testing.T) {
 		BatchID: "b1",
 		RunID:   "run-1",
 		Rows:    []string{"SC-01"},
-		Canary:  &Canary{RowID: "SC-01", Kind: "natural", Caught: true},
 		Verdicts: []CriticVerdict{
 			{RowID: "SC-01", Verdict: "WEAK"},
 		},
@@ -468,7 +376,7 @@ func TestValidateGapRowLayer3KeepsItsLiveVerdict(t *testing.T) {
 	in := baseInputs()
 	in.Batches = greenBatches()
 	in.Trace.Findings = []TraceFinding{{Kind: "gap", RowID: "SC-02", Detail: "no tagged test"}}
-	in.Batches[2].Verdicts[0].Verdict = "MISSING"
+	in.Batches[1].Verdicts[0].Verdict = "MISSING"
 	in.Mutations = nil
 	if err := Validate(in); err != nil {
 		t.Fatalf("Validate: %v", err)
@@ -479,7 +387,7 @@ func TestValidateMutationOnGapRow(t *testing.T) {
 	in := baseInputs()
 	in.Batches = greenBatches()
 	in.Trace.Findings = []TraceFinding{{Kind: "gap", RowID: "SC-02", Detail: "no tagged test"}}
-	in.Batches[2].Verdicts[0].Verdict = "MISSING"
+	in.Batches[1].Verdicts[0].Verdict = "MISSING"
 	in.Live.RowVerdicts[0] = LiveRowVerdict{RowID: "SC-02", Verdict: "LIVE-N/A (layer 1 gap)"}
 	wantRefusal(t, Validate(in), CodeMutationOnGapRow)
 }
@@ -553,23 +461,6 @@ func TestValidateInvalidVerdictLayer4UnloadedEvidence(t *testing.T) {
 	}
 }
 
-func TestValidateCanaryBookkeepingCanaryRowNotInBatchRows(t *testing.T) {
-	in := baseInputs()
-	in.Batches[0].Rows = []string{"SC-01"}
-	wantRefusal(t, Validate(in), CodeCanaryBookkeeping)
-}
-
-func TestValidateCanaryBookkeepingNaturalCaughtHoldsInAnotherBatch(t *testing.T) {
-	in := baseInputs()
-	in.Batches[0].Verdicts = nil
-	in.Batches[2].Rows = []string{"SC-02", "SC-03"}
-	in.Batches[2].Verdicts = []CriticVerdict{
-		{RowID: "SC-02", Verdict: "HOLDS"},
-		{RowID: "SC-03", Verdict: "HOLDS"},
-	}
-	wantRefusal(t, Validate(in), CodeCanaryBookkeeping)
-}
-
 func TestValidateStaleEvidenceLiveAttemptRunIDMismatch(t *testing.T) {
 	in := baseInputs()
 	in.Live = nil
@@ -622,26 +513,6 @@ func TestValidateRejectsEvidenceFromPreviousCommitWithSameRunID(t *testing.T) {
 	}
 }
 
-func TestValidateCanaryKindsAndSourceSeparation(t *testing.T) {
-	t.Run("natural verdict belongs to same batch", func(t *testing.T) {
-		in := baseInputs()
-		in.Batches[0].Verdicts = nil
-		in.Batches[1].Verdicts = append(in.Batches[1].Verdicts, CriticVerdict{RowID: "SC-02", Verdict: "WEAK"})
-		wantRefusal(t, Validate(in), CodeCanaryBookkeeping)
-	})
-	t.Run("unknown kind", func(t *testing.T) {
-		in := baseInputs()
-		in.Batches[0].Canary.Kind = "unknown"
-		wantRefusal(t, Validate(in), CodeCanaryBookkeeping)
-	})
-	t.Run("synthetic verdict is not real evidence", func(t *testing.T) {
-		in := greenInputs()
-		in.Batches[0].Verdicts = in.Batches[1].Verdicts
-		in.Batches[1].Verdicts = nil
-		wantRefusal(t, Validate(in), CodeCanaryBookkeeping)
-	})
-}
-
 func TestValidateRejectsMissingOrMixedProvenance(t *testing.T) {
 	for _, field := range []string{"commit", "source", "sha", "wrong-source", "wrong-sha"} {
 		t.Run(field, func(t *testing.T) {
@@ -659,24 +530,6 @@ func TestValidateRejectsMissingOrMixedProvenance(t *testing.T) {
 				in.Mutations[0].Evidence.SourceSHA256 = "other-sha"
 			}
 			wantRefusal(t, Validate(in), CodeStaleEvidence)
-		})
-	}
-}
-
-func TestValidateCanaryUnavailableCannotInheritOrCarryCanary(t *testing.T) {
-	for _, mode := range []string{"canary", "inheritance", "whitespace"} {
-		t.Run(mode, func(t *testing.T) {
-			in := greenInputs()
-			switch mode {
-			case "canary":
-				in.Batches[0].CanaryUnavailableReason = "audited exception"
-			case "inheritance":
-				in.Batches[1].CanaryUnavailableReason = "audited exception"
-			case "whitespace":
-				in.Batches[1].InheritsFrom = ""
-				in.Batches[1].CanaryUnavailableReason = " \t"
-			}
-			wantRefusal(t, Validate(in), CodeCanaryBookkeeping)
 		})
 	}
 }
@@ -728,23 +581,10 @@ func reusedMutationInputs() *Inputs {
 	return in
 }
 
-func TestValidateReusedBatchKeepsPriorRunIDAndSkipsCanaryBookkeeping(t *testing.T) {
-	if err := Validate(reusedBatchInputs()); err != nil {
-		t.Fatalf("Validate over an adopted batch: %v", err)
-	}
-}
-
 func TestValidateReusedBatchRunIDDiffersFromReference(t *testing.T) {
 	in := reusedBatchInputs()
 	in.Batches[2].RunID = "run-9"
 	wantRefusal(t, Validate(in), CodeReuseIdentityMismatch)
-}
-
-func TestValidateNonReusedBatchStillNeedsCanaryBookkeeping(t *testing.T) {
-	in := reusedBatchInputs()
-	in.Batches[2].RunID = "run-1"
-	in.Batches[2].Reuse = nil
-	wantRefusal(t, Validate(in), CodeCanaryBookkeeping)
 }
 
 func TestValidateNonReusedBatchWithForeignRunIDIsStale(t *testing.T) {

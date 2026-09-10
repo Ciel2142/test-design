@@ -137,13 +137,17 @@ func TestRenderMarkdownLayer2BatchTable(t *testing.T) {
 	r := mustCompute(t, greenInputs())
 	md := mustRender(t, r)
 
-	for _, want := range []string{"cb1", "d1", "synthesized", "dropped the boundary assertion", "true"} {
-		if !strings.Contains(md, want) {
-			t.Errorf("markdown missing canary field %q; got:\n%s", want, md)
-		}
+	if !strings.Contains(md, "| batch-1 | run-1 | SC-01 | - |") {
+		t.Errorf("markdown missing batch-1 row; got:\n%s", md)
+	}
+	if !strings.Contains(md, "| batch-2 | run-1 | SC-02, SC-03 | - |") {
+		t.Errorf("markdown missing batch-2 row; got:\n%s", md)
 	}
 	if !strings.Contains(md, "HOLDS") {
 		t.Errorf("markdown missing HOLDS verdict; got:\n%s", md)
+	}
+	if strings.Contains(md, "Canary") {
+		t.Errorf("markdown should carry no Canary token; got:\n%s", md)
 	}
 }
 
@@ -155,18 +159,10 @@ func TestRenderMarkdownLayer3NAIsOneLine(t *testing.T) {
 	in.Trace.Counts = SuiteCounts{Passed: 1}
 	in.Trace.RowAccounting = RowAccounting{ActiveRows: 1, WithResult: 1}
 	in.Batches = []Batch{{
-		BatchID:    "cb1",
-		DispatchID: "d1",
-		RunID:      "run-1",
-		Rows:       []string{"SC-01"},
-		Canary:     &Canary{RowID: "SC-01", Kind: "synthesized", Weakening: "dropped the assertion", Caught: true},
-	}, {
-		BatchID:      "b1",
-		DispatchID:   "d2",
-		RunID:        "run-1",
-		Rows:         []string{"SC-01"},
-		InheritsFrom: "cb1",
-		Verdicts:     []CriticVerdict{{RowID: "SC-01", Verdict: "HOLDS"}},
+		BatchID:  "batch-1",
+		RunID:    "run-1",
+		Rows:     []string{"SC-01"},
+		Verdicts: []CriticVerdict{{RowID: "SC-01", Verdict: "HOLDS"}},
 	}}
 	in.Live = nil
 	in.Mutations = nil
@@ -214,26 +210,15 @@ func TestRenderMarkdownLayer3NAAllGapsIsOneLine(t *testing.T) {
 		Freshness: Freshness{Result: "fresh"},
 		Batches: []Batch{
 			{
-				BatchID:    "cb1",
-				DispatchID: "d1",
-				RunID:      "run-1",
-				Rows:       []string{"SC-00"},
-				Canary:     &Canary{RowID: "SC-00", Kind: "synthesized", Weakening: "dropped a check", Caught: true},
+				BatchID:  "batch-1",
+				RunID:    "run-1",
+				Rows:     []string{"SC-00"},
+				Verdicts: []CriticVerdict{{RowID: "SC-00", Verdict: "HOLDS"}},
 			},
 			{
-				BatchID:      "b1",
-				DispatchID:   "d2",
-				RunID:        "run-1",
-				Rows:         []string{"SC-00"},
-				InheritsFrom: "cb1",
-				Verdicts:     []CriticVerdict{{RowID: "SC-00", Verdict: "HOLDS"}},
-			},
-			{
-				BatchID:      "b2",
-				DispatchID:   "d3",
-				RunID:        "run-1",
-				Rows:         []string{"SC-01", "SC-02"},
-				InheritsFrom: "cb1",
+				BatchID: "batch-2",
+				RunID:   "run-1",
+				Rows:    []string{"SC-01", "SC-02"},
 				Verdicts: []CriticVerdict{
 					{RowID: "SC-01", Verdict: "MISSING"},
 					{RowID: "SC-02", Verdict: "MISSING"},
@@ -244,7 +229,7 @@ func TestRenderMarkdownLayer3NAAllGapsIsOneLine(t *testing.T) {
 			RunID:        "run-1",
 			Source:       greenSourcePath,
 			SourceSHA256: "sha-source-1",
-			RepoCommit: "head-1",
+			RepoCommit:   "head-1",
 			RowVerdicts: []LiveRowVerdict{
 				{RowID: "SC-01", Verdict: "LIVE-N/A (layer 1 gap)"},
 				{RowID: "SC-02", Verdict: "LIVE-N/A (layer 1 gap)"},

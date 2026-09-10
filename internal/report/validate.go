@@ -2,8 +2,6 @@ package report
 
 import (
 	"fmt"
-	"slices"
-	"strings"
 
 	"test-design/internal/coverage"
 	"test-design/internal/evidence"
@@ -11,23 +9,20 @@ import (
 )
 
 const (
-	CodeStaleEvidence           = "stale-evidence"
-	CodeMissingFreshness        = "missing-freshness"
-	CodeInvalidFreshness        = "invalid-freshness"
-	CodeDuplicateVerdict        = "duplicate-verdict"
-	CodeMissingVerdict          = "missing-verdict"
-	CodeVoidedVerdict           = "voided-verdict"
-	CodeUncaughtCanaryNotVoided = "uncaught-canary-not-voided"
-	CodeUnknownRow              = "unknown-row"
-	CodeCanaryBookkeeping       = "canary-bookkeeping"
-	CodeUnexpectedLiveEvidence  = "unexpected-live-evidence"
-	CodeMutationOnGapRow        = "mutation-on-gap-row"
-	CodeMutationEvidenceEmpty   = "mutation-evidence-empty"
-	CodeMutationRowMismatch     = "mutation-row-mismatch"
-	CodeMissingAttemptEvidence  = "missing-attempt-evidence"
-	CodeInvalidMutationOutcome  = "invalid-mutation-outcome"
-	CodeInvalidVerdict          = "invalid-verdict"
-	CodeLiveDecisionIncomplete  = "live-decision-incomplete"
+	CodeStaleEvidence          = "stale-evidence"
+	CodeMissingFreshness       = "missing-freshness"
+	CodeInvalidFreshness       = "invalid-freshness"
+	CodeDuplicateVerdict       = "duplicate-verdict"
+	CodeMissingVerdict         = "missing-verdict"
+	CodeUnknownRow             = "unknown-row"
+	CodeUnexpectedLiveEvidence = "unexpected-live-evidence"
+	CodeMutationOnGapRow       = "mutation-on-gap-row"
+	CodeMutationEvidenceEmpty  = "mutation-evidence-empty"
+	CodeMutationRowMismatch    = "mutation-row-mismatch"
+	CodeMissingAttemptEvidence = "missing-attempt-evidence"
+	CodeInvalidMutationOutcome = "invalid-mutation-outcome"
+	CodeInvalidVerdict         = "invalid-verdict"
+	CodeLiveDecisionIncomplete = "live-decision-incomplete"
 	// CodeReuseNotAdmitted refuses a parent-pasted batch or layer-4 row that
 	// carries a reuse reference: only reuse itself may adopt a prior record.
 	CodeReuseNotAdmitted = "reuse-not-admitted"
@@ -193,9 +188,6 @@ func validateRowUniverse(in *Inputs, activeSet map[string]bool) error {
 				return refuse(CodeUnknownRow, "batch %s binds unknown or retired row %s", b.BatchID, rowID)
 			}
 		}
-		if b.Canary != nil && !activeSet[b.Canary.RowID] {
-			return refuse(CodeUnknownRow, "batch %s canary names unknown or retired row %s", b.BatchID, b.Canary.RowID)
-		}
 		for _, v := range b.Verdicts {
 			if !activeSet[v.RowID] {
 				return refuse(CodeUnknownRow, "batch %s verdicts name unknown or retired row %s", b.BatchID, v.RowID)
@@ -218,13 +210,6 @@ func validateRowUniverse(in *Inputs, activeSet map[string]bool) error {
 }
 
 func validateLayer2(in *Inputs, active []coverage.Row, gaps map[string]bool) error {
-	byID := make(map[string]Batch, len(in.Batches))
-	for _, b := range in.Batches {
-		byID[b.BatchID] = b
-	}
-
-	voided := voidedBatches(in.Batches)
-
 	for _, b := range in.Batches {
 		for _, v := range b.Verdicts {
 			if !validCriticVerdict(v.Verdict) {
@@ -233,100 +218,22 @@ func validateLayer2(in *Inputs, active []coverage.Row, gaps map[string]bool) err
 		}
 	}
 
-	for _, b := range in.Batches {
-		if b.Canary != nil && !b.Canary.Caught && !voided[b.BatchID] {
-			return refuse(CodeUncaughtCanaryNotVoided, "batch %s has an uncaught canary and is not voided", b.BatchID)
-		}
-	}
-
 	for _, row := range active {
-		var nonVoided, onlyVoided []CriticVerdict
+		var verdicts []CriticVerdict
 		for _, b := range in.Batches {
 			for _, v := range b.Verdicts {
-				if v.RowID != row.ID {
-					continue
-				}
-				if voided[b.BatchID] {
-					onlyVoided = append(onlyVoided, v)
-				} else {
-					nonVoided = append(nonVoided, v)
+				if v.RowID == row.ID {
+					verdicts = append(verdicts, v)
 				}
 			}
 		}
 		switch {
-		case len(nonVoided) > 1:
-			return refuse(CodeDuplicateVerdict, "row %s has %d non-voided layer-2 verdicts", row.ID, len(nonVoided))
-		case len(nonVoided) == 0 && len(onlyVoided) > 0:
-			return refuse(CodeVoidedVerdict, "row %s is verdicted only by voided batches", row.ID)
-		case len(nonVoided) == 0:
+		case len(verdicts) > 1:
+			return refuse(CodeDuplicateVerdict, "row %s has %d layer-2 verdicts", row.ID, len(verdicts))
+		case len(verdicts) == 0:
 			return refuse(CodeMissingVerdict, "row %s has no layer-2 verdict", row.ID)
-		case gaps[row.ID] && nonVoided[0].Verdict != "MISSING":
-			return refuse(CodeMissingVerdict, "row %s is a layer-1 gap and must carry a MISSING layer-2 verdict, got %q", row.ID, nonVoided[0].Verdict)
-		}
-	}
-
-	for _, b := range in.Batches {
-		if b.Reuse != nil {
-			// The prior run's review record carries no canary fields; an
-			// adopted batch inherits its catch from the run it came from.
-			continue
-		}
-		if err := validateCanaryBookkeeping(b, byID, voided); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func validateCanaryBookkeeping(b Batch, byID map[string]Batch, voided map[string]bool) error {
-	if b.CanaryUnavailableReason != "" {
-		if strings.TrimSpace(b.CanaryUnavailableReason) == "" || b.Canary != nil || b.InheritsFrom != "" {
-			return refuse(CodeCanaryBookkeeping, "batch %s canaryUnavailableReason must be nonempty and exclusive with canary/inheritance", b.BatchID)
-		}
-		return nil
-	}
-	if b.Canary == nil {
-		if b.InheritsFrom == "" {
-			return refuse(CodeCanaryBookkeeping, "canary-free batch %s does not inherit from a caught-canary batch", b.BatchID)
-		}
-		inherited, ok := byID[b.InheritsFrom]
-		if !ok || inherited.Canary == nil || !inherited.Canary.Caught {
-			return refuse(CodeCanaryBookkeeping, "batch %s inheritsFrom %s, which is not a caught-canary batch", b.BatchID, b.InheritsFrom)
-		}
-		return nil
-	}
-
-	if !slices.Contains(b.Rows, b.Canary.RowID) {
-		return refuse(CodeCanaryBookkeeping, "batch %s carries a canary on row %s, which the batch does not dispatch", b.BatchID, b.Canary.RowID)
-	}
-
-	switch b.Canary.Kind {
-	default:
-		return refuse(CodeCanaryBookkeeping, "batch %s has unknown canary kind %q", b.BatchID, b.Canary.Kind)
-	case "synthesized":
-		if b.Canary.Weakening == "" {
-			return refuse(CodeCanaryBookkeeping, "batch %s synthesized canary has empty weakening", b.BatchID)
-		}
-		for _, v := range b.Verdicts {
-			if v.RowID == b.Canary.RowID {
-				return refuse(CodeCanaryBookkeeping, "batch %s synthesized copy cannot supply a real-source verdict for row %s", b.BatchID, v.RowID)
-			}
-		}
-		if !hasRealSourceVerdict(b, byID, voided) {
-			return refuse(CodeCanaryBookkeeping, "batch %s synthesized canary row %s has no separate real-source verdict", b.BatchID, b.Canary.RowID)
-		}
-	case "natural":
-		found := false
-		for _, v := range b.Verdicts {
-			if v.RowID == b.Canary.RowID {
-				found = true
-				if b.Canary.Caught && v.Verdict != "WEAK" && v.Verdict != "VACUOUS" {
-					return refuse(CodeCanaryBookkeeping, "batch %s caught natural canary must carry its real WEAK/VACUOUS verdict", b.BatchID)
-				}
-			}
-		}
-		if !found {
-			return refuse(CodeCanaryBookkeeping, "batch %s natural canary requires a verdict in the same batch", b.BatchID)
+		case gaps[row.ID] && verdicts[0].Verdict != "MISSING":
+			return refuse(CodeMissingVerdict, "row %s is a layer-1 gap and must carry a MISSING layer-2 verdict, got %q", row.ID, verdicts[0].Verdict)
 		}
 	}
 	return nil
@@ -344,26 +251,6 @@ func validLiveVerdict(verdict string) bool {
 	switch verdict {
 	case "LIVE-PASS", "LIVE-FAIL", "LIVE-INCONCLUSIVE", valueLiveGap:
 		return true
-	}
-	return false
-}
-
-func hasRealSourceVerdict(canaryBatch Batch, byID map[string]Batch, voided map[string]bool) bool {
-	for id, b := range byID {
-		if id == canaryBatch.BatchID || voided[id] {
-			continue
-		}
-		if b.Canary != nil && b.Canary.Kind == "synthesized" && b.Canary.RowID == canaryBatch.Canary.RowID {
-			continue
-		}
-		if len(b.Rows) != 1 || b.Rows[0] != canaryBatch.Canary.RowID {
-			continue
-		}
-		for _, v := range b.Verdicts {
-			if v.RowID == canaryBatch.Canary.RowID {
-				return true
-			}
-		}
 	}
 	return false
 }

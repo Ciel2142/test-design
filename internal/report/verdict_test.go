@@ -47,32 +47,20 @@ func greenTrace() *TraceEvidence {
 	}
 }
 
-// greenBatches models the all-green layer-2 shape: a synthesized canary on a
-// healthy row, caught, with that row re-dispatched alone against the real
-// source, and the remaining rows in a canary-free batch inheriting the catch.
+// greenBatches models the all-green layer-2 shape: two canary-free batches,
+// each supplying HOLDS verdicts for the rows it dispatched.
 func greenBatches() []Batch {
 	return []Batch{
 		{
-			BatchID:    "cb1",
-			DispatchID: "d1",
-			RunID:      "run-1",
-			Rows:       []string{"SC-01"},
-			Canary:     &Canary{RowID: "SC-01", Kind: "synthesized", Weakening: "dropped the boundary assertion", Caught: true},
+			BatchID:  "batch-1",
+			RunID:    "run-1",
+			Rows:     []string{"SC-01"},
+			Verdicts: []CriticVerdict{{RowID: "SC-01", Verdict: "HOLDS"}},
 		},
 		{
-			BatchID:      "b1",
-			DispatchID:   "d2",
-			RunID:        "run-1",
-			Rows:         []string{"SC-01"},
-			InheritsFrom: "cb1",
-			Verdicts:     []CriticVerdict{{RowID: "SC-01", Verdict: "HOLDS"}},
-		},
-		{
-			BatchID:      "b2",
-			DispatchID:   "d3",
-			RunID:        "run-1",
-			Rows:         []string{"SC-02", "SC-03"},
-			InheritsFrom: "cb1",
+			BatchID: "batch-2",
+			RunID:   "run-1",
+			Rows:    []string{"SC-02", "SC-03"},
 			Verdicts: []CriticVerdict{
 				{RowID: "SC-02", Verdict: "HOLDS"},
 				{RowID: "SC-03", Verdict: "HOLDS"},
@@ -238,8 +226,8 @@ func TestComputeAllGreenIsPass(t *testing.T) {
 	if sc01.Layer1 != (LayerVerdict{Status: "bound", Scope: "pkg/a", Name: "TestA"}) {
 		t.Errorf("SC-01 Layer1 = %+v, want bound with scope/name", sc01.Layer1)
 	}
-	if sc01.Layer2 != (CriticRef{Verdict: "HOLDS", BatchID: "b1", DispatchID: "d2"}) {
-		t.Errorf("SC-01 Layer2 = %+v, want HOLDS from the real-source batch b1/d2", sc01.Layer2)
+	if sc01.Layer2 != (CriticRef{Verdict: "HOLDS", BatchID: "batch-1"}) {
+		t.Errorf("SC-01 Layer2 = %+v, want HOLDS from batch-1", sc01.Layer2)
 	}
 	if sc01.Layer3 != "N/A" {
 		t.Errorf("SC-01 Layer3 = %q, want N/A (unit row)", sc01.Layer3)
@@ -258,8 +246,8 @@ func TestComputeAllGreenIsPass(t *testing.T) {
 	if sc02.Layer4.Status != "MUTATION-CAUGHT" || len(sc02.Layer4.Sites) != 0 {
 		t.Errorf("SC-02 Layer4 = %+v, want MUTATION-CAUGHT with no named sites", sc02.Layer4)
 	}
-	if sc02.Layer2 != (CriticRef{Verdict: "HOLDS", BatchID: "b2", DispatchID: "d3"}) {
-		t.Errorf("SC-02 Layer2 = %+v, want HOLDS from b2/d3", sc02.Layer2)
+	if sc02.Layer2 != (CriticRef{Verdict: "HOLDS", BatchID: "batch-2"}) {
+		t.Errorf("SC-02 Layer2 = %+v, want HOLDS from batch-2", sc02.Layer2)
 	}
 
 	sc03 := rowOf(t, r, "SC-03")
@@ -283,8 +271,8 @@ func TestComputeAllGreenIsPass(t *testing.T) {
 		t.Errorf("Layer4 summary = %+v, want 1 applicable / 1 caught", r.Layers.Layer4)
 	}
 
-	if len(r.Batches) != 3 || r.Batches[0].BatchID != "cb1" || r.Batches[0].Canary == nil {
-		t.Errorf("Batches = %+v, want every dispatch with the canary preserved", r.Batches)
+	if len(r.Batches) != 2 || r.Batches[0].BatchID != "batch-1" || r.Batches[1].BatchID != "batch-2" {
+		t.Errorf("Batches = %+v, want the two canary-free dispatches batch-1 and batch-2", r.Batches)
 	}
 }
 
@@ -307,7 +295,7 @@ func gapInputs() *Inputs {
 	in.Trace.RowAccounting = RowAccounting{ActiveRows: 3, WithResult: 2}
 	in.Trace.Findings = []TraceFinding{{Kind: "gap", RowID: "SC-02", Detail: "no test cites SC-02"}}
 	in.Trace.FindingCounts = map[string]int{"gap": 1}
-	in.Batches[2].Verdicts[0].Verdict = "MISSING"
+	in.Batches[1].Verdicts[0].Verdict = "MISSING"
 	in.Live.RowVerdicts[0].Verdict = "LIVE-N/A (layer 1 gap)"
 	in.Mutations = nil
 	return in
@@ -636,18 +624,10 @@ func TestComputeLayer3NotApplicableIsNA(t *testing.T) {
 	in.Trace.Counts = SuiteCounts{Passed: 1}
 	in.Trace.RowAccounting = RowAccounting{ActiveRows: 1, WithResult: 1}
 	in.Batches = []Batch{{
-		BatchID:    "cb1",
-		DispatchID: "d1",
-		RunID:      "run-1",
-		Rows:       []string{"SC-01"},
-		Canary:     &Canary{RowID: "SC-01", Kind: "synthesized", Weakening: "dropped the assertion", Caught: true},
-	}, {
-		BatchID:      "b1",
-		DispatchID:   "d2",
-		RunID:        "run-1",
-		Rows:         []string{"SC-01"},
-		InheritsFrom: "cb1",
-		Verdicts:     []CriticVerdict{{RowID: "SC-01", Verdict: "HOLDS"}},
+		BatchID:  "batch-1",
+		RunID:    "run-1",
+		Rows:     []string{"SC-01"},
+		Verdicts: []CriticVerdict{{RowID: "SC-01", Verdict: "HOLDS"}},
 	}}
 	in.Live = nil
 	in.Mutations = nil
@@ -697,7 +677,7 @@ func TestComputeLayer3JourneyedIntegrationRowCarriesItsLiveVerdict(t *testing.T)
 
 func TestComputeWeakCriticVerdictIsBlocked(t *testing.T) {
 	in := greenInputs()
-	in.Batches[2].Verdicts[1] = CriticVerdict{RowID: "SC-03", Verdict: "WEAK", Reason: "asserts only the status code"}
+	in.Batches[1].Verdicts[1] = CriticVerdict{RowID: "SC-03", Verdict: "WEAK", Reason: "asserts only the status code"}
 
 	r := mustCompute(t, in)
 
@@ -714,7 +694,7 @@ func TestComputeWeakCriticVerdictIsBlocked(t *testing.T) {
 
 func TestComputeVacuousCriticVerdictIsBlocked(t *testing.T) {
 	in := greenInputs()
-	in.Batches[2].Verdicts[1].Verdict = "VACUOUS"
+	in.Batches[1].Verdicts[1].Verdict = "VACUOUS"
 
 	r := mustCompute(t, in)
 
@@ -762,9 +742,9 @@ func TestComputeRedRunnerIsBlocked(t *testing.T) {
 	in.Trace.RowResults = nil
 	in.Trace.Counts = SuiteCounts{}
 	in.Trace.RowAccounting = RowAccounting{ActiveRows: 3, Unaccounted: []string{"SC-01", "SC-02", "SC-03"}}
+	in.Batches[0].Verdicts[0].Verdict = "MISSING"
 	in.Batches[1].Verdicts[0].Verdict = "MISSING"
-	in.Batches[2].Verdicts[0].Verdict = "MISSING"
-	in.Batches[2].Verdicts[1].Verdict = "MISSING"
+	in.Batches[1].Verdicts[1].Verdict = "MISSING"
 	in.Live.RowVerdicts[0].Verdict = "LIVE-N/A (layer 1 gap)"
 	in.Live.RowVerdicts[1].Verdict = "LIVE-N/A (layer 1 gap)"
 	in.Mutations = nil
@@ -833,21 +813,9 @@ func TestComputeSkippedRowResultWithoutFindingIsGap(t *testing.T) {
 	}
 }
 
-func TestComputeRefusesUncaughtCanaryNotVoided(t *testing.T) {
-	in := greenInputs()
-	in.Batches[0].Canary.Caught = false
-	wantComputeRefusal(t, in, CodeUncaughtCanaryNotVoided)
-}
-
-func TestComputeRefusesVoidedVerdict(t *testing.T) {
-	in := greenInputs()
-	in.Batches[1].Voided = true
-	wantComputeRefusal(t, in, CodeVoidedVerdict)
-}
-
 func TestComputeRefusesStaleBatchRunID(t *testing.T) {
 	in := greenInputs()
-	in.Batches[1].RunID = "run-0"
+	in.Batches[0].RunID = "run-0"
 	wantComputeRefusal(t, in, CodeStaleEvidence)
 }
 
@@ -866,8 +834,8 @@ func multiCauseInputs() *Inputs {
 	}
 	in.Trace.FindingCounts = map[string]int{"drift": 1, "gap": 1}
 	in.Trace.RowAccounting = RowAccounting{ActiveRows: 3, WithResult: 2}
-	in.Batches[1].Verdicts[0].Verdict = "MISSING"
-	in.Batches[2].Verdicts[1] = CriticVerdict{RowID: "SC-03", Verdict: "WEAK", Reason: "shallow"}
+	in.Batches[0].Verdicts[0].Verdict = "MISSING"
+	in.Batches[1].Verdicts[1] = CriticVerdict{RowID: "SC-03", Verdict: "WEAK", Reason: "shallow"}
 	in.Live.RowVerdicts[0].Verdict = "LIVE-FAIL"
 	in.Live.RowVerdicts[1].RedactionBarrier = true
 	in.Live.CleanupFailed = true
@@ -910,7 +878,7 @@ func TestComputeIsDeterministic(t *testing.T) {
 
 func TestDeriveLayer2InvalidVerdictBlocks(t *testing.T) {
 	in := greenInputs()
-	in.Batches[1].Verdicts[0].Verdict = "PROBABLY-HOLDS"
+	in.Batches[0].Verdicts[0].Verdict = "PROBABLY-HOLDS"
 	rs := newReasonSet()
 
 	refs := deriveLayer2(rs, in, ActiveRows(in.Source))
@@ -983,7 +951,7 @@ func TestComputeAmbiguityFindingOnPassingRowIsGapGated(t *testing.T) {
 	in := greenInputs()
 	in.Trace.Findings = []TraceFinding{{Kind: "ambiguity", RowID: "SC-01", Detail: "two tests cite SC-01"}}
 	in.Trace.FindingCounts = map[string]int{"ambiguity": 1}
-	in.Batches[1].Verdicts[0].Verdict = "MISSING"
+	in.Batches[0].Verdicts[0].Verdict = "MISSING"
 
 	r := mustCompute(t, in)
 
@@ -1006,41 +974,12 @@ func TestComputeAmbiguityFindingOnPassingRowRefusesHoldingCritic(t *testing.T) {
 	wantComputeRefusal(t, in, CodeMissingVerdict)
 }
 
-func TestComputeCanaryUnavailableIsAuditedPartial(t *testing.T) {
-	in := greenInputs()
-	in.Batches = in.Batches[1:]
-	for i := range in.Batches {
-		in.Batches[i].InheritsFrom = ""
-		in.Batches[i].CanaryUnavailableReason = "Only snapshot assertions exist; no safe prompt-only weakening is possible."
-	}
-	rep := mustCompute(t, in)
-	if rep.Verdict != VerdictPartial || rep.Layers.Layer2.Status != statusPartial {
-		t.Fatalf("canary-free verdict = %s, layer2 = %+v", rep.Verdict, rep.Layers.Layer2)
-	}
-	wantReason(t, rep, layer2, "", "critic-canary-unavailable")
-	if rep.Batches[0].CanaryUnavailableReason != in.Batches[0].CanaryUnavailableReason {
-		t.Fatal("report lost the audited canary exception")
-	}
-}
-
-func TestComputeNaturalCanaryKeepsRealWeakVerdict(t *testing.T) {
-	in := greenInputs()
-	in.Batches[0].Canary = &Canary{RowID: "SC-01", Kind: "natural", Caught: true}
-	in.Batches[0].Verdicts = []CriticVerdict{{RowID: "SC-01", Verdict: "WEAK", Reason: "boundary assertion absent"}}
-	in.Batches = []Batch{in.Batches[0], in.Batches[2]}
-	rep := mustCompute(t, in)
-	if rep.Verdict != VerdictBlocked || rowOf(t, rep, "SC-01").Layer2.Verdict != "WEAK" {
-		t.Fatalf("natural weakness was suppressed: %+v", rep)
-	}
-	wantReason(t, rep, layer2, "SC-01", "WEAK")
-}
-
 // covers: SC-05
 func TestDeriveLayer2BlocksWeakVacuousMissing(t *testing.T) {
 	for _, verdict := range []string{"WEAK", "VACUOUS", "MISSING"} {
 		t.Run(verdict, func(t *testing.T) {
 			in := greenInputs()
-			in.Batches[2].Verdicts[1] = CriticVerdict{RowID: "SC-03", Verdict: verdict, Reason: "critic found " + verdict}
+			in.Batches[1].Verdicts[1] = CriticVerdict{RowID: "SC-03", Verdict: verdict, Reason: "critic found " + verdict}
 
 			r := mustCompute(t, in)
 
@@ -1098,7 +1037,7 @@ func TestComputeCopiesReuseIntoBatchReportAndMutationRef(t *testing.T) {
 		Artifact:          evidence.FileRef{Path: "runs/run-0/review-g1-2.json", SHA256: "digest-review"},
 		Basis:             evidence.ReuseBasis{PriorCommit: "head-0", ClaimRows: []string{"SC-02", "SC-03"}, ContextFiles: 3, Policy: "matched", Toolchain: "matched"},
 	}
-	in.Batches[2] = Batch{
+	in.Batches[1] = Batch{
 		BatchID: "reuse:g1",
 		RunID:   "run-0",
 		Rows:    []string{"SC-02", "SC-03"},

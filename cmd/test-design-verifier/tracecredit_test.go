@@ -474,9 +474,8 @@ func TestTraceWithholdsCreditForSkippedContributor(t *testing.T) {
 		Trace:      tr,
 		Freshness:  report.Freshness{Result: "fresh"},
 		Batches: []report.Batch{{
-			BatchID: "batch-1", DispatchID: "dispatch-1", RunID: ev.RunID,
-			Rows:                    []string{"SC-01", "SC-02"},
-			CanaryUnavailableReason: "no critic runs in this layer-1 proof",
+			BatchID: "batch-1", RunID: ev.RunID,
+			Rows: []string{"SC-01", "SC-02"},
 			Verdicts: []report.CriticVerdict{
 				{RowID: "SC-01", Verdict: "MISSING", Reason: "layer-1 gap"},
 				{RowID: "SC-02", Verdict: "MISSING", Reason: "layer-1 gap"},
@@ -557,9 +556,8 @@ func TestTraceDispatchKeepsFailedRowsRedBesideAGap(t *testing.T) {
 		Trace:      tr,
 		Freshness:  report.Freshness{Result: "fresh"},
 		Batches: []report.Batch{{
-			BatchID: "batch-1", DispatchID: "dispatch-1", RunID: ev.RunID,
-			Rows:                    []string{"SC-01"},
-			CanaryUnavailableReason: "no critic runs in this layer-1 proof",
+			BatchID: "batch-1", RunID: ev.RunID,
+			Rows: []string{"SC-01"},
 			Verdicts: []report.CriticVerdict{
 				{RowID: "SC-01", Verdict: "MISSING", Reason: "layer-1 red"},
 			},

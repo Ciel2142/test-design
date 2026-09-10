@@ -41,15 +41,11 @@ func layer2FromTrace(active []coverage.Row, gaps map[string]bool) []report.Batch
 	}
 	return []report.Batch{
 		{
-			BatchID: "cb1", DispatchID: "d1", RunID: e2eFinalizeRunID, Rows: []string{canaryRow},
-			Canary: &report.Canary{RowID: canaryRow, Kind: "synthesized", Weakening: "dropped the boundary assertion", Caught: true},
-		},
-		{
-			BatchID: "b1", DispatchID: "d2", RunID: e2eFinalizeRunID, Rows: []string{canaryRow}, InheritsFrom: "cb1",
+			BatchID: "b1", RunID: e2eFinalizeRunID, Rows: []string{canaryRow},
 			Verdicts: []report.CriticVerdict{{RowID: canaryRow, Verdict: "HOLDS"}},
 		},
 		{
-			BatchID: "b2", DispatchID: "d3", RunID: e2eFinalizeRunID, Rows: rest, InheritsFrom: "cb1",
+			BatchID: "b2", RunID: e2eFinalizeRunID, Rows: rest,
 			Verdicts: verdicts,
 		},
 	}

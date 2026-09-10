@@ -273,9 +273,8 @@ func readyBatch(t *testing.T, rep *report.Report, batchID string) report.BatchRe
 // refusal over it is about reuse and nothing else.
 func readyHoldingBatch(runID, batchID, row string) report.Batch {
 	return report.Batch{
-		BatchID: batchID, DispatchID: "d-" + batchID, RunID: runID, Rows: []string{row},
-		CanaryUnavailableReason: "the subject carries one assertion per row",
-		Verdicts:                []report.CriticVerdict{{RowID: row, Verdict: "HOLDS"}},
+		BatchID: batchID, RunID: runID, Rows: []string{row},
+		Verdicts: []report.CriticVerdict{{RowID: row, Verdict: "HOLDS"}},
 	}
 }
 
