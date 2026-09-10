@@ -1,0 +1,362 @@
+{
+  "schemaVersion": "1",
+  "verifierVersion": "0.6.0",
+  "runId": "run-2026-09-10-0002",
+  "source": "docs/superpowers/coverage/2026-09-07-verification-workflow-redesign-coverage.md",
+  "sourceSha256": "b45e5ac06a5fb6693dc407c21a5c12357795853236189519f009cc680d63d3a2",
+  "repoCommit": "dee1832206b4b5df8db5ef62f5194e8d310043f6",
+  "baselineCommit": "122401156dbf639afb5d7ce021e3a0ae2dbb0824",
+  "baselineStatus": "ok",
+  "modulePath": "test-design",
+  "command": [
+    "go",
+    "test",
+    "-count=1",
+    "-json",
+    "./..."
+  ],
+  "exitStatus": 0,
+  "reportSha256": "e1cc616e3321fe39e8614580b94babed3dd38dea999cb046e7cd2de9038c27a2",
+  "counts": {
+    "passed": 1491,
+    "failed": 0,
+    "skipped": 2
+  },
+  "rowAccounting": {
+    "activeRows": 36,
+    "withResult": 36,
+    "unaccounted": []
+  },
+  "findingCounts": {},
+  "rowResults": [
+    {
+      "rowId": "SC-01",
+      "scope": "test-design/cmd/test-design-verifier",
+      "name": "TestNextIDReservesRetiredHighestAndTraceExcludesRetired",
+      "status": "passed",
+      "file": "cmd/test-design-verifier/nextidtrace_test.go",
+      "line": 91,
+      "endLine": 137
+    },
+    {
+      "rowId": "SC-02",
+      "scope": "test-design/cmd/test-design-verifier",
+      "name": "TestTraceCreditsOneTestForThreeRows",
+      "status": "passed",
+      "file": "cmd/test-design-verifier/tracecredit_test.go",
+      "line": 181,
+      "endLine": 229
+    },
+    {
+      "rowId": "SC-03",
+      "scope": "test-design/cmd/test-design-verifier",
+      "name": "TestTraceCombinesTwoTestsForOneRow",
+      "status": "passed",
+      "file": "cmd/test-design-verifier/tracecredit_test.go",
+      "line": 268,
+      "endLine": 350
+    },
+    {
+      "rowId": "SC-04",
+      "scope": "test-design/cmd/test-design-verifier",
+      "name": "TestTraceWithholdsCreditForSkippedContributor",
+      "status": "passed",
+      "file": "cmd/test-design-verifier/tracecredit_test.go",
+      "line": 390,
+      "endLine": 493
+    },
+    {
+      "rowId": "SC-05",
+      "scope": "test-design/internal/report",
+      "name": "TestDeriveLayer2BlocksWeakVacuousMissing",
+      "status": "passed",
+      "file": "internal/report/verdict_test.go",
+      "line": 977,
+      "endLine": 1000
+    },
+    {
+      "rowId": "SC-06",
+      "scope": "test-design/internal/coverage",
+      "name": "TestValidateLiveDecisionIncompleteForms",
+      "status": "passed",
+      "file": "internal/coverage/livedecision_test.go",
+      "line": 13,
+      "endLine": 69
+    },
+    {
+      "rowId": "SC-07",
+      "scope": "test-design/internal/live",
+      "name": "TestApplicableRowsFollowRequiredJourneys",
+      "status": "passed",
+      "file": "internal/live/applicable_test.go",
+      "line": 40,
+      "endLine": 88
+    },
+    {
+      "rowId": "SC-08",
+      "scope": "test-design/cmd/test-design-verifier",
+      "name": "TestLiveHandoff_GapRowExecutesAndStaysTraceGap",
+      "status": "passed",
+      "file": "cmd/test-design-verifier/livehandoff_test.go",
+      "line": 159,
+      "endLine": 207
+    },
+    {
+      "rowId": "SC-09",
+      "scope": "test-design/cmd/test-design-verifier",
+      "name": "TestLiveHandoff_ResolvedProfileAcceptedAndResourceRemoved",
+      "status": "passed",
+      "file": "cmd/test-design-verifier/livehandoff_test.go",
+      "line": 209,
+      "endLine": 269
+    },
+    {
+      "rowId": "SC-10",
+      "scope": "test-design/cmd/test-design-verifier",
+      "name": "TestLiveTruth_DeployedRevisionJourney",
+      "status": "passed",
+      "file": "cmd/test-design-verifier/livetruth_test.go",
+      "line": 304,
+      "endLine": 438
+    },
+    {
+      "rowId": "SC-11",
+      "scope": "test-design/cmd/test-design-verifier",
+      "name": "TestLiveTruth_ReadinessGatesBusinessAssertions",
+      "status": "passed",
+      "file": "cmd/test-design-verifier/livetruth_test.go",
+      "line": 1006,
+      "endLine": 1108
+    },
+    {
+      "rowId": "SC-12",
+      "scope": "test-design/cmd/test-design-verifier",
+      "name": "TestLiveTruth_OwnedCleanupAfterFailedPhase",
+      "status": "passed",
+      "file": "cmd/test-design-verifier/livetruth_test.go",
+      "line": 1110,
+      "endLine": 1174
+    },
+    {
+      "rowId": "SC-13",
+      "scope": "test-design/cmd/test-design-verifier",
+      "name": "TestLiveTruth_CleanupConfinedToRun",
+      "status": "passed",
+      "file": "cmd/test-design-verifier/livetruth_test.go",
+      "line": 440,
+      "endLine": 505
+    },
+    {
+      "rowId": "SC-14",
+      "scope": "test-design/cmd/test-design-verifier",
+      "name": "TestExecuteLive_SanitizedEnvOmitsUnapprovedCredential",
+      "status": "passed",
+      "file": "cmd/test-design-verifier/executelive_test.go",
+      "line": 1113,
+      "endLine": 1141
+    },
+    {
+      "rowId": "SC-15",
+      "scope": "test-design/cmd/test-design-verifier",
+      "name": "TestLiveTruth_UnboundAssertionFailureBlocks",
+      "status": "passed",
+      "file": "cmd/test-design-verifier/livetruth_test.go",
+      "line": 1261,
+      "endLine": 1363
+    },
+    {
+      "rowId": "SC-16",
+      "scope": "test-design/cmd/test-design-verifier",
+      "name": "TestExecuteLive_MergeVerdictKeepsEarlierFailure",
+      "status": "passed",
+      "file": "cmd/test-design-verifier/executelive_test.go",
+      "line": 1146,
+      "endLine": 1185
+    },
+    {
+      "rowId": "SC-17",
+      "scope": "test-design/cmd/test-design-verifier",
+      "name": "TestLiveTruth_EveryCleanupFailureRetained",
+      "status": "passed",
+      "file": "cmd/test-design-verifier/livetruth_test.go",
+      "line": 1721,
+      "endLine": 1864
+    },
+    {
+      "rowId": "SC-18",
+      "scope": "test-design/cmd/test-design-verifier",
+      "name": "TestLiveTruth_IncompleteOutputIsNotProof",
+      "status": "passed",
+      "file": "cmd/test-design-verifier/livetruth_test.go",
+      "line": 2265,
+      "endLine": 2391
+    },
+    {
+      "rowId": "SC-19",
+      "scope": "test-design/cmd/test-design-verifier",
+      "name": "TestLiveHandoff_FinalizeAcceptsRealLiveEvidence",
+      "status": "passed",
+      "file": "cmd/test-design-verifier/livehandoff_test.go",
+      "line": 283,
+      "endLine": 323
+    },
+    {
+      "rowId": "SC-20",
+      "scope": "test-design/cmd/test-design-verifier",
+      "name": "TestResume_SelectsOnlyValidatedCompletions",
+      "status": "passed",
+      "file": "cmd/test-design-verifier/resume_test.go",
+      "line": 452,
+      "endLine": 712
+    },
+    {
+      "rowId": "SC-21",
+      "scope": "test-design/internal/runstate",
+      "name": "TestCheckpoint_InterruptedReplacementKeepsPriorCompletion",
+      "status": "passed",
+      "file": "internal/runstate/checkpoint_test.go",
+      "line": 13,
+      "endLine": 106
+    },
+    {
+      "rowId": "SC-22",
+      "scope": "test-design/cmd/test-design-verifier",
+      "name": "TestResume_PreservesFailedOutcomes",
+      "status": "passed",
+      "file": "cmd/test-design-verifier/resume_test.go",
+      "line": 734,
+      "endLine": 909
+    },
+    {
+      "rowId": "SC-23",
+      "scope": "test-design/cmd/test-design-verifier",
+      "name": "TestRestart_RecoversLiveStateBeforeRepeating",
+      "status": "passed",
+      "file": "cmd/test-design-verifier/restart_test.go",
+      "line": 163,
+      "endLine": 369
+    },
+    {
+      "rowId": "SC-24",
+      "scope": "test-design/cmd/test-design-verifier",
+      "name": "TestRestart_RestoresMutationWorkspaceBeforeMeasuring",
+      "status": "passed",
+      "file": "cmd/test-design-verifier/restart_test.go",
+      "line": 718,
+      "endLine": 826
+    },
+    {
+      "rowId": "SC-25",
+      "scope": "test-design/cmd/test-design-verifier",
+      "name": "TestReuse_MatchesCompleteInputsBeforeReuse",
+      "status": "passed",
+      "file": "cmd/test-design-verifier/reuseproof_test.go",
+      "line": 277,
+      "endLine": 515
+    },
+    {
+      "rowId": "SC-26",
+      "scope": "test-design/cmd/test-design-verifier",
+      "name": "TestReuse_IsolatedRepairInvalidatesOnlyItsGroup",
+      "status": "passed",
+      "file": "cmd/test-design-verifier/reuseproof_test.go",
+      "line": 616,
+      "endLine": 753
+    },
+    {
+      "rowId": "SC-27",
+      "scope": "test-design/cmd/test-design-verifier",
+      "name": "TestReuse_RejectsAlteredRetainedBytes",
+      "status": "passed",
+      "file": "cmd/test-design-verifier/reusefinalize_test.go",
+      "line": 629,
+      "endLine": 762
+    },
+    {
+      "rowId": "SC-28",
+      "scope": "test-design/cmd/test-design-verifier",
+      "name": "TestReuse_PreservesOriginalProvenanceInReport",
+      "status": "passed",
+      "file": "cmd/test-design-verifier/reusefinalize_test.go",
+      "line": 764,
+      "endLine": 906
+    },
+    {
+      "rowId": "SC-29",
+      "scope": "test-design/cmd/test-design-verifier",
+      "name": "TestReuse_NewRevisionGetsFreshSuiteAndLive",
+      "status": "passed",
+      "file": "cmd/test-design-verifier/reuserevision_test.go",
+      "line": 109,
+      "endLine": 266
+    },
+    {
+      "rowId": "SC-30",
+      "scope": "test-design/cmd/test-design-verifier",
+      "name": "TestPublication_RetriesFromRetainedEvidence",
+      "status": "passed",
+      "file": "cmd/test-design-verifier/publicationproof_test.go",
+      "line": 242,
+      "endLine": 347
+    },
+    {
+      "rowId": "SC-31",
+      "scope": "test-design/cmd/test-design-verifier",
+      "name": "TestPublication_RecoversOnlyProvenOwnArtifacts",
+      "status": "passed",
+      "file": "cmd/test-design-verifier/publicationproof_test.go",
+      "line": 349,
+      "endLine": 574
+    },
+    {
+      "rowId": "SC-32",
+      "scope": "test-design/cmd/test-design-verifier",
+      "name": "TestPublication_CommitKeepsMeasuredRevision",
+      "status": "passed",
+      "file": "cmd/test-design-verifier/publicationproof_test.go",
+      "line": 576,
+      "endLine": 711
+    },
+    {
+      "rowId": "SC-33",
+      "scope": "test-design/cmd/test-design-verifier",
+      "name": "TestReuse_LegacyRecordsAreHistoricalNotReusable",
+      "status": "passed",
+      "file": "cmd/test-design-verifier/reuseproof_test.go",
+      "line": 761,
+      "endLine": 816
+    },
+    {
+      "rowId": "SC-34",
+      "scope": "test-design/internal/report",
+      "name": "TestLayer2_CompleteReviewFinalizesWithoutCanaryBookkeeping",
+      "status": "passed",
+      "file": "internal/report/canaryfree_test.go",
+      "line": 11,
+      "endLine": 64
+    },
+    {
+      "rowId": "SC-35",
+      "scope": "test-design/internal/report",
+      "name": "TestLayer4_HighRiskObligationSurvivesCanaryRemoval",
+      "status": "passed",
+      "file": "internal/report/canaryfree_test.go",
+      "line": 66,
+      "endLine": 109
+    },
+    {
+      "rowId": "SC-36",
+      "scope": "test-design/cmd/test-design-verifier",
+      "name": "TestOrchestration_SummaryMatchesRetainedWork",
+      "status": "passed",
+      "file": "cmd/test-design-verifier/orchestration_test.go",
+      "line": 185,
+      "endLine": 417
+    }
+  ],
+  "findings": [],
+  "tagClasses": [],
+  "newFailures": [],
+  "startedAt": "2026-09-10T18:11:19.017192Z",
+  "finishedAt": "2026-09-10T18:17:46.223061Z"
+}

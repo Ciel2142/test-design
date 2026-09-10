@@ -1,0 +1,50 @@
+{
+  "schemaVersion": "1",
+  "verifierVersion": "0.6.0",
+  "runId": "run-2026-09-10-0002",
+  "rowID": "SC-15",
+  "identity": {
+    "scope": "test-design/cmd/test-design-verifier",
+    "name": "TestLiveTruth_UnboundAssertionFailureBlocks"
+  },
+  "runnerKind": "go",
+  "suiteCommand": [
+    "go",
+    "test",
+    "-count=1",
+    "-json",
+    "./..."
+  ],
+  "targetCommand": [
+    "go",
+    "test",
+    "-count=1",
+    "-json",
+    "test-design/cmd/test-design-verifier",
+    "-run",
+    "^TestLiveTruth_UnboundAssertionFailureBlocks$"
+  ],
+  "sites": [
+    {
+      "site": "site-1",
+      "outcome": "caught",
+      "diffPath": "/private/var/folders/mj/95h4sfv90kdfh4l4qb32gjth0000gn/T/test-design-verifier-2263543031/runs/run-2026-09-10-0002/site-1.diff",
+      "diffSha256": "0635ebce483493ce40239a061055115f05fb0b1be3ebcf17161b850eff5ce7ad",
+      "mutatedRunDir": "/private/var/folders/mj/95h4sfv90kdfh4l4qb32gjth0000gn/T/test-design-verifier-2263543031/runs/run-2026-09-10-0002/site-1-mutated",
+      "mutatedExitStatus": 1,
+      "cleanRunDir": "/private/var/folders/mj/95h4sfv90kdfh4l4qb32gjth0000gn/T/test-design-verifier-2263543031/runs/run-2026-09-10-0002/site-1-clean",
+      "cleanExitStatus": 0
+    },
+    {
+      "site": "site-2",
+      "outcome": "caught",
+      "diffPath": "/private/var/folders/mj/95h4sfv90kdfh4l4qb32gjth0000gn/T/test-design-verifier-2263543031/runs/run-2026-09-10-0002/site-2.diff",
+      "diffSha256": "6e42b5ae7d0a7232c61058e1d75e2a319071ecae4e0f71207521065750940663",
+      "mutatedRunDir": "/private/var/folders/mj/95h4sfv90kdfh4l4qb32gjth0000gn/T/test-design-verifier-2263543031/runs/run-2026-09-10-0002/site-2-mutated",
+      "mutatedExitStatus": 1,
+      "cleanRunDir": "/private/var/folders/mj/95h4sfv90kdfh4l4qb32gjth0000gn/T/test-design-verifier-2263543031/runs/run-2026-09-10-0002/site-2-clean",
+      "cleanExitStatus": 0
+    }
+  ],
+  "snapshotEqual": true
+}

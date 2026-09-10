@@ -1,0 +1,60 @@
+{
+  "schemaVersion": "1",
+  "verifierVersion": "0.6.0",
+  "runId": "run-2026-09-10-0002",
+  "rowID": "SC-03",
+  "identity": {
+    "scope": "test-design/cmd/test-design-verifier",
+    "name": "TestTraceCombinesTwoTestsForOneRow"
+  },
+  "runnerKind": "go",
+  "suiteCommand": [
+    "go",
+    "test",
+    "-count=1",
+    "-json",
+    "./..."
+  ],
+  "targetCommand": [
+    "go",
+    "test",
+    "-count=1",
+    "-json",
+    "test-design/cmd/test-design-verifier",
+    "-run",
+    "^TestTraceCombinesTwoTestsForOneRow$"
+  ],
+  "sites": [
+    {
+      "site": "site-1",
+      "outcome": "caught",
+      "diffPath": "/private/var/folders/mj/95h4sfv90kdfh4l4qb32gjth0000gn/T/test-design-verifier-1079151533/runs/run-2026-09-10-0002/site-1.diff",
+      "diffSha256": "cd08a6d316a27141555ec38dffd9b7fa16ae2004dd2867f0ebbf2071f80f3bce",
+      "mutatedRunDir": "/private/var/folders/mj/95h4sfv90kdfh4l4qb32gjth0000gn/T/test-design-verifier-1079151533/runs/run-2026-09-10-0002/site-1-mutated",
+      "mutatedExitStatus": 1,
+      "cleanRunDir": "/private/var/folders/mj/95h4sfv90kdfh4l4qb32gjth0000gn/T/test-design-verifier-1079151533/runs/run-2026-09-10-0002/site-1-clean",
+      "cleanExitStatus": 0
+    },
+    {
+      "site": "site-2",
+      "outcome": "caught",
+      "diffPath": "/private/var/folders/mj/95h4sfv90kdfh4l4qb32gjth0000gn/T/test-design-verifier-1079151533/runs/run-2026-09-10-0002/site-2.diff",
+      "diffSha256": "552319ca404ace893da38d45f68ed4cf982128d73b9fbf1dba11fde66ccc1981",
+      "mutatedRunDir": "/private/var/folders/mj/95h4sfv90kdfh4l4qb32gjth0000gn/T/test-design-verifier-1079151533/runs/run-2026-09-10-0002/site-2-mutated",
+      "mutatedExitStatus": 1,
+      "cleanRunDir": "/private/var/folders/mj/95h4sfv90kdfh4l4qb32gjth0000gn/T/test-design-verifier-1079151533/runs/run-2026-09-10-0002/site-2-clean",
+      "cleanExitStatus": 0
+    },
+    {
+      "site": "site-3",
+      "outcome": "caught",
+      "diffPath": "/private/var/folders/mj/95h4sfv90kdfh4l4qb32gjth0000gn/T/test-design-verifier-1079151533/runs/run-2026-09-10-0002/site-3.diff",
+      "diffSha256": "c8c5850fe0ffaa4fb0ecc7db35e8912b8deb184fc7cc18f60f4170e1388ab066",
+      "mutatedRunDir": "/private/var/folders/mj/95h4sfv90kdfh4l4qb32gjth0000gn/T/test-design-verifier-1079151533/runs/run-2026-09-10-0002/site-3-mutated",
+      "mutatedExitStatus": 1,
+      "cleanRunDir": "/private/var/folders/mj/95h4sfv90kdfh4l4qb32gjth0000gn/T/test-design-verifier-1079151533/runs/run-2026-09-10-0002/site-3-clean",
+      "cleanExitStatus": 0
+    }
+  ],
+  "snapshotEqual": true
+}

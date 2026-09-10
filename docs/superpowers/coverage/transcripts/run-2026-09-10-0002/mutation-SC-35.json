@@ -1,0 +1,40 @@
+{
+  "schemaVersion": "1",
+  "verifierVersion": "0.6.0",
+  "runId": "run-2026-09-10-0002",
+  "rowID": "SC-35",
+  "identity": {
+    "scope": "test-design/internal/report",
+    "name": "TestLayer4_HighRiskObligationSurvivesCanaryRemoval"
+  },
+  "runnerKind": "go",
+  "suiteCommand": [
+    "go",
+    "test",
+    "-count=1",
+    "-json",
+    "./..."
+  ],
+  "targetCommand": [
+    "go",
+    "test",
+    "-count=1",
+    "-json",
+    "test-design/internal/report",
+    "-run",
+    "^TestLayer4_HighRiskObligationSurvivesCanaryRemoval$"
+  ],
+  "sites": [
+    {
+      "site": "site-1",
+      "outcome": "caught",
+      "diffPath": "/private/var/folders/mj/95h4sfv90kdfh4l4qb32gjth0000gn/T/test-design-verifier-2471881108/runs/run-2026-09-10-0002/site-1.diff",
+      "diffSha256": "17bf89d6ea187ef1b5c5fa2e67ccd4c2d2e942a92edf55f9322557a4b22f3052",
+      "mutatedRunDir": "/private/var/folders/mj/95h4sfv90kdfh4l4qb32gjth0000gn/T/test-design-verifier-2471881108/runs/run-2026-09-10-0002/site-1-mutated",
+      "mutatedExitStatus": 1,
+      "cleanRunDir": "/private/var/folders/mj/95h4sfv90kdfh4l4qb32gjth0000gn/T/test-design-verifier-2471881108/runs/run-2026-09-10-0002/site-1-clean",
+      "cleanExitStatus": 0
+    }
+  ],
+  "snapshotEqual": true
+}
