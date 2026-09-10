@@ -448,7 +448,7 @@ func reportedStatus(rec *runstate.Record, reason string) string {
 
 func everyGroupSettled(groups []resumeGroup) bool {
 	for _, group := range groups {
-		if group.Status != string(runstate.StatusCompleted) || group.Reason != "" {
+		if group.Status != string(runstate.StatusCompleted) {
 			return false
 		}
 	}
