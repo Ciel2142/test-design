@@ -129,9 +129,9 @@ If a row's expected behavior cannot be exercised through the profile's declared 
 and endpoints — no declared command reaches the code path, or the observable outcome has
 no expressible predicate — say so as your entire reply instead of forcing a step that
 would misrepresent the row: name the row and explain what is missing. The main thread
-records the actual refusal through `record-attempt` as the **whole layer's**
-`attemptEvidencePath`, then continues to mutation. Per-row live continuation is not
-supported; do not return a partial plan or claim the remaining rows ran.
+records the actual refusal through `record-attempt` as the **whole layer's** attempt — the
+record is in the ledger; finalize reads it — then continues to mutation. Per-row live
+continuation is not supported; do not return a partial plan or claim the remaining rows ran.
 
 ## Example — only when needed
 

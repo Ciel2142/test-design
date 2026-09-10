@@ -2,8 +2,8 @@
 
 Layer 4 covers each active `risk=high` row whose layer-1 status is bound. Rows whose layer-1
 status is `gap` or `ambiguity` are **never** dispatched: there is no executable test to
-mutate, finalize derives `MUTATION-N/A (layer 1 gap)` for them itself, and supplying an entry
-for one is refused `mutation-on-gap-row`.
+mutate, finalize derives `MUTATION-N/A (layer 1 gap)` for them itself, and recording a
+mutation record for one is refused `mutation-on-gap-row`.
 
 ### 1. Prepare the row's worktree
 
@@ -31,7 +31,7 @@ If it returns `unappliable` with a reason instead of a list, record the row as
 and move on. Finalize turns that into `MUTATION-UNAPPLIABLE`, which blocks: it is a
 coverage-design defect — the row's `Verification mutation` was phrased as a negated
 expectation rather than a code-level fault. Report it as such and never let the mutator
-invent a substitute.
+invent a substitute. `finalize` publishes the record as `mutation-unappliable-<rowId>.json`.
 
 ### 3. Apply one site, confirm it, evaluate it
 
@@ -67,11 +67,8 @@ Per site, in the order the agent listed them:
    the aggregated `sites[]` and the `evidencePath` of the row's mutation evidence.
 
 Set `lastSite: true` on the final site of a row whose every site confirmed. That call writes
-the evidence and disposes the worktree; record the row as
-
-```json
-{"rowId": "SC-07", "evidencePath": "<the printed evidencePath>"}
-```
+the evidence, disposes the worktree, and completes the row in the ledger — the record is in
+the ledger, finalize reads it.
 
 Finalize derives `MUTATION-CAUGHT` when every enumerated site's targeted test failed with the
 mutation applied and passed again after restore, and `MUTATION-SURVIVED`, naming each
@@ -110,18 +107,14 @@ using the shared request plus `layer: 4` and this `rowID`:
 go run -C "$CLAUDE_PLUGIN_ROOT" ./cmd/test-design-verifier record-attempt -request -
 ```
 
-The op returns source/commit-stamped `evidencePath`; never hand-write or re-stamp an attempt.
-Use that path as `attemptEvidencePath`,
+The op returns a source/commit-stamped `evidencePath` and completes the row in the ledger with
+outcome `environmental` in the same call; the record is in the ledger, finalize reads it —
+never hand-write or re-stamp an attempt.
 
-and record the row as
-
-```json
-{"rowId": "SC-07", "outcome": "environmental", "reason": "<refusal message>", "attemptEvidencePath": "<that file>"}
-```
-
-`environmental` without an `attemptEvidencePath` is refused `missing-attempt-evidence`, and
-the attempt document is loaded through `report.LoadAttempt`, which refuses anything without
-the envelope. The row becomes `MUTATION-N/A (environmental)` and the run yields `PARTIAL`.
+A completed `environmental` record with no attempt artifact is refused
+`missing-attempt-evidence`, and the attempt document is loaded through `report.LoadAttempt`,
+which refuses anything without the envelope. The row becomes `MUTATION-N/A (environmental)`
+and the run yields `PARTIAL`.
 
 ### Restart
 

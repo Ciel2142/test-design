@@ -31,6 +31,7 @@ Four kinds, one current record per obligation:
 | `review-group` / `<groupId>` | the group's rows, each row's source hashes (primary first, then contributors), the dispatch-inputs digest they came from | `evidence` (`review-<groupId>-<seq>.json`) | `holds` (every verdict `HOLDS`), `blocked` (any other) |
 | `mutation-row` / `<rowId>` | the bound test's identity, the runner kind, the run dir, the worktree path | `evidence` (mutation-evidence.json, or `mutation-unappliable-<rowId>-<seq>.json`), `attempt` (mutation-attempt.json, environmental only) | `caught`, `survived`, `unappliable`, `environmental` |
 | `live-attempt` / `live` | the run dir, worktree path, profile path, plan digest | `evidence` (live-evidence.json), `attempt` (live-attempt.json, unavailable only) | `pass`, `fail`, `inconclusive`, `unavailable` |
+| `phase` / `publish` | the measured commit, the run dir, the report's digest, whether it carries an acknowledgement, and every file the publication writes with its digest | nothing — the captured files are the evidence | `ok` |
 
 A record's status is `started`, `completed`, or `superseded`. `Complete` never rewrites an
 outcome: a completed record is immutable until superseded, and a superseded record keeps its
@@ -58,7 +59,10 @@ sectioned, not interleaved by ledger position, so a parent reads one layer at a 
 3. the live attempt, when the coverage source requires layer 3;
 4. mutation rows: every mutation row the run opened whose record is started or no longer
    stands, in ledger order — whatever its risk — then every required row (high risk, active)
-   never started, in dispatch order.
+   never started, in dispatch order;
+5. the publish phase: one entry `{phase, publish, started-not-completed}`, appearing only when
+   the ledger's current publish record is started — never `never-started`, since nothing
+   attempts publication before every obligation above is settled.
 
 Each entry's `reason` is one of `never-started`, `started-not-completed`, or the reason a
 completed record no longer stands: `stale`, `inputs-changed`, `inputs-unreadable` (the
@@ -89,8 +93,16 @@ or recreates the worktree, so a parent re-dispatching the mutator gets the works
 exists now, not the one `prepare-mutation` opened.
 
 `counts` tallies the whole ledger: `started`, `completed`, `failed` (completed records with a
-failed outcome), `superseded`, `invalid` (completed records that no longer stand), and
-`pending` (the length of the `pending` list above).
+failed outcome), `superseded`, `invalid` (completed records that no longer stand), `pending`
+(the length of the `pending` list above), and `reused` (current completed records whose inputs
+carry `reuse`).
+
+`headCommit` is the repository's current HEAD — distinct from the commit the ledger recorded.
+Staleness is judged against the measured commit, not HEAD directly: a commit that touched only
+this run's own publication paths is drift, not staleness. `publication` reports the current
+`phase/publish` record: `status` (`none`, `started`, or `completed`), `outcome`,
+`measuredCommit`, `acknowledged`, the `files` it named with their digests, and `reason`
+(`started-not-completed` when `status` is `started`).
 
 Output (fields relevant here; `records[]` carries the raw ledger too):
 
@@ -100,15 +112,18 @@ Output (fields relevant here; `records[]` carries the raw ledger too):
   "ledgerPath": "<stateDir>/runs/<repoKey>/run-2026-09-07-0001/ledger.json",
   "initialized": true,
   "stale": false,
+  "headCommit": "<HEAD>",
   "trace": {"status": "completed", "outcome": "ok", "evidencePath": "...", "dispatchPath": "...", "runDir": "...", "reason": ""},
   "review": {"complete": false, "groups": [{"id": "batch-1", "rows": ["SC-07"], "status": "completed", "outcome": "holds", "evidencePath": "...", "reason": ""}], "uncovered": ["SC-09"]},
   "live": {"required": true, "status": "started", "recoveryRequired": true},
   "mutation": {"complete": false, "rows": [{"rowId": "SC-07", "status": "started", "worktreePath": "...", "completedSites": ["site-1"], "interruptedSite": "site-2"}]},
+  "publication": {"status": "started", "outcome": "", "measuredCommit": "", "acknowledged": false, "files": [], "reason": "started-not-completed"},
   "pending": [
     {"kind": "review-group", "id": "", "reason": "uncovered: SC-09"},
-    {"kind": "mutation-row", "id": "SC-07", "reason": "started-not-completed"}
+    {"kind": "mutation-row", "id": "SC-07", "reason": "started-not-completed"},
+    {"kind": "phase", "id": "publish", "reason": "started-not-completed"}
   ],
-  "counts": {"started": 1, "completed": 2, "failed": 0, "superseded": 0, "invalid": 0, "pending": 2}
+  "counts": {"started": 1, "completed": 2, "failed": 0, "superseded": 0, "invalid": 0, "pending": 3, "reused": 0}
 }
 ```
 
@@ -127,8 +142,8 @@ dispatch, never partway through one.
   written evidence (`review-<groupId>-<seq>.json`, where `<seq>` is the started record's
   position in the ledger, so a repeated group's completion never overwrites the evidence its
   superseded record digested) retains `rows`, `inputs` (the same input identity captured at
-  `started`) and `verdicts` — it carries no canary field at all; the canary's own
-  accounting stays in finalize's `layer2.batches[]`, never in the ledger's review record.
+  `started`) and `verdicts`. This record is what `finalize` reads as the group's layer-2
+  batch — the parent never assembles or pastes one.
 
 Merged into the shared request body:
 

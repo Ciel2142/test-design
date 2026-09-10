@@ -5,9 +5,9 @@ Layer 3 covers the rows the coverage source's `## Live decision` makes applicabl
 row; with `decision: not-applicable`, none. A journeyed `unit`, `component` or
 `integration` row is as applicable as a `smoke` row and keeps the level it was written
 with. Read the live decision from the source, and the row facts from the trace dispatch
-payload, **before** preparing or planning. Omit `layer3` only when `prepare-live` refuses
-`no-applicable-rows`; every other applicable row is planned, run and judged, the layer-1
-gap/ambiguity rows among them.
+payload, **before** preparing or planning. Layer 3 is skipped entirely only when
+`prepare-live` refuses `no-applicable-rows`; every other applicable row is planned, run and
+judged, the layer-1 gap/ambiguity rows among them.
 
 When reviewing a profile's schema or limits, **read [live profiles](../../../docs/live-profile.md)**.
 Optional `timeoutSeconds` defaults to 120, `cleanupTimeoutSeconds` to 30, and
@@ -30,13 +30,15 @@ coverage source, not an outcome — amend the source and rerun.
 
 Two refusals are outcomes rather than errors:
 
-- `no-applicable-rows` — the live decision is `not-applicable`. Omit `layer3` from
-  the finalize request entirely; the report says layer 3 is `n/a`, not skipped and not
-  partial.
-- `profile-unavailable` — the profile is missing, unreadable, or fails validation. The op has
-  **already written** `live-attempt.json` into the run dir and its message names the path.
-  Take that path as `layer3.attemptEvidencePath` and continue the run; finalize records
-  `live-profile-unavailable` and the verdict becomes `PARTIAL`.
+- `no-applicable-rows` — the live decision is `not-applicable`. Nothing is recorded for
+  layer 3 at all; continue straight to mutation. The report reads layer 3 as `n/a` from the
+  coverage source's live decision, not skipped and not partial.
+- `profile-unavailable` — the profile is missing, unreadable, or fails validation.
+  `prepare-live` now records that attempt itself, completing `live-attempt/live` with outcome
+  `unavailable` before it creates a run dir or worktree — refusing `live-attempt-completed`
+  first when a completed record already stands without `repeat.reason`. The record is in the
+  ledger; finalize reads it. Continue the run; finalize records `live-profile-unavailable` and
+  the verdict becomes `PARTIAL`.
 
 ### 2. Dispatch [live-runner](../../../agents/live-runner.md)
 
@@ -65,7 +67,7 @@ Two other replies are legitimate:
   go run -C "$CLAUDE_PLUGIN_ROOT" ./cmd/test-design-verifier record-attempt -request -
   ```
 
-  Use its `evidencePath` as `layer3.attemptEvidencePath` and continue to mutation.
+  The record is in the ledger; finalize reads it. Continue to mutation.
   The executable stamps the source/commit/run identity; never hand-write an envelope,
   invent a refusal, or report the other live rows as executed. Retain the prepared
   `worktreePath` and `runDir` for controller-owned disposal if preparation already ran.
@@ -82,7 +84,7 @@ validates the plan against the profile, starts the environment, runs the steps, 
 transcripts, runs cleanup unconditionally, disposes the worktree, and writes
 `live-evidence.json`.
 
-Read `evidencePath` — it is `layer3.evidencePath` in the finalize request — plus `rowVerdicts`,
+Read `evidencePath` — the record is in the ledger; finalize reads it — plus `rowVerdicts`,
 `unboundFailures`, `cleanupOK`, and `cleanupFailed` for the running summary. Every applicable row
 carries `LIVE-PASS`, `LIVE-FAIL`, or `LIVE-INCONCLUSIVE`; a gap row gets the journey's
 truthful outcome like any other, with `layer1Gap: true` recorded beside its verdict. The

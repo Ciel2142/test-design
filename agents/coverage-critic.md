@@ -75,21 +75,6 @@ does. A bare verdict is not usable.
 
 reads: <repo-relative paths you opened, comma-separated, or none>
 
-## The canary
-
-**Only when your prompt says this batch carries a canary.** A dispatch can carry none
-because it re-runs real-source rows from a caught-canary batch, or because it explicitly
-records an unavailable snapshot/fixture canary. In either case ignore this section;
-do not infer that a lone row must be weak. The parent accounts for unavailable canaries
-as PARTIAL rather than claiming inherited evidence.
-
-When it does: the batch contains **one** test the dispatcher already knows is weak; it may
-be a real test or a deliberately weakened copy — you cannot tell by how it arrives, because
-every row's source arrives the same way. If you miss it, your entire batch is discarded and
-re-run. Do not try to identify it, and do not sacrifice an arbitrary row to look thorough: a
-`WEAK` on a healthy test blocks the branch and is caught on re-read. Just do the work
-honestly and the canary takes care of itself.
-
 ## Rules
 
 - You have no edit tools. This is deliberate: a critic that can repair a weak test will
