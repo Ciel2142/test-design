@@ -72,9 +72,9 @@ Setup proof: `docs/superpowers/coverage/2026-09-07-verification-workflow-redesig
 - Changing the two-commit baseline protocol: explicitly excluded by the approved spec; this design still uses it.
 - Provider plugins, production deployment, expanded credentials and unrelated shared-resource deletion: outside approved scope and permission.
 - Cross-language dependency inference, global cache services and offline critic calibration platforms: explicitly excluded; use conservative file/group/module boundaries.
-- New distributed or simultaneous multi-operator coordination guarantees: not specified. Same-run interruption and owned-resource recovery are included; no new lock service is required.
+- New distributed or simultaneous multi-operator coordination guarantees: not specified. Same-run interruption and owned-resource recovery are included; no new lock service is required. A-2: the same-host advisory file lock on the run ledger is owned-state protection between this run’s own callers, not a lock service.
 - Clock expiry, DST/timezone behavior, throughput targets or fixed token-savings percentages: no such contract. Evidence identity is content/target based; cost is observed on paired repair scenarios.
-- Unrelated Go/JVM runner changes and previously noted Maven/Failsafe questions: not part of this redesign. Existing supported runners must retain behavior; baseline is not a survey of their coverage.
+- Unrelated Go/JVM runner changes and previously noted Maven/Failsafe questions: not part of this redesign. Existing supported runners must retain behavior; baseline is not a survey of their coverage. A-2 declares the one JVM runner change that did land on this branch (report-glob confinement); it stays outside the redesign’s numbered obligations.
 - Implementation of a general-purpose LLM evaluation runner: not needed for three focused real-agent walkthroughs. Prompt string assertions and canned reviewer replies cannot substitute for semantic proof.
 
 ## Retired
@@ -198,7 +198,7 @@ Axes: SC-09 axes 2,7,10; SC-10 axes 7,10; SC-11 axes 3,5,7; SC-12 axes 3,7; SC-1
 | SC-10 | Deploy the measured revision and exercise changed business behavior | Normal live verification builds/deploys the selected revision, records its artifact/target, separates readiness from the changed business assertion and proves owned cleanup; an older healthy deployment cannot satisfy it. | smoke | Omit the deployment/start loop while an older healthy instance remains reachable. | med |
 | SC-11 | Wait for successful startup and readiness before business assertions | Failed startup/readiness retains non-success and never invokes business assertions; successful health without business evidence is not a journey pass. | integration | Run the business walkthrough even when startFailed or healthFailed is true. | high |
 | SC-12 | Attempt owned cleanup after a failed live phase | A run-owned resource created before startup/readiness/business failure is cleaned up, and its absence is independently observed. | integration | Return on start/health failure before entering the unconditional cleanup section. | high |
-| SC-13 | Keep cleanup confined to the current run | Cleaning one run removes its owned resources while another active run and an unrelated sentinel remain intact. | integration | Broaden the approved project recipe cleanup selector from the exact run resource to a shared prefix. | high |
+| SC-13 | Keep cleanup confined to the current run | Cleaning one run removes its owned resources while another active run and an unrelated sentinel remain intact. | integration | In prepare-live’s descriptor substitution, resolve the {run-id} token of the profile’s cleanup command group to a shared prefix of the run ID (the ID with its trailing digits stripped) instead of the run’s exact identity, so the verifier-issued cleanup addresses a resource selector wider than this run’s own. | high |
 | SC-14 | Limit inherited credentials to the declared environment | A live command receives only approved inherited variables; an unapproved credential is absent, and no full-environment fallback is used. | unit | Return the complete parent environment instead of the SanitizedEnv allowlist projection. | high |
 
 harness SC-09: Real prepare→execute calls with a local run-owned resource and removal predicate; consume prepared state unchanged, never manufacture a resolved descriptor.
@@ -310,7 +310,7 @@ Axes: SC-30 axes 1,3,4,7,9,10; SC-31 axes 3,4,5,6; SC-32 axes 4,7,10.
 
 | ID | Behavior | Expected | Level | Verification mutation | Risk |
 |---|---|---|---|---|---|
-| SC-30 | Retry publication without repeating valid verification | After destination-only repair, publication resumes from retained validated evidence without another suite, live, critic or mutation run; a partially written report set is not completed publication. | integration | Route publication failure through all-layer invalidation instead of publication-only recovery. | high |
+| SC-30 | Retry publication without repeating valid verification | After destination-only repair, publication resumes from retained validated evidence without another suite, live, critic or mutation run; a partially written report set is not completed publication. | integration | In resume’s pending accounting, when the publish phase is started-but-incomplete or was refused, re-owe every completed review group, live attempt and mutation row as pending instead of owing only the publish phase; the own-report exemption in staleForRun is SC-32’s surface and is not a site of this mutation. | high |
 | SC-31 | Preserve user files during publication recovery | Recovery affects only this run’s proven generated artifacts; unrelated tracked/untracked files and edited or uncertain-provenance outputs are preserved or cause explicit refusal. | integration | Replace exact generated-artifact recovery with recursive directory deletion or repository reset, deleting user data. | high |
 | SC-32 | Keep publication commits separate from verification target selection | Publishing/committing report files keeps the report’s measured revision fixed and causes no recursive verification; explicit selection of a real new target still requires fresh observations. | integration | Choose current publication HEAD as the next measurement target instead of retaining the selected target. | high |
 
@@ -351,6 +351,35 @@ Axes: SC-34 axes 10; SC-35 axes 3,10; SC-36 axes 10.
 harness SC-36: Run a mixed-outcome disposable verification, compare real invocation logs and artifact references to the canonical summary; rerun an isolated repair and measure actual dispatch count and repeated input bytes.
 
 Semantic acceptance: W-3 is mandatory; accepting canary-free evidence does not prove that normal agent dispatches avoid canary recursion or use sufficient bounded context.
+
+## Amendment A-2 (2026-09-10): repairs after verification run-2026-09-10-0001
+
+Verification `run-2026-09-10-0001` (report `docs/superpowers/coverage/2026-09-07-verification-workflow-redesign-verification.md`, commit 31db4c6) returned BLOCKED: the source was stale against eleven production hunks, two verification mutations enumerated outside their rows’ fault, nine mutation sites survived, and one `covers:` comment sat inside a function body. This amendment records the source-side repairs. It adds no scenario row, retires none, renumbers nothing and changes no Cost and allocation count. Test-side repairs (strengthened bound tests for SC-18, SC-20, SC-22, SC-27, SC-31; the reworded comment in `internal/tags/extract_test.go`) are code changes the next trace measures, not source text.
+
+### Rephrased verification mutations
+
+Only the probe wording changes; each row’s behavior, expected result, level and risk stand.
+
+- SC-13 — was: “Broaden the approved project recipe cleanup selector from the exact run resource to a shared prefix.” That wording enumerated to `fixtures/workflow-redesign-live/recipe.py:154`, a trusted Python fixture outside the Go mutation surface, and the row was MUTATION-UNAPPLIABLE. The row now names the verifier’s own surface: the substitution of the run’s identity into the profile’s cleanup command group (`substituteRunID`, `cmd/test-design-verifier/preparelive.go`). A cleanup issued for a wider selector leaves run A’s root in place, which `TestLiveTruth_CleanupConfinedToRun` observes directly.
+- SC-30 — was: “Route publication failure through all-layer invalidation instead of publication-only recovery.” Site enumeration reached the own-report exemption in `staleForRun` (`cmd/test-design-verifier/resume.go`), which is SC-32’s fault (a publication commit advancing the measured revision), so the row was MUTATION-UNAPPLIABLE. The row now names resume’s pending accounting alone and excludes `staleForRun` explicitly.
+
+### Production hunks declared as in-scope hardening
+
+The production diff between baseline 1224011 and the measured head carries these behaviors the approved text did not name. Each is assigned to the behavior group it hardens, with the suite tests that exercise it. They are declared behaviors, not numbered obligations: their tests run in every trace but earn no layer-2 or layer-4 credit, and none introduces data loss, corruption or exposure — each narrows what the verifier accepts or bounds what it runs — so none carries a mutation obligation under the risk rule in force. A later finding that one of them is wrong or missing is amended by appending a fresh SC row, never by editing this list.
+
+| Hunk | Behavior | Group | Suite evidence |
+|---|---|---|---|
+| `internal/jvmrun/jvmrun.go:29-71,110-214` | JVM report-glob confinement: every glob segment is validated (`report-glob-escapes-root` for an empty, absolute, traversing or invalid pattern); report collection walks under `os.Root`, refuses symlinked or non-regular report paths, fails on an unreadable directory, removes only concrete pre-existing report files (never a directory) and applies no mtime cutoff; `ReportDirs` is gone. | Out of scope (runner), declared here | `TestRun_GlobEscapeRefused` (`internal/jvmrun`), `TestLoadVerifiedSource_ReportGlobEscapingRootRefused` |
+| `cmd/test-design-verifier/finalize.go:978-995` | `artifactStem` derives the publication stem from any non-empty `.md` basename, taking the `-coverage.md` stem when present; only an empty stem or a non-Markdown name is refused `source-name-unconventional`. | 10 | `TestArtifactStem_AcceptsAnyMarkdownBasename` (added with this amendment) |
+| `internal/live/transcript.go:29-51` | The redaction barrier scans the plan step’s expectation text together with the decisive output and command; a step whose expectation carries a withheld parent-environment value is published as `[withheld by redaction barrier]`, never with the value. | 5 | `TestLiveRunWithholdsUnboundExpectationBehindRedactionBarrier` |
+| `internal/subprocess/run.go:1-99` | The verifier’s own subprocess policy: 30-minute suite timeout, 30-second git utility timeout, process-group kill on timeout, cancellation or SIGINT/SIGTERM, returned as infrastructure errors distinct from an ordinary exit result. | 6 | `TestRunTimeoutTerminatesDescendants` (`internal/subprocess`), `TestExecuteStepTimeoutPreservesRawAndCannotPass` (`internal/live`) |
+| `internal/live/plan.go:86-94` | Live plan validation refuses a row-bound step with no predicates (`missing-row-predicates`). | 4 | `TestValidateRefusesBoundStepWithoutPredicates` (`internal/live`), `TestExecuteLive_MissingRowPredicatesRefused` |
+| `cmd/test-design-verifier/preflight.go:64-72` | Preflight resolves a relative `--source` against `--repo`; a source outside the repository is still refused `source-outside-repo`. | 12 | `TestPreflightHandler_ValidSourceReportsFullOutput`, `TestPreflightHandler_SourceOutsideRepoNamesBothPaths` |
+| `internal/runstate/lock.go:1-45` | Ledger reads take a shared and write transitions an exclusive advisory lock on `ledger.lock`, serialising same-host callers of one run. | 7 | `TestRecordReview_GroupLifecycle`, `TestRecordReview_ConcurrentStartsKeepARowInOneGroup` |
+| `cmd/test-design-verifier/publication.go:359-430` | Finalize fingerprints the ledger it assembled the report from and refuses `ledger-changed` when the ledger differs at the moment the publication opens. | 10 | `TestStartPublication_RefusesALedgerThatChangedSinceFinalizeReadIt` |
+| `internal/runstate/runstate.go:110-123` | Run ledger location: `TEST_DESIGN_STATE_DIR` overrides; the default is under the user cache directory. | 7 | `TestDefaultStateDir` (`internal/runstate`) |
+| `cmd/test-design-verifier/recordreview.go:104-151` | record-review refuses `invalid-group-id` for a group id that is not a plain name of letters, digits, dot, dash or underscore. | 7 | `TestRecordReview_RefusesAMalformedRequestBeforeTheLedger` |
+| `cmd/test-design-verifier/recordreview.go:443-470` | A scenario row belongs to at most one current review group: record-review and reuse refuse `row-already-grouped` unless the earlier group is superseded. | 8 | `TestRecordReview_GroupLifecycle`, `TestRecordReview_ConcurrentStartsKeepARowInOneGroup` |
 
 ## Source grounding
 

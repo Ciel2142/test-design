@@ -14,7 +14,7 @@ func TestExtractBareID(t *testing.T) {
 }
 
 func TestExtractAreaPrefixedIDSurvives(t *testing.T) {
-	// The trap this rule exists to prevent: substring-matching "covers: SC-"
+	// The trap this rule exists to prevent: substring-matching the bare marker prefix
 	// silently drops area-prefixed forms like orders/SC-01.
 	got := Extract("covers: orders/SC-01")
 	want := []string{"orders/SC-01"}
