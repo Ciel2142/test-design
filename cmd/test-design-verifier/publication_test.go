@@ -136,6 +136,15 @@ func TestIsPublicationPath(t *testing.T) {
 		{"the transcripts directory itself", pubDir, pubDir + "/transcripts/" + pubRunID, false},
 		{"an executable committed among this run's transcripts", pubDir, pubDir + "/transcripts/" + pubRunID + "/x_test.go", false},
 		{"a transcript-shaped file below this run's transcripts", pubDir, pubDir + "/transcripts/" + pubRunID + "/sub/a.json", false},
+		// A row ID may name an area ("orders/SC-05"), and a mutation
+		// transcript carries the row ID in its file name, so this run's own
+		// document lands one directory down.
+		{"an area-prefixed mutation transcript", pubDir, pubDir + "/transcripts/" + pubRunID + "/mutation-orders/SC-05.json", true},
+		{"an area-prefixed mutation attempt transcript", pubDir, pubDir + "/transcripts/" + pubRunID + "/mutation-attempt-orders/SC-05.json", true},
+		{"an area-prefixed adopted mutation transcript", pubDir, pubDir + "/transcripts/" + pubRunID + "/reused-mutation-unappliable-orders/SC-05.json", true},
+		{"a row-shaped path under no transcript name", pubDir, pubDir + "/transcripts/" + pubRunID + "/orders/SC-05.json", false},
+		{"an executable inside a mutation transcript's area", pubDir, pubDir + "/transcripts/" + pubRunID + "/mutation-orders/x_test.go", false},
+		{"a mutation transcript nested deeper than a row area", pubDir, pubDir + "/transcripts/" + pubRunID + "/mutation-orders/deeper/SC-05.json", false},
 		{"the coverage source", pubDir, pubSource, false},
 		{"a sibling report", pubDir, pubDir + "/2026-08-30-other-verification.json", false},
 		{"a production file", pubDir, "orders/orders.go", false},
@@ -235,6 +244,27 @@ func TestMeasuredCommit_PublicationDriftKeepsTheRunsCommit(t *testing.T) {
 		}
 		if commit != "" || offending != planted {
 			t.Errorf("measuredCommit = (%q, %q), want (\"\", %q)", commit, offending, planted)
+		}
+	})
+
+	// The other side of the same rule: a publication whose mutation row carried
+	// an area prefix put one of its own transcripts a directory down, and
+	// committing it is still this run publishing itself.
+	t.Run("a commit of an area-prefixed mutation transcript keeps the run's commit", func(t *testing.T) {
+		repo := pubRepo(t)
+		opened := pubHead(t, repo)
+		areaRow := pubDir + "/transcripts/" + pubRunID + "/mutation-orders/SC-05.json"
+		pubWrite(t, repo, pubJSON, "{}\n")
+		pubWrite(t, repo, pubMD, "# report\n")
+		pubWrite(t, repo, pubTrace, "{}\n")
+		pubWrite(t, repo, areaRow, "{}\n")
+		mustGit(t, repo, "add", pubJSON, pubMD, pubTrace, areaRow)
+		mustGit(t, repo, "commit", "-q", "-m", "publish an area-prefixed row")
+
+		commit, offending, err := measuredCommit(repo, pubDir, pubStem, pubRunID, opened, pubHead(t, repo))
+
+		if err != nil || offending != "" || commit != opened {
+			t.Fatalf("measuredCommit = (%q, %q, %v), want the run's own commit %s", commit, offending, err, opened)
 		}
 	})
 

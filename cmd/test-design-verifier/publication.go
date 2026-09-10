@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -56,16 +57,58 @@ const republicationReason = "republication"
 // unquoted path.
 type dirtyEntry struct{ Code, Path string }
 
+// The six names a mutation row's transcript is published under: one per
+// outcome, this run's own and adopted. finalize builds each of them by putting
+// the record's row ID between the prefix and ".json", and a row ID may name an
+// area ("orders/SC-05"), so these are the only transcript names that can carry
+// a path separator inside them. They live here, beside the predicate whose
+// correctness depends on the list, so a renamed transcript and the set of paths
+// this run may publish cannot drift apart.
+const (
+	mutationTranscriptPrefix            = "mutation-"
+	mutationAttemptTranscriptPrefix     = "mutation-attempt-"
+	mutationUnappliableTranscriptPrefix = "mutation-unappliable-"
+
+	reusedMutationTranscriptPrefix            = "reused-" + mutationTranscriptPrefix
+	reusedMutationAttemptTranscriptPrefix     = "reused-" + mutationAttemptTranscriptPrefix
+	reusedMutationUnappliableTranscriptPrefix = "reused-" + mutationUnappliableTranscriptPrefix
+)
+
+// mutationTranscriptPrefixes is the same six as a set to test a path segment
+// against.
+var mutationTranscriptPrefixes = []string{
+	mutationTranscriptPrefix,
+	mutationAttemptTranscriptPrefix,
+	mutationUnappliableTranscriptPrefix,
+	reusedMutationTranscriptPrefix,
+	reusedMutationAttemptTranscriptPrefix,
+	reusedMutationUnappliableTranscriptPrefix,
+}
+
+// rowAreaPattern and rowFilePattern are the two halves an area-prefixed row ID
+// splits a mutation transcript's name into. Together they are
+// internal/coverage's own `^([A-Za-z0-9._-]+/)?SC-[0-9]+$` seen as a path: the
+// area before the separator, the row and the extension after it. A row ID
+// carries at most one separator, so a publication is at most one directory deep.
+var (
+	rowAreaPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+	rowFilePattern = regexp.MustCompile(`^SC-[0-9]+\.json$`)
+)
+
 // isPublicationPath reports whether path is one this run may publish:
-// <dir>/<stem>-verification.json, <dir>/<stem>-verification.md, or a .json
-// document directly under <dir>/transcripts/<runID>/ (dir "" = repository
-// root).
+// <dir>/<stem>-verification.json, <dir>/<stem>-verification.md, or, under
+// <dir>/transcripts/<runID>/ (dir "" = repository root), either a .json
+// document directly in that directory or one mutation transcript of an
+// area-prefixed row — <mutation prefix><area>/SC-<n>.json, exactly one
+// directory down.
 //
 // The exemption is the shape of a publication, not the directory it lands in.
-// Every transcript this run writes is a JSON document it puts in that directory
-// itself; a file of any other kind there — an executable above all — and
-// anything in a subdirectory below it are changes to the subject the report
-// describes, whoever committed them, and finalize never published them.
+// Every transcript this run writes is a JSON document named for the record it
+// answers for, and the only one that nests is a mutation row whose ID names an
+// area. A file of any other kind — an executable above all — a directory that
+// is not one of finalize's own transcript names, and anything deeper than a row
+// are changes to the subject the report describes, whoever committed them, and
+// finalize never published them.
 func isPublicationPath(artifactDir, stem, runID, path string) bool {
 	if path == "" {
 		return false
@@ -77,7 +120,26 @@ func isPublicationPath(artifactDir, stem, runID, path string) bool {
 	// The trailing separator is what keeps another run whose id this one is a
 	// prefix of — and the transcripts directory itself — outside the set.
 	name, under := strings.CutPrefix(path, repoPath(artifactDir, "transcripts", runID)+"/")
-	return under && name != "" && !strings.Contains(name, "/") && strings.HasSuffix(name, ".json")
+	if !under || name == "" || !strings.HasSuffix(name, ".json") {
+		return false
+	}
+	head, tail, nested := strings.Cut(name, "/")
+	if !nested {
+		return true
+	}
+	return isMutationTranscriptArea(head) && rowFilePattern.MatchString(tail)
+}
+
+// isMutationTranscriptArea reports whether segment is one of finalize's own
+// mutation transcript names carrying a row area rather than a whole row ID —
+// "mutation-orders" for the row orders/SC-05.
+func isMutationTranscriptArea(segment string) bool {
+	for _, prefix := range mutationTranscriptPrefixes {
+		if area, ok := strings.CutPrefix(segment, prefix); ok && rowAreaPattern.MatchString(area) {
+			return true
+		}
+	}
+	return false
 }
 
 // measuredCommit returns ledgerCommit when head == ledgerCommit, or when every

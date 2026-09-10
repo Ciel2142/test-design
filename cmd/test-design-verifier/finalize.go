@@ -719,11 +719,11 @@ func (r *assembledRun) addMutationRow(
 	}
 
 	entry := report.MutationInput{RowID: rec.ID}
-	role, name := artifactEvidence, "mutation-"+rec.ID+".json"
+	role, name := artifactEvidence, mutationTranscriptPrefix+rec.ID+".json"
 	if rec.Outcome == outcomeEnvironmental {
-		role, name = artifactAttempt, "mutation-attempt-"+rec.ID+".json"
+		role, name = artifactAttempt, mutationAttemptTranscriptPrefix+rec.ID+".json"
 	} else if rec.Outcome == outcomeUnappliable {
-		name = "mutation-unappliable-" + rec.ID + ".json"
+		name = mutationUnappliableTranscriptPrefix + rec.ID + ".json"
 	}
 	path := rec.Artifacts[role].Path
 	if path == "" {
@@ -848,21 +848,21 @@ func reusedMutationEntry(
 			return report.MutationInput{}, transcriptCopy{}, reusedArtifactError(op, ref.Artifact.Path, err)
 		}
 		entry.Outcome, entry.Reason = outcomeUnappliable, doc.Reason
-		name, runID, commit, sourceSHA = "reused-mutation-unappliable-", doc.RunID, doc.RepoCommit, doc.SourceSHA256
+		name, runID, commit, sourceSHA = reusedMutationUnappliableTranscriptPrefix, doc.RunID, doc.RepoCommit, doc.SourceSHA256
 	case outcomeEnvironmental:
 		attempt, err := report.LoadAttempt(ref.Artifact.Path)
 		if err != nil {
 			return report.MutationInput{}, transcriptCopy{}, reusedArtifactError(op, ref.Artifact.Path, err)
 		}
 		entry.Outcome, entry.AttemptEvidencePath, entry.Attempt = outcomeEnvironmental, ref.Artifact.Path, attempt
-		name, runID, commit, sourceSHA = "reused-mutation-attempt-", attempt.RunID, attempt.RepoCommit, attempt.SourceSHA256
+		name, runID, commit, sourceSHA = reusedMutationAttemptTranscriptPrefix, attempt.RunID, attempt.RepoCommit, attempt.SourceSHA256
 	default:
 		ev, err := report.LoadMutation(ref.Artifact.Path)
 		if err != nil {
 			return report.MutationInput{}, transcriptCopy{}, reusedArtifactError(op, ref.Artifact.Path, err)
 		}
 		entry.EvidencePath, entry.Evidence = ref.Artifact.Path, ev
-		name, runID, commit, sourceSHA = "reused-mutation-", ev.RunID, ev.RepoCommit, ev.SourceSHA256
+		name, runID, commit, sourceSHA = reusedMutationTranscriptPrefix, ev.RunID, ev.RepoCommit, ev.SourceSHA256
 	}
 	if cliErr := checkReusedIdentity(op, rec.ID, ref, runID, commit, sourceSHA); cliErr != nil {
 		return report.MutationInput{}, transcriptCopy{}, cliErr
