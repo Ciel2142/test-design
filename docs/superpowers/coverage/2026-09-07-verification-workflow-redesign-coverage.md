@@ -383,6 +383,25 @@ The production diff between baseline 1224011 and the measured head carries these
 | `cmd/test-design-verifier/reuse.go` (`reuseBeforeAdopt`) | Test seam added with this amendment: a package-level hook that is nil in production and, when a test sets it, runs inside the reuse transaction after every prior record is verified and before the first is adopted. It changes no production behavior; it exists so `TestReuse_RejectsAlteredRetainedBytes` can alter a retained artifact at the moment adopt’s re-digest must refuse it (SC-27). | 8 | `TestReuse_RejectsAlteredRetainedBytes` |
 | `cmd/test-design-verifier/resume.go` (`everyGroupSettled`) | Dead clause removed with this amendment: `reportedStatus` already reports a completed record that carries a reason as `invalid`, so a group with status `completed` and a non-empty reason never existed and the extra `Reason != ""` check was unreachable. Run-2026-09-10-0001 enumerated it as SC-20 site-1, an equivalent mutant; removing it changes no observable behavior. | 7 | `TestResume_SelectsOnlyValidatedCompletions` |
 
+## Amendment A-3 (2026-09-11): repairs after verification run-2026-09-10-0002
+
+Verification `run-2026-09-10-0002` (report `docs/superpowers/coverage/2026-09-07-verification-workflow-redesign-verification.md`, commit dee1832) returned BLOCKED for seven reasons: the source was stale against one production hunk, and six rows each carried a mutation site their bound test did not catch (SC-20 site-2, SC-21 site-2, SC-22 sites 1 and 3, SC-26 site-2, SC-27 site-4, SC-30 site-3). This amendment records the source-side repairs. It adds no scenario row, retires none, renumbers nothing and changes no Cost and allocation count. The test-side repairs — strengthened bound tests for SC-20, SC-21, SC-22, SC-26 and SC-30 — are code changes the next trace measures, not source text.
+
+### Rephrased verification mutations
+
+Only the probe wording changes; each row's behavior, expected result, level and risk stand.
+
+- SC-27 — the row's mutation stands, with one site excluded by name: the pre-load `report.VerifyEvidenceDigest` in `reusedMutationEntry` (`cmd/test-design-verifier/finalize.go`). Run-2026-09-10-0002 enumerated it as site-4 and it survived because it is an equivalent mutant, not because the row's test is weak. Three checks dominate it on the same bytes: `pendingRefusal` refuses over resume's own `runstate.Verify` of the record before finalize assembles anything; `assembleRun` runs `runstate.Verify(rec)` in the same loop iteration immediately before `addMutationRow`; and `reuse.adopt` refuses adoption unless the completed record's artifact digest equals the reuse reference's, so an adopted record's artifact and its reference are always the same path and the same digest. Tampering before finalize is refused `run-incomplete`, tampering between the accounting and the assembly is refused `ledger-invalid`, and tampering after the report is written is caught by `stageReusedArtifacts`, which is a different check the row already binds. The check stays in place as defense in depth against the window it names; it earns no site.
+
+### Production hunks declared as in-scope hardening
+
+Appended to the A-2 table under the same rule: declared behaviors, not numbered obligations; their tests run in every trace but earn no layer-2 or layer-4 credit, and neither introduces data loss, corruption or exposure. A later finding that one of them is wrong or missing is amended by appending a fresh SC row, never by editing this list.
+
+| Hunk | Behavior | Group | Suite evidence |
+|---|---|---|---|
+| `cmd/test-design-verifier/baseline.go:169-214` | Baseline evidence JVM toolchain identity: `toolVersions` reads the JVM identity out of the invoked runner's own `-version` banner (the first `Java version:`, `Launcher JVM:` or `JVM:` line of `mvn -B -version` or `gradle --version`), never from an unrelated `java` executable found on PATH, and records no `java` entry at all for a runner that reports none. `addToolVersion` strips ANSI escapes and takes the first non-empty, non-flag line as the runner's own version. Capture stays best-effort: a toolchain that cannot report its version does not invalidate the suite run that already succeeded with it. | 8 | `TestBaselineJVM_MavenE2EPublishesEvidence` (asserts both the `mvn` and the `java` entry), `TestTraceDispatchCarriesClaimRunnerAndToolchain` (the go runner's own version, with no JVM entry to report) |
+| `cmd/test-design-verifier/baseline.go` (import order) | Formatting only, applied with this amendment: the import block was not `gofmt`-clean (`internal/trace` before `internal/subprocess`). No behavior changes. | 8 | `gofmt -l ./cmd ./internal` reports nothing |
+
 ## Source grounding
 
 - Design semantics and future behaviors: approved spec sections Scenario selection, Deliberate live verification, Incremental verification, and Acceptance evidence.

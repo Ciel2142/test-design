@@ -14,8 +14,8 @@ import (
 	"test-design/internal/evidence"
 	"test-design/internal/gotestjson"
 	"test-design/internal/runrecord"
-	"test-design/internal/trace"
 	"test-design/internal/subprocess"
+	"test-design/internal/trace"
 	"test-design/internal/worktree"
 )
 
