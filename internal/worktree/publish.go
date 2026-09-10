@@ -21,6 +21,11 @@ var (
 	// ErrDuplicatePublishPath is wrapped into Publish's error when files
 	// names the same RepoRelPath more than once.
 	ErrDuplicatePublishPath = errors.New("duplicate publish RepoRelPath")
+	// ErrSnapshotChanged is wrapped into Publish's error when the repository
+	// no longer matches before. A caller distinguishes a repository that moved
+	// under the run from a destination it could not write, and neither is a
+	// substring of the other's message to be matched on.
+	ErrSnapshotChanged = errors.New("repository changed since snapshot")
 )
 
 // PublishFile names one file to publish: RepoRelPath is its destination
@@ -60,7 +65,7 @@ func (c *Controller) Publish(before *Snapshot, files []PublishFile) ([]PublishRe
 		return nil, fmt.Errorf("publish: %w", err)
 	}
 	if equal, differing := Compare(before, after); !equal {
-		return nil, fmt.Errorf("publish: repository changed since snapshot (%s); commit or discard the concurrent change, then rerun", strings.Join(differing, ", "))
+		return nil, fmt.Errorf("publish: %w (%s); commit or discard the concurrent change, then rerun", ErrSnapshotChanged, strings.Join(differing, ", "))
 	}
 
 	targets := make([]string, len(files))

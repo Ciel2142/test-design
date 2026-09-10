@@ -43,6 +43,9 @@ const (
 	codeEnvelopeNotAccepted = "envelope-not-accepted"
 	codeTraceIncomplete     = "trace-incomplete"
 	codeRunIncomplete       = "run-incomplete"
+	// codePublicationUnverifiable is an own published path whose bytes are not
+	// what this run wrote; every other dirty path is source-not-reproducible.
+	codePublicationUnverifiable = "publication-unverifiable"
 )
 
 // finalizeRequestBody is everything the parent still hands finalize: the
@@ -79,6 +82,8 @@ type finalizeOutput struct {
 	MarkdownPath   string            `json:"markdownPath"`
 	TranscriptsDir string            `json:"transcriptsDir"`
 	RunDir         string            `json:"runDir"`
+	MeasuredCommit string            `json:"measuredCommit"`
+	Recovered      []recoveredFile   `json:"recovered"`
 	Work           report.WorkCounts `json:"work"`
 }
 
@@ -205,21 +210,40 @@ func finalizeOp(req *finalizeRequest, stdout io.Writer, between func()) *cliErro
 	}
 
 	// The revision the report measures is the one the run was opened against.
-	// A repository that moved under the run is a different subject, whatever
-	// the ledger still holds about the old one.
-	measured := ledger.Identity.RepoCommit
-	if measured != head {
+	// Committing what a previous finalize published is not a change to the
+	// thing the report describes, so the measured revision survives it; a
+	// repository that moved for any other reason is a different subject,
+	// whatever the ledger still holds about the old one.
+	opened := ledger.Identity.RepoCommit
+	measured, offending, err := measuredCommit(req.RepoRoot, artifactDir, stem, req.RunID, opened, head)
+	if err != nil {
 		return &cliError{
 			Code: "head-moved",
-			Message: fmt.Sprintf("%s: HEAD is %s but the run was opened at %s; a verification describes one commit, so start a new run at HEAD",
-				op, head, measured),
+			Message: fmt.Sprintf("%s: HEAD is %s and the run was opened at %s, but what changed between them could not be read: %v",
+				op, head, opened, err),
 		}
 	}
+	if offending != "" {
+		return &cliError{
+			Code: "head-moved",
+			Message: fmt.Sprintf("%s: HEAD is %s but the run was opened at %s and %s changed between them; a verification describes one commit, so start a new run at HEAD, reusing this approval when the scope is unchanged",
+				op, head, opened, offending),
+		}
+	}
+	identity := ledgerIdentity(&req.verifyRequest, req.RepoRoot, measured, src)
 
 	// resume is the accounting authority: what it says the run still owes is
 	// what finalize refuses to publish over.
 	state := buildResume(&req.verifyRequest, src, head, store.Dir(), ledger)
 	if cliErr := pendingRefusal(op, state.Pending); cliErr != nil {
+		return cliErr
+	}
+
+	// An earlier publication of this run is taken back before the snapshot
+	// gate sees it: exactly the files that publication recorded, proved by
+	// digest, and nothing else in the tree.
+	recovered, cliErr := recoverOwnPublication(op, req.RepoRoot, runstate.Current(ledger, runstate.KindPhase, publishPhaseID))
+	if cliErr != nil {
 		return cliErr
 	}
 
@@ -321,6 +345,36 @@ func finalizeOp(req *finalizeRequest, stdout io.Writer, between func()) *cliErro
 		{RepoRelPath: markdownRel, SourcePath: markdownPath},
 	}, run.transcripts...)
 
+	// The publication is recorded before it starts, naming every file it will
+	// write with the digest of the bytes it will write there. A publication
+	// that fails part way leaves this record started, which is what tells the
+	// rerun which files are its own to take back.
+	reportSHA, err := evidence.SHA256File(jsonPath)
+	if err != nil {
+		return &cliError{Code: "evidence-unreadable", Message: fmt.Sprintf("%s: %v", op, err)}
+	}
+	markdownSHA, err := evidence.SHA256File(markdownPath)
+	if err != nil {
+		return &cliError{Code: "evidence-unreadable", Message: fmt.Sprintf("%s: %v", op, err)}
+	}
+	published := make([]evidence.FileRef, 0, 2+len(rep.Transcripts))
+	published = append(published,
+		evidence.FileRef{Path: jsonRel, SHA256: reportSHA},
+		evidence.FileRef{Path: markdownRel, SHA256: markdownSHA})
+	for _, ref := range rep.Transcripts {
+		published = append(published, evidence.FileRef{Path: ref.Path, SHA256: ref.SHA256})
+	}
+	sort.Slice(published, func(i, j int) bool { return published[i].Path < published[j].Path })
+	if cliErr := startPublication(op, store, identity, publishInputs{
+		MeasuredCommit: measured,
+		RunDir:         runDir,
+		ReportSHA256:   reportSHA,
+		Acknowledged:   req.Acknowledgement != "",
+		Files:          published,
+	}); cliErr != nil {
+		return cliErr
+	}
+
 	if between != nil {
 		between()
 	}
@@ -337,11 +391,20 @@ func finalizeOp(req *finalizeRequest, stdout io.Writer, between func()) *cliErro
 	files = append(files, staged...)
 	if _, err := ctrl.Publish(before, files); err != nil {
 		code := "publish-failed"
-		// Publish reports the concurrent-change refusal by message alone.
-		if strings.Contains(err.Error(), "repository changed since snapshot") {
+		if errors.Is(err, worktree.ErrSnapshotChanged) {
 			code = "snapshot-mismatch"
 		}
-		return &cliError{Code: code, Message: fmt.Sprintf("%s: %v; the report stays in %s", op, err, runDir)}
+		// The publish record stays started: what Publish wrote is a partially
+		// written report set, and the rerun that repairs the destination is
+		// what completes it.
+		return &cliError{
+			Code: code,
+			Message: fmt.Sprintf("%s: %v; publication incomplete: repair the destination and rerun finalize; the report stays in %s",
+				op, err, runDir),
+		}
+	}
+	if cliErr := completePublication(op, store, identity); cliErr != nil {
+		return cliErr
 	}
 
 	out := finalizeOutput{
@@ -353,6 +416,8 @@ func finalizeOp(req *finalizeRequest, stdout io.Writer, between func()) *cliErro
 		MarkdownPath:   markdownRel,
 		TranscriptsDir: repoPath(artifactDir, "transcripts", req.RunID),
 		RunDir:         runDir,
+		MeasuredCommit: measured,
+		Recovered:      recovered,
 		Work:           rep.Work.Counts,
 	}
 	return writeStdout(stdout, out)

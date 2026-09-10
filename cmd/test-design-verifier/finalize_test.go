@@ -7,6 +7,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
+	"sort"
 	"strings"
 	"testing"
 
@@ -1140,6 +1143,154 @@ func TestFinalize_PartialAcknowledgementAfterDiscardingOwnArtifacts(t *testing.T
 		if ack.Transcripts[i] != ref {
 			t.Fatalf("evidence changed: %+v -> %+v", ref, ack.Transcripts[i])
 		}
+	}
+
+	// Nothing this repository carries was tracked before the first
+	// publication, so every file it wrote is removed rather than restored.
+	wantRecovered := []string{first.JSONPath, first.MarkdownPath}
+	for _, ref := range rep.Transcripts {
+		wantRecovered = append(wantRecovered, ref.Path)
+	}
+	sort.Strings(wantRecovered)
+	gotRecovered := make([]string, 0, len(second.Recovered))
+	for _, file := range second.Recovered {
+		if file.Action != "removed" {
+			t.Errorf("recovered %s action = %q, want removed", file.Path, file.Action)
+		}
+		gotRecovered = append(gotRecovered, file.Path)
+	}
+	if !reflect.DeepEqual(gotRecovered, wantRecovered) {
+		t.Errorf("recovered = %+v, want the first publication's own files %v", second.Recovered, wantRecovered)
+	}
+}
+
+// TestFinalize_ProductionCommitAfterTheRunIsHeadMoved is the other side of the
+// measured revision: a commit that touches anything but this run's own
+// publication is a different subject, and the refusal names the path that made
+// it one.
+func TestFinalize_ProductionCommitAfterTheRunIsHeadMoved(t *testing.T) {
+	f := newFinalizeFixture(t)
+	f.seed()
+
+	source := filepath.Join(f.repo, "orders", "orders.go")
+	data, err := os.ReadFile(source)
+	if err != nil {
+		t.Fatalf("read orders.go: %v", err)
+	}
+	if err := os.WriteFile(source, append(data, []byte("\n// a later thought\n")...), 0o644); err != nil {
+		t.Fatalf("write orders.go: %v", err)
+	}
+	mustGit(t, f.repo, "add", "orders/orders.go")
+	mustGit(t, f.repo, "commit", "-q", "-m", "production change")
+	moved := strings.TrimSpace(mustGit(t, f.repo, "rev-parse", "HEAD"))
+
+	got := f.wantRefusal("head-moved")
+
+	for _, want := range []string{"orders/orders.go", f.head, moved} {
+		if !strings.Contains(got.Message, want) {
+			t.Errorf("message = %q, want it to name %s", got.Message, want)
+		}
+	}
+}
+
+// TestFinalize_PublishFailureLeavesTheRecordStartedUntilARerunCompletesIt is
+// the publication's own bookkeeping: a destination that cannot be written
+// leaves the run's publish record open, resume says so, and one rerun over the
+// repaired destination — with no verification work redone — closes it.
+func TestFinalize_PublishFailureLeavesTheRecordStartedUntilARerunCompletesIt(t *testing.T) {
+	f := newFinalizeFixture(t)
+	planted := filepath.Join(f.repo, "docs", "superpowers", "coverage", "transcripts", f.runID, traceEvidenceFile)
+
+	cliErr := finalizeOp(f.request(), io.Discard, func() {
+		if err := os.MkdirAll(planted, 0o755); err != nil {
+			t.Fatalf("MkdirAll %s: %v", planted, err)
+		}
+		t.Cleanup(func() { _ = os.RemoveAll(planted) })
+	})
+
+	if cliErr == nil {
+		t.Fatal("finalizeOp returned no error, want the publish-failed refusal")
+	}
+	if cliErr.Code != "publish-failed" {
+		t.Fatalf("code = %q, want publish-failed; message=%s", cliErr.Code, cliErr.Message)
+	}
+	for _, want := range []string{"did not write", "rerun finalize"} {
+		if !strings.Contains(cliErr.Message, want) {
+			t.Errorf("message = %q, want it to say %q", cliErr.Message, want)
+		}
+	}
+
+	state := runResume(t, f.repo, f.runID)
+	if state.Publication.Status != string(runstate.StatusStarted) {
+		t.Errorf("publication.status = %q, want started; publication=%+v", state.Publication.Status, state.Publication)
+	}
+	owed := resumePending{Kind: runstate.KindPhase, ID: publishPhaseID, Reason: "started-not-completed"}
+	if !slices.Contains(state.Pending, owed) {
+		t.Errorf("pending = %+v, want it to carry %+v", state.Pending, owed)
+	}
+
+	// Only the destination is repaired: the rerun recovers what the failed
+	// publication did write and publishes the whole set over it.
+	if err := os.RemoveAll(planted); err != nil {
+		t.Fatalf("RemoveAll %s: %v", planted, err)
+	}
+	exit, stdout, stderr := f.run()
+	if exit != exitOK {
+		t.Fatalf("rerun after repairing the destination: %s", stderr)
+	}
+	out := decodeFinalizeOutput(t, stdout)
+	if len(out.Recovered) != 2 {
+		t.Errorf("recovered = %+v, want the JSON and Markdown the failed publication wrote", out.Recovered)
+	}
+
+	after := runResume(t, f.repo, f.runID)
+	if after.Publication.Status != string(runstate.StatusCompleted) || after.Publication.Outcome != "ok" {
+		t.Fatalf("publication = %+v, want a completed record", after.Publication)
+	}
+	if len(after.Publication.Files) != 6 {
+		t.Fatalf("publication.files = %+v, want the report, the Markdown and four transcripts", after.Publication.Files)
+	}
+	for _, ref := range after.Publication.Files {
+		sum, err := evidence.SHA256File(filepath.Join(f.repo, filepath.FromSlash(ref.Path)))
+		if err != nil {
+			t.Errorf("stat published %s: %v", ref.Path, err)
+			continue
+		}
+		if sum != ref.SHA256 {
+			t.Errorf("%s: published sha256 = %s, want the recorded %s", ref.Path, sum, ref.SHA256)
+		}
+	}
+	for _, owed := range after.Pending {
+		if owed.Kind == runstate.KindPhase && owed.ID == publishPhaseID {
+			t.Errorf("pending = %+v, want the completed publication owed no more", after.Pending)
+		}
+	}
+}
+
+// TestFinalize_OutputNamesTheMeasuredRevisionAndRecovery locks the three
+// fields a parent reads to know what was measured, what was taken back and how
+// much of the run was fresh.
+func TestFinalize_OutputNamesTheMeasuredRevisionAndRecovery(t *testing.T) {
+	f := newFinalizeFixture(t)
+
+	exit, stdout, stderr := f.run()
+
+	if exit != exitOK {
+		t.Fatalf("exit code = %d, want %d; stderr=%s", exit, exitOK, stderr)
+	}
+	out := decodeFinalizeOutput(t, stdout)
+	if out.MeasuredCommit != f.head {
+		t.Errorf("measuredCommit = %q, want the commit the run was opened at %q", out.MeasuredCommit, f.head)
+	}
+	if len(out.Recovered) != 0 {
+		t.Errorf("recovered = %+v, want none on a first publication", out.Recovered)
+	}
+	if !strings.Contains(stdout, `"recovered":[]`) {
+		t.Errorf("stdout = %s, want recovered rendered as an empty array", stdout)
+	}
+	want := report.WorkCounts{Fresh: 4}
+	if out.Work != want {
+		t.Errorf("work = %+v, want %+v", out.Work, want)
 	}
 }
 

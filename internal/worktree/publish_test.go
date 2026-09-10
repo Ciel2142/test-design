@@ -40,6 +40,11 @@ func TestPublishRefusesOnConcurrentRepoChange(t *testing.T) {
 	if err == nil {
 		t.Fatalf("Publish = %+v, nil, want an error after a concurrent repo change", records)
 	}
+	// The caller tells this refusal apart from a destination that could not be
+	// written by the sentinel, not by reading the message.
+	if !errors.Is(err, ErrSnapshotChanged) {
+		t.Errorf("Publish error = %v, want it to wrap ErrSnapshotChanged", err)
+	}
 	if !strings.Contains(err.Error(), "tracked.txt") {
 		t.Errorf("Publish error = %v, want it to name %q", err, "tracked.txt")
 	}

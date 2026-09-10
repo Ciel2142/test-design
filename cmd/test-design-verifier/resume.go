@@ -36,6 +36,7 @@ type resumeOutput struct {
 	RunID       string             `json:"runId"`
 	LedgerPath  string             `json:"ledgerPath"`
 	Initialized bool               `json:"initialized"`
+	HeadCommit  string             `json:"headCommit"`
 	Stale       bool               `json:"stale"`
 	StaleReason string             `json:"staleReason,omitempty"`
 	Identity    *runstate.Identity `json:"identity,omitempty"`
@@ -43,6 +44,7 @@ type resumeOutput struct {
 	Review      resumeReview       `json:"review"`
 	Live        resumeLive         `json:"live"`
 	Mutation    resumeMutation     `json:"mutation"`
+	Publication resumePublication  `json:"publication"`
 	Pending     []resumePending    `json:"pending"`
 	Counts      resumeCounts       `json:"counts"`
 	Records     []runstate.Record  `json:"records"`
@@ -100,6 +102,20 @@ type resumeMutationRow struct {
 	Reason          string   `json:"reason"`
 }
 
+// resumePublication is what the run's report publication holds: the revision
+// the report measures, whether the parent's acknowledgement was carried, and
+// every file the publication writes with the digest of the bytes it writes. A
+// started record is a partially written report set, which is why it has a
+// reason like any other unfinished obligation.
+type resumePublication struct {
+	Status         string             `json:"status"`
+	Outcome        string             `json:"outcome"`
+	MeasuredCommit string             `json:"measuredCommit"`
+	Acknowledged   bool               `json:"acknowledged"`
+	Files          []evidence.FileRef `json:"files"`
+	Reason         string             `json:"reason"`
+}
+
 type resumePending struct {
 	Kind   runstate.Kind `json:"kind"`
 	ID     string        `json:"id"`
@@ -109,6 +125,7 @@ type resumePending struct {
 type resumeCounts struct {
 	Started    int `json:"started"`
 	Completed  int `json:"completed"`
+	Reused     int `json:"reused"`
 	Failed     int `json:"failed"`
 	Superseded int `json:"superseded"`
 	Invalid    int `json:"invalid"`
@@ -162,10 +179,12 @@ func buildResume(req *verifyRequest, src *coverage.Source, repoCommit, ledgerDir
 		RunID:       req.RunID,
 		LedgerPath:  filepath.Join(ledgerDir, runstate.LedgerFile),
 		Initialized: ledger != nil,
+		HeadCommit:  repoCommit,
 		Trace:       resumePhase{Status: statusNone},
 		Review:      resumeReview{Groups: []resumeGroup{}, Uncovered: []string{}},
 		Live:        resumeLive{Required: len(live.ApplicableRows(src)) > 0, Status: statusNone},
 		Mutation:    resumeMutation{Rows: []resumeMutationRow{}},
+		Publication: resumePublication{Status: statusNone, Files: []evidence.FileRef{}},
 		Pending:     []resumePending{},
 		Records:     []runstate.Record{},
 	}
@@ -180,7 +199,8 @@ func buildResume(req *verifyRequest, src *coverage.Source, repoCommit, ledgerDir
 
 	out.Identity = &ledger.Identity
 	out.Records = ledger.Records
-	out.Stale, out.StaleReason = staleAgainst(ledger.Identity, repoCommit, src)
+	out.Stale, out.StaleReason = staleForRun(req, src, ledger.Identity, repoCommit)
+	out.Publication = publicationSection(ledger)
 
 	// invalidReason names why a completed record is not reusable work: the run
 	// moved out from under it, or an artifact it points at is no longer what it
@@ -276,6 +296,69 @@ func staleAgainst(id runstate.Identity, repoCommit string, src *coverage.Source)
 		return true, fmt.Sprintf("%s digest is %s; the ledger was opened at %s", src.Path, src.SHA256, id.SourceSHA256)
 	}
 	return false, ""
+}
+
+// staleForRun is the same question with one exemption: a HEAD that moved only
+// because this run's own report was committed is not a move at all — the
+// subject the report describes is unchanged, and finalize goes on measuring the
+// commit the run was opened at — so staleness is judged against that revision
+// rather than against HEAD. Every other move names what made it one.
+func staleForRun(req *verifyRequest, src *coverage.Source, id runstate.Identity, repoCommit string) (bool, string) {
+	measured, offending := measuredAgainstHead(req, id, repoCommit)
+	if measured == id.RepoCommit {
+		return staleAgainst(id, id.RepoCommit, src)
+	}
+	stale, reason := staleAgainst(id, repoCommit, src)
+	if stale && offending != "" {
+		reason += fmt.Sprintf("; %s changed between them", offending)
+	}
+	return stale, reason
+}
+
+// measuredAgainstHead is the revision finalize would report for this run at
+// repoCommit, empty when the repository moved for any other reason than this
+// run's own publication. A source name resume cannot derive artifact paths from
+// and a git query that cannot be answered both say the same thing: nothing here
+// proves the move was a publication.
+func measuredAgainstHead(req *verifyRequest, id runstate.Identity, repoCommit string) (measured, offending string) {
+	dir, stem, cliErr := artifactStem(req.CoverageSource)
+	if cliErr != nil {
+		return "", ""
+	}
+	measured, offending, err := measuredCommit(req.RepoRoot, dir, stem, req.RunID, id.RepoCommit, repoCommit)
+	if err != nil {
+		return "", ""
+	}
+	return measured, offending
+}
+
+// publicationSection is the run's report publication as the ledger holds it: a
+// started record is a partially written report set, which is why it carries a
+// reason like any other unfinished obligation.
+func publicationSection(ledger *runstate.Ledger) resumePublication {
+	rec := runstate.Current(ledger, runstate.KindPhase, publishPhaseID)
+	if rec == nil {
+		return resumePublication{Status: statusNone, Files: []evidence.FileRef{}}
+	}
+	var inputs publishInputs
+	reason := ""
+	if err := recordInputs(rec, &inputs); err != nil {
+		reason = reasonInputsUnreadable
+	}
+	if rec.Status == runstate.StatusStarted {
+		reason = reasonNotCompleted
+	}
+	if inputs.Files == nil {
+		inputs.Files = []evidence.FileRef{}
+	}
+	return resumePublication{
+		Status:         string(rec.Status),
+		Outcome:        rec.Outcome,
+		MeasuredCommit: inputs.MeasuredCommit,
+		Acknowledged:   inputs.Acknowledged,
+		Files:          inputs.Files,
+		Reason:         reason,
+	}
 }
 
 // phasePendingReason names why the trace phase is still owed.
@@ -572,6 +655,12 @@ func pendingObligations(
 			pending = append(pending, resumePending{Kind: runstate.KindMutationRow, ID: id, Reason: reasonNeverStarted})
 		}
 	}
+
+	// The report the run owes comes last: a parent answers the layers it is
+	// still missing before it publishes anything about them.
+	if rec := runstate.Current(ledger, runstate.KindPhase, publishPhaseID); rec != nil && rec.Status == runstate.StatusStarted {
+		pending = append(pending, resumePending{Kind: runstate.KindPhase, ID: publishPhaseID, Reason: reasonNotCompleted})
+	}
 	return pending
 }
 
@@ -607,6 +696,12 @@ func countRecords(
 			continue
 		case runstate.StatusCompleted:
 			counts.Completed++
+			// What the run stands on rather than did: read from the record's
+			// own inputs, so a record nothing can decode is this run's work
+			// until it says otherwise.
+			if adopted, err := recordCarriesReuse(rec); err == nil && adopted {
+				counts.Reused++
+			}
 			if runstate.IsFailedOutcome(rec.Kind, rec.Outcome) {
 				counts.Failed++
 			}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -726,5 +727,146 @@ func TestResume_PreservesFailedOutcomes(t *testing.T) {
 	}
 	if fresh.Counts.Completed != 0 {
 		t.Errorf("counts.completed = %d, want 0", fresh.Counts.Completed)
+	}
+}
+
+// TestResume_AnUnfinishedPublicationIsStillOwed reads the run's publication
+// back out of the ledger: what it measured, what it meant to write, and that a
+// record left open by a failed publication is an obligation the run still
+// carries.
+func TestResume_AnUnfinishedPublicationIsStillOwed(t *testing.T) {
+	f := newFinalizeFixture(t)
+	planted := filepath.Join(f.repo, "docs", "superpowers", "coverage", "transcripts", f.runID, traceEvidenceFile)
+
+	cliErr := finalizeOp(f.request(), io.Discard, func() {
+		if err := os.MkdirAll(planted, 0o755); err != nil {
+			t.Fatalf("MkdirAll %s: %v", planted, err)
+		}
+		t.Cleanup(func() { _ = os.RemoveAll(planted) })
+	})
+	if cliErr == nil || cliErr.Code != "publish-failed" {
+		t.Fatalf("finalizeOp = %+v, want the publish-failed refusal", cliErr)
+	}
+
+	out := runResume(t, f.repo, f.runID)
+
+	pub := out.Publication
+	if pub.Status != string(runstate.StatusStarted) {
+		t.Errorf("publication.status = %q, want started", pub.Status)
+	}
+	if pub.Outcome != "" {
+		t.Errorf("publication.outcome = %q, want none while the record is open", pub.Outcome)
+	}
+	if pub.Reason != reasonNotCompleted {
+		t.Errorf("publication.reason = %q, want %q", pub.Reason, reasonNotCompleted)
+	}
+	if pub.MeasuredCommit != f.head {
+		t.Errorf("publication.measuredCommit = %q, want the commit the run was opened at %q", pub.MeasuredCommit, f.head)
+	}
+	if pub.Acknowledged {
+		t.Error("publication.acknowledged = true, want false: the request carried no acknowledgement")
+	}
+	if len(pub.Files) != 6 {
+		t.Fatalf("publication.files = %+v, want the report, the Markdown and four transcripts", pub.Files)
+	}
+	for i, ref := range pub.Files {
+		if i > 0 && pub.Files[i-1].Path >= ref.Path {
+			t.Errorf("publication.files are not sorted by path: %+v", pub.Files)
+		}
+		if ref.SHA256 == "" {
+			t.Errorf("publication.files[%d] = %+v, want the digest of the bytes it writes", i, ref)
+		}
+	}
+
+	owed := resumePending{Kind: runstate.KindPhase, ID: publishPhaseID, Reason: reasonNotCompleted}
+	if !slices.Contains(out.Pending, owed) {
+		t.Errorf("pending = %+v, want it to carry %+v", out.Pending, owed)
+	}
+	// The publication is the last section, after everything the report speaks
+	// for: a parent reads the layers it owes before the report it owes.
+	if got := out.Pending[len(out.Pending)-1]; got != owed {
+		t.Errorf("pending ends with %+v, want the publication %+v", got, owed)
+	}
+	if out.HeadCommit != f.head {
+		t.Errorf("headCommit = %q, want %q", out.HeadCommit, f.head)
+	}
+}
+
+// TestResume_CountsAdoptedRecordsAsReused separates the run's own work from
+// what it stands on: the count is read from each record's captured inputs, so a
+// fresh trace beside three adopted records is one run with three reused answers.
+func TestResume_CountsAdoptedRecordsAsReused(t *testing.T) {
+	s := readySubject(t, "not-applicable")
+	runID := readyAdoptedRun(t, s, "rsm-reused", readyCaughtVersionRow)
+
+	out := readyResume(t, s, runID)
+
+	if out.Counts.Reused != 3 {
+		t.Errorf("counts.reused = %d, want the two adopted groups and the adopted row; counts=%+v", out.Counts.Reused, out.Counts)
+	}
+	if out.Counts.Completed != 4 {
+		t.Errorf("counts.completed = %d, want the adopted three plus this run's own trace", out.Counts.Completed)
+	}
+	if out.Publication.Status != statusNone {
+		t.Errorf("publication = %+v, want none before finalize runs", out.Publication)
+	}
+
+	// The run's own trace is not reused, whatever the records beside it say.
+	if _, err := os.Stat(out.Trace.EvidencePath); err != nil {
+		t.Errorf("stat trace evidence: %v", err)
+	}
+}
+
+// TestResume_APublicationCommitDoesNotMakeTheRunStale is the measured
+// revision seen from the accounting side: committing what finalize published
+// moves HEAD without moving the subject, and resume keeps standing on the
+// commit the run was opened at until something else changes.
+func TestResume_APublicationCommitDoesNotMakeTheRunStale(t *testing.T) {
+	f := newFinalizeFixture(t)
+	exit, stdout, stderr := f.run()
+	if exit != exitOK {
+		t.Fatalf("finalize: %s", stderr)
+	}
+	out := decodeFinalizeOutput(t, stdout)
+	rep := f.publishedReport(out.JSONPath)
+
+	published := []string{out.JSONPath, out.MarkdownPath}
+	for _, ref := range rep.Transcripts {
+		published = append(published, ref.Path)
+	}
+	mustGit(t, f.repo, append([]string{"add"}, published...)...)
+	mustGit(t, f.repo, "commit", "-q", "-m", "publish the verification report")
+	afterPublish := strings.TrimSpace(mustGit(t, f.repo, "rev-parse", "HEAD"))
+
+	state := runResume(t, f.repo, f.runID)
+
+	if state.Stale {
+		t.Errorf("stale = true (%s), want a publication-only commit to leave the run standing", state.StaleReason)
+	}
+	if state.HeadCommit != afterPublish {
+		t.Errorf("headCommit = %q, want %q", state.HeadCommit, afterPublish)
+	}
+	if state.Identity.RepoCommit != f.head {
+		t.Errorf("identity.repoCommit = %q, want the commit the run was opened at %q", state.Identity.RepoCommit, f.head)
+	}
+	if state.Publication.MeasuredCommit != f.head {
+		t.Errorf("publication.measuredCommit = %q, want %q", state.Publication.MeasuredCommit, f.head)
+	}
+
+	// Anything else in the same repository is another subject.
+	source := filepath.Join(f.repo, "orders", "orders.go")
+	data, err := os.ReadFile(source)
+	if err != nil {
+		t.Fatalf("read orders.go: %v", err)
+	}
+	if err := os.WriteFile(source, append(data, []byte("\n// a later thought\n")...), 0o644); err != nil {
+		t.Fatalf("write orders.go: %v", err)
+	}
+	mustGit(t, f.repo, "add", "orders/orders.go")
+	mustGit(t, f.repo, "commit", "-q", "-m", "production change")
+
+	moved := runResume(t, f.repo, f.runID)
+	if !moved.Stale {
+		t.Errorf("stale = false after a production commit, want the run stale")
 	}
 }
