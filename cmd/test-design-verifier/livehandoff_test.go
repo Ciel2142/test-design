@@ -160,7 +160,7 @@ func handoffPlan(runID string) map[string]any {
 func TestLiveHandoff_GapRowExecutesAndStaysTraceGap(t *testing.T) {
 	const runID = "handoff-gap"
 	subject := newHandoffSubject(t)
-	tr, _, exec := runLivePipeline(t, subject, runID, handoffPlan(runID), nil)
+	_, _, exec := runLivePipeline(t, subject, runID, handoffPlan(runID), nil)
 
 	// The plan binds the row layer 1 reported as a gap, and execute-live runs
 	// it rather than refusing the binding or standing a placeholder in for it.
@@ -182,7 +182,7 @@ func TestLiveHandoff_GapRowExecutesAndStaysTraceGap(t *testing.T) {
 	}
 
 	code, stdout, stderr := runVerifyOp(t, "finalize",
-		liveFinalizeRequestJSON(t, subject, runID, tr.EvidencePath, exec.EvidencePath))
+		liveFinalizeRequestJSON(t, subject, runID))
 	if code != exitOK {
 		t.Fatalf("finalize exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
 	}
@@ -284,7 +284,7 @@ func descriptorPrefixes(t *testing.T, descriptor json.RawMessage) []string {
 func TestLiveHandoff_FinalizeAcceptsRealLiveEvidence(t *testing.T) {
 	const runID = "handoff-evidence"
 	subject := newHandoffSubject(t)
-	tr, _, exec := runLivePipeline(t, subject, runID, handoffPlan(runID), nil)
+	_, _, exec := runLivePipeline(t, subject, runID, handoffPlan(runID), nil)
 
 	// Hashed before finalize reads it: the report's transcript reference has to
 	// describe these exact bytes, not a re-serialization of them.
@@ -294,7 +294,7 @@ func TestLiveHandoff_FinalizeAcceptsRealLiveEvidence(t *testing.T) {
 	}
 
 	code, stdout, stderr := runVerifyOp(t, "finalize",
-		liveFinalizeRequestJSON(t, subject, runID, tr.EvidencePath, exec.EvidencePath))
+		liveFinalizeRequestJSON(t, subject, runID))
 	if code != exitOK {
 		t.Fatalf("finalize refused real live evidence: exit code = %d, stderr=%s", code, stderr)
 	}

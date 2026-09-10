@@ -311,7 +311,7 @@ func TestLiveTruth_DeployedRevisionJourney(t *testing.T) {
 		registerRunCleanup(t, subject, redesignRecipePath, runID)
 		root := redesignRunRoot(runID)
 
-		tr, _, execOut := runLivePipeline(t, subject, runID, redesignPlan(subject.head, runID), nil)
+		_, _, execOut := runLivePipeline(t, subject, runID, redesignPlan(subject.head, runID), nil)
 
 		// The run root lives outside the disposable worktree, so its absence is
 		// observable here rather than only through the cleanup predicate.
@@ -321,7 +321,7 @@ func TestLiveTruth_DeployedRevisionJourney(t *testing.T) {
 		}
 
 		code, stdout, stderr := runVerifyOp(t, "finalize",
-			liveFinalizeRequestJSON(t, subject, runID, tr.EvidencePath, execOut.EvidencePath))
+			liveFinalizeRequestJSON(t, subject, runID))
 		if code != exitOK {
 			t.Fatalf("finalize refused the live evidence: exit code = %d, stderr=%s", code, stderr)
 		}
@@ -1286,7 +1286,7 @@ func TestLiveTruth_UnboundAssertionFailureBlocks(t *testing.T) {
 			subject := newPhaseSubject(t, phasePatientTimeoutSeconds)
 			runID := newPhaseRun(t, subject, tc.prefix, map[string]string{"teardown": "fail"})
 
-			tr, _, execOut := runLivePipeline(t, subject, runID, phaseUnboundPlan(t, runID, tc.cleanup), nil)
+			_, _, execOut := runLivePipeline(t, subject, runID, phaseUnboundPlan(t, runID, tc.cleanup), nil)
 			ev := readLiveEvidence(t, execOut.EvidencePath)
 
 			want := []liveStepFailure{tc.expected}
@@ -1300,7 +1300,7 @@ func TestLiveTruth_UnboundAssertionFailureBlocks(t *testing.T) {
 			}
 
 			code, stdout, stderr := runVerifyOp(t, "finalize",
-				liveFinalizeRequestJSON(t, subject, runID, tr.EvidencePath, execOut.EvidencePath))
+				liveFinalizeRequestJSON(t, subject, runID))
 			if code != exitOK {
 				t.Fatalf("finalize exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
 			}
@@ -1381,7 +1381,7 @@ func TestLiveTruth_WithheldExpectationNeverReachesThePublishedReport(t *testing.
 	}
 	steps[len(steps)-1]["expectation"] = unboundProbeExpectation + " for " + liveCanaryValue
 
-	tr, _, execOut := runLivePipeline(t, subject, runID, plan, nil)
+	_, _, execOut := runLivePipeline(t, subject, runID, plan, nil)
 	ev := readLiveEvidence(t, execOut.EvidencePath)
 
 	want := []liveStepFailure{{Phase: "step", Index: 2, Expectation: withheldExpectation}}
@@ -1393,7 +1393,7 @@ func TestLiveTruth_WithheldExpectationNeverReachesThePublishedReport(t *testing.
 	}
 
 	code, stdout, stderr := runVerifyOp(t, "finalize",
-		liveFinalizeRequestJSON(t, subject, runID, tr.EvidencePath, execOut.EvidencePath))
+		liveFinalizeRequestJSON(t, subject, runID))
 	if code != exitOK {
 		t.Fatalf("finalize exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
 	}
@@ -1727,7 +1727,7 @@ func TestLiveTruth_EveryCleanupFailureRetained(t *testing.T) {
 		runID := newLiveTruthRun(t, "lt-sweep-refused")
 		writeDirectives(t, runID, map[string]string{"remove": "fail"})
 
-		tr, _, execOut := runLivePipeline(t, subject, runID, sweepPlan(runID), nil)
+		_, _, execOut := runLivePipeline(t, subject, runID, sweepPlan(runID), nil)
 		ev := readLiveEvidence(t, execOut.EvidencePath)
 
 		if got := profileCleanupStep(t, ev, 1).Result; got != "fail" {
@@ -1746,7 +1746,7 @@ func TestLiveTruth_EveryCleanupFailureRetained(t *testing.T) {
 		}
 
 		code, stdout, stderr := runVerifyOp(t, "finalize",
-			liveFinalizeRequestJSON(t, subject, runID, tr.EvidencePath, execOut.EvidencePath))
+			liveFinalizeRequestJSON(t, subject, runID))
 		if code != exitOK {
 			t.Fatalf("finalize exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
 		}
@@ -1797,7 +1797,7 @@ func TestLiveTruth_EveryCleanupFailureRetained(t *testing.T) {
 		runID := newLiveTruthRun(t, "lt-sweep-held")
 		writeDirectives(t, runID, map[string]string{"remove": "stall"})
 
-		tr, _, execOut := runLivePipeline(t, subject, runID, sweepPlan(runID), nil)
+		_, _, execOut := runLivePipeline(t, subject, runID, sweepPlan(runID), nil)
 		ev := readLiveEvidence(t, execOut.EvidencePath)
 
 		// The held command has no reduced step to read a result off, and the
@@ -1810,7 +1810,7 @@ func TestLiveTruth_EveryCleanupFailureRetained(t *testing.T) {
 		requireCleanupState(t, execOut, ev, false, false)
 
 		code, stdout, stderr := runVerifyOp(t, "finalize",
-			liveFinalizeRequestJSON(t, subject, runID, tr.EvidencePath, execOut.EvidencePath))
+			liveFinalizeRequestJSON(t, subject, runID))
 		if code != exitOK {
 			t.Fatalf("finalize exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
 		}
@@ -2269,7 +2269,7 @@ func TestLiveTruth_IncompleteOutputIsNotProof(t *testing.T) {
 	runID := newLiveTruthRun(t, "lt-incomplete")
 	walkthrough := incompleteWalkthrough()
 
-	tr, _, execOut := runLivePipeline(t, subject, runID, incompletePlan(runID), blockStepCapture(t, len(walkthrough)))
+	_, _, execOut := runLivePipeline(t, subject, runID, incompletePlan(runID), blockStepCapture(t, len(walkthrough)))
 	ev := readLiveEvidence(t, execOut.EvidencePath)
 
 	for i, step := range walkthrough {
@@ -2307,7 +2307,7 @@ func TestLiveTruth_IncompleteOutputIsNotProof(t *testing.T) {
 	requireCleanupState(t, execOut, ev, true, false)
 
 	code, stdout, stderr := runVerifyOp(t, "finalize",
-		liveFinalizeRequestJSON(t, subject, runID, tr.EvidencePath, execOut.EvidencePath))
+		liveFinalizeRequestJSON(t, subject, runID))
 	if code != exitOK {
 		t.Fatalf("finalize exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
 	}

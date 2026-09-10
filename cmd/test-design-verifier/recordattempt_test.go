@@ -189,42 +189,6 @@ func newRecordAttemptLiveSubject(t *testing.T) *liveSubject {
 	}}, nil)
 }
 
-// liveAttemptFinalizeRequestJSON assembles a finalize request around the
-// subject's real trace evidence and layer-2 bookkeeping, naming a layer-3
-// attempt document instead of live evidence — the shape finalize sees when a
-// live run was refused before it ran.
-func liveAttemptFinalizeRequestJSON(t *testing.T, s *liveSubject, runID, tracePath, attemptPath string) string {
-	t.Helper()
-	src, cliErr := loadVerifiedSource("finalize", s.repo, s.coverageSource)
-	if cliErr != nil {
-		t.Fatalf("loadVerifiedSource: %v", cliErr)
-	}
-	tr, err := report.LoadTrace(tracePath)
-	if err != nil {
-		t.Fatalf("LoadTrace: %v", err)
-	}
-	active := report.ActiveRows(src)
-	gaps := report.Layer1Gaps(tr)
-
-	body, err := json.Marshal(finalizeRequestJSON{
-		SchemaVersion:  evidence.SchemaVersion,
-		RepoRoot:       s.repo,
-		CoverageSource: s.coverageSource,
-		RunID:          runID,
-		finalizeRequestBody: finalizeRequestBody{
-			Approval:      finalizeApproval,
-			TraceEvidence: tracePath,
-			Freshness:     report.Freshness{Result: "fresh"},
-			Layer2:        finalizeLayer2{Batches: layer2ForSubject(runID, active, gaps)},
-			Layer3:        &finalizeLayer3{AttemptEvidencePath: attemptPath},
-		},
-	})
-	if err != nil {
-		t.Fatalf("marshal finalize request: %v", err)
-	}
-	return string(body)
-}
-
 // TestRecordAttemptLayer3GreenPathAcceptedByFinalize drives the real trace and
 // record-attempt ops over a subject whose live decision is required, then
 // hands the attempt document record-attempt wrote to a real finalize run. The
@@ -285,8 +249,10 @@ func TestRecordAttemptLayer3GreenPathAcceptedByFinalize(t *testing.T) {
 		t.Errorf("attempt evidence refusal = %q, want %q", attemptDoc.Refusal, refusal)
 	}
 
-	code, stdout, stderr = runVerifyOp(t, "finalize",
-		liveAttemptFinalizeRequestJSON(t, subject, runID, tr.EvidencePath, attemptOut.EvidencePath))
+	// The attempt record-attempt wrote is the run's whole layer-3 answer, so
+	// finalize reads it from the ledger; the rest of the run's bookkeeping is
+	// recorded through the same ops the workflow uses.
+	code, stdout, stderr = runVerifyOp(t, "finalize", liveFinalizeRequestJSON(t, subject, runID))
 	if code != exitOK {
 		t.Fatalf("finalize refused the recorded attempt: exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
 	}

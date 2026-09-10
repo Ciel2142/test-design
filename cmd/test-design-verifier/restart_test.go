@@ -261,7 +261,7 @@ func TestRestart_RecoversLiveStateBeforeRepeating(t *testing.T) {
 		}
 
 		code, stdout, stderr = runVerifyOp(t, "finalize",
-			liveFinalizeRequestJSON(t, subject, runID, attempt.tracePath, out.EvidencePath))
+			liveFinalizeRequestJSON(t, subject, runID))
 		if code != exitOK {
 			t.Fatalf("finalize refused the recovered run's evidence: exit code = %d, stderr=%s", code, stderr)
 		}
@@ -345,7 +345,7 @@ func TestRestart_RecoversLiveStateBeforeRepeating(t *testing.T) {
 		}
 
 		code, stdout, stderr = runVerifyOp(t, "finalize",
-			liveFinalizeRequestJSON(t, subject, runID, attempt.tracePath, out.EvidencePath))
+			liveFinalizeRequestJSON(t, subject, runID))
 		if code != exitOK {
 			t.Fatalf("finalize exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
 		}

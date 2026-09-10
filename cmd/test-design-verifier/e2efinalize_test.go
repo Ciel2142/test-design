@@ -8,87 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	"test-design/internal/coverage"
-	"test-design/internal/evidence"
 	"test-design/internal/report"
 )
 
 const e2eFinalizeRunID = "e2e-finalize"
-
-// layer2FromTrace builds the bookkeeping a critic dispatch would have produced
-// for this trace: gap rows can only be MISSING, the rest HOLDS, all inheriting
-// one caught synthesized canary.
-func layer2FromTrace(active []coverage.Row, gaps map[string]bool) []report.Batch {
-	canaryRow := ""
-	for _, row := range active {
-		if !gaps[row.ID] {
-			canaryRow = row.ID
-			break
-		}
-	}
-	var rest []string
-	var verdicts []report.CriticVerdict
-	for _, row := range active {
-		if row.ID == canaryRow {
-			continue
-		}
-		verdict := "HOLDS"
-		if gaps[row.ID] {
-			verdict = "MISSING"
-		}
-		rest = append(rest, row.ID)
-		verdicts = append(verdicts, report.CriticVerdict{RowID: row.ID, Verdict: verdict, Reason: "critic verdict for " + row.ID})
-	}
-	return []report.Batch{
-		{
-			BatchID: "b1", RunID: e2eFinalizeRunID, Rows: []string{canaryRow},
-			Verdicts: []report.CriticVerdict{{RowID: canaryRow, Verdict: "HOLDS"}},
-		},
-		{
-			BatchID: "b2", RunID: e2eFinalizeRunID, Rows: rest,
-			Verdicts: verdicts,
-		},
-	}
-}
-
-// layer4FromTrace builds the bookkeeping a mutation run would have produced
-// for this trace: every layer-4-applicable row the fixture carries — its
-// high-risk rows that layer 1 did not leave as gaps — reports an
-// environmental outcome backed by its own attempt evidence, so this test
-// never invokes the mutator agent. The set is derived rather than named, so a
-// row that becomes bound (or stops being) moves the bookkeeping with it.
-func layer4FromTrace(t *testing.T, dir string, src *coverage.Source, tr *report.TraceEvidence, active []coverage.Row, gaps map[string]bool) []report.MutationInput {
-	t.Helper()
-	var rows []report.MutationInput
-	for _, row := range active {
-		if row.Risk != "high" || gaps[row.ID] {
-			continue
-		}
-		attemptPath := filepath.Join(dir, "mutation-attempt-"+row.ID+".json")
-		if err := evidence.WriteJSON(attemptPath, map[string]string{
-			"schemaVersion":   evidence.SchemaVersion,
-			"verifierVersion": evidence.VerifierVersion,
-			"runID":           e2eFinalizeRunID,
-			"repoCommit":      tr.RepoCommit,
-			"source":          src.Path,
-			"sourceSha256":    src.SHA256,
-			"rowID":           row.ID,
-			"refusal":         "runner-start-failed",
-		}); err != nil {
-			t.Fatalf("write attempt evidence for %s: %v", row.ID, err)
-		}
-		rows = append(rows, report.MutationInput{
-			RowID:               row.ID,
-			Outcome:             "environmental",
-			Reason:              "the mutation runner could not start in this environment",
-			AttemptEvidencePath: attemptPath,
-		})
-	}
-	if len(rows) == 0 {
-		t.Fatal("the fixture has no bound high-risk row; the layer-4 bookkeeping would prove nothing")
-	}
-	return rows
-}
 
 var finishedAtField = regexp.MustCompile(`(?m)^(\s*"finishedAt": ).*$`)
 
@@ -118,40 +41,17 @@ func TestE2E_FinalizePipeline(t *testing.T) {
 	}
 	traceOut := decodeTraceOutput(t, stdout)
 
-	src, cliErr := loadVerifiedSource("finalize", repo, fixtureCoverageSource)
-	if cliErr != nil {
-		t.Fatalf("loadVerifiedSource: %v", cliErr)
-	}
-	tr, err := report.LoadTrace(traceOut.EvidencePath)
-	if err != nil {
-		t.Fatalf("LoadTrace: %v", err)
-	}
-	active := report.ActiveRows(src)
-	gaps := report.Layer1Gaps(tr)
+	// The layers reach finalize the way the workflow leaves them: reviewed
+	// through record-review, and — for SC-07 and SC-10, the fixture's high-risk
+	// rows, both bound by layer 1 under structural credit — an environmental
+	// attempt through record-attempt, so this test never invokes a mutator.
+	recordAllRowsReviewed(t, repo, fixtureCoverageSource, e2eFinalizeRunID, traceOut.DispatchPath)
+	recordEnvironmentalMutations(t, repo, fixtureCoverageSource, e2eFinalizeRunID, traceOut.DispatchPath)
+	attemptRows := requiredMutationRows(t, traceOut.DispatchPath)
 
-	// SC-07 and SC-10 are the fixture's high-risk rows, both bound by layer 1
-	// under structural credit; each reports an environmental mutation run so
-	// this test never invokes a mutator.
-	layer4Rows := layer4FromTrace(t, t.TempDir(), src, tr, active, gaps)
+	requestBody := finalizeRequestJSONFor(t, repo, fixtureCoverageSource, e2eFinalizeRunID, freshFinalizeBody())
 
-	requestBody, err := json.Marshal(finalizeRequestJSON{
-		SchemaVersion:  evidence.SchemaVersion,
-		RepoRoot:       repo,
-		CoverageSource: fixtureCoverageSource,
-		RunID:          e2eFinalizeRunID,
-		finalizeRequestBody: finalizeRequestBody{
-			Approval:      finalizeApproval,
-			TraceEvidence: traceOut.EvidencePath,
-			Freshness:     report.Freshness{Result: "fresh"},
-			Layer2:        finalizeLayer2{Batches: layer2FromTrace(active, gaps)},
-			Layer4:        finalizeLayer4{Rows: layer4Rows},
-		},
-	})
-	if err != nil {
-		t.Fatalf("marshal finalize request: %v", err)
-	}
-
-	code, stdout, stderr = runVerifyOp(t, "finalize", string(requestBody))
+	code, stdout, stderr = runVerifyOp(t, "finalize", requestBody)
 	if code != exitOK {
 		t.Fatalf("finalize exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
 	}
@@ -182,8 +82,9 @@ func TestE2E_FinalizePipeline(t *testing.T) {
 		"docs/superpowers/coverage/2026-08-30-fixture-verification.md",
 		transcripts + "/trace-evidence.json",
 	}
-	for _, m := range layer4Rows {
-		published = append(published, transcripts+"/"+filepath.Base(m.AttemptEvidencePath))
+	published = append(published, transcripts+"/review-all.json")
+	for _, rowID := range attemptRows {
+		published = append(published, transcripts+"/mutation-attempt-"+rowID+".json")
 	}
 	for _, rel := range published {
 		if _, err := os.Stat(filepath.Join(repo, filepath.FromSlash(rel))); err != nil {
@@ -205,7 +106,7 @@ func TestE2E_FinalizePipeline(t *testing.T) {
 		t.Fatalf("git status = %v, want a clean tree before the rerun", lines)
 	}
 
-	code, _, stderr = runVerifyOp(t, "finalize", string(requestBody))
+	code, _, stderr = runVerifyOp(t, "finalize", requestBody)
 	if code != exitOK {
 		t.Fatalf("second finalize exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
 	}
@@ -219,4 +120,21 @@ func TestE2E_FinalizePipeline(t *testing.T) {
 	if maskFinishedAt(first) != maskFinishedAt(second) {
 		t.Errorf("two finalize runs over identical inputs differ beyond finishedAt:\n--- first ---\n%s\n--- second ---\n%s", first, second)
 	}
+}
+
+// requiredMutationRows names the rows the dispatch inputs oblige to layer 4:
+// the high-risk rows layer 1 bound, which is the set recordEnvironmentalMutations
+// answers for.
+func requiredMutationRows(t *testing.T, dispatchPath string) []string {
+	t.Helper()
+	var rows []string
+	for _, row := range readDispatchInputs(t, dispatchPath).Rows {
+		if row.Risk == "high" && row.Status != "gap" && row.Status != "ambiguity" {
+			rows = append(rows, row.RowID)
+		}
+	}
+	if len(rows) == 0 {
+		t.Fatal("the fixture has no bound high-risk row; the layer-4 bookkeeping would prove nothing")
+	}
+	return rows
 }

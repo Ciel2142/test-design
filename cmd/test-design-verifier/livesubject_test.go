@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"test-design/internal/coverage"
 	"test-design/internal/evidence"
 	"test-design/internal/report"
 )
@@ -131,16 +130,7 @@ func newLiveSubject(t *testing.T, coverageSource, profilePath string, commits []
 
 func liveRequestJSON(t *testing.T, repo, coverageSource, runID string) string {
 	t.Helper()
-	body, err := json.Marshal(map[string]string{
-		"schemaVersion":  evidence.SchemaVersion,
-		"repoRoot":       repo,
-		"coverageSource": coverageSource,
-		"runID":          runID,
-	})
-	if err != nil {
-		t.Fatalf("marshal request: %v", err)
-	}
-	return string(body)
+	return opRequestJSON(t, repo, coverageSource, runID, nil)
 }
 
 func liveExecuteRequestJSON(t *testing.T, repo, coverageSource, runDir, planPath, tracePath string) string {
@@ -203,64 +193,165 @@ func runLivePipeline(t *testing.T, s *liveSubject, runID string, plan map[string
 	return tr, prep, exec
 }
 
-// layer2ForSubject reuses the bookkeeping shape the e2e finalize proof builds —
-// one caught synthesized canary, its row re-dispatched alone against the real
-// source, the rest inheriting the catch, gap rows MISSING — and stamps this
-// run's own id, which staleness validation ties every batch to.
-func layer2ForSubject(runID string, active []coverage.Row, gaps map[string]bool) []report.Batch {
-	batches := layer2FromTrace(active, gaps)
-	for i := range batches {
-		batches[i].RunID = runID
+// opRequestJSON is a verify request over any repository plus whatever fields
+// the op being driven adds.
+func opRequestJSON(t *testing.T, repo, coverageSource, runID string, extra map[string]any) string {
+	t.Helper()
+	body := map[string]any{
+		"schemaVersion":  evidence.SchemaVersion,
+		"repoRoot":       repo,
+		"coverageSource": coverageSource,
+		"runID":          runID,
 	}
-	return batches
+	for name, value := range extra {
+		body[name] = value
+	}
+	data, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	return string(data)
 }
 
-// liveFinalizeRequestJSON assembles the finalize request around the evidence
-// the pipeline actually produced: the trace file, the layer-2 verdicts it
-// implies, and the live evidence path execute-live wrote.
-func liveFinalizeRequestJSON(t *testing.T, s *liveSubject, runID, tracePath, livePath string) string {
+// resumeFor asks the real resume op what a run holds. Every helper that has to
+// know whether an obligation is already answered asks it rather than
+// remembering across calls.
+func resumeFor(t *testing.T, repo, coverageSource, runID string) resumeOutput {
 	t.Helper()
-	src, cliErr := loadVerifiedSource("finalize", s.repo, s.coverageSource)
-	if cliErr != nil {
-		t.Fatalf("loadVerifiedSource: %v", cliErr)
+	code, stdout, stderr := runVerifyOp(t, "resume", opRequestJSON(t, repo, coverageSource, runID, nil))
+	if code != exitOK {
+		t.Fatalf("resume exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
 	}
-	tr, err := report.LoadTrace(tracePath)
-	if err != nil {
-		t.Fatalf("LoadTrace: %v", err)
+	var out resumeOutput
+	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
+		t.Fatalf("resume stdout did not decode: %v\nstdout=%s", err, stdout)
 	}
-	active := report.ActiveRows(src)
-	gaps := report.Layer1Gaps(tr)
-	// The layer-2 canary rides on the first row layer 1 bound to a tagged test;
-	// a trace reporting every active row as a gap would leave that batch with no
-	// row at all, which is a broken subject rather than a finalize verdict.
-	canaried := false
-	for _, row := range active {
-		if !gaps[row.ID] {
-			canaried = true
-			break
-		}
-	}
-	if !canaried {
-		t.Fatalf("trace gaps = %v over active rows %+v, want at least one bound row to carry the layer-2 canary", gaps, active)
-	}
+	return out
+}
 
-	body, err := json.Marshal(finalizeRequestJSON{
-		SchemaVersion:  evidence.SchemaVersion,
-		RepoRoot:       s.repo,
-		CoverageSource: s.coverageSource,
-		RunID:          runID,
-		finalizeRequestBody: finalizeRequestBody{
-			Approval:      finalizeApproval,
-			TraceEvidence: tracePath,
-			Freshness:     report.Freshness{Result: "fresh"},
-			Layer2:        finalizeLayer2{Batches: layer2ForSubject(runID, active, gaps)},
-			Layer3:        &finalizeLayer3{EvidencePath: livePath},
-		},
+// freshFinalizeBody is what a parent hands finalize when nothing is bent: the
+// approval line and a fresh freshness answer, and nothing else.
+func freshFinalizeBody() finalizeRequestBody {
+	return finalizeRequestBody{Approval: finalizeApproval, Freshness: report.Freshness{Result: "fresh"}}
+}
+
+// finalizeRequestJSONFor is the finalize request document for one run: the
+// verify fields plus exactly the body the caller built.
+func finalizeRequestJSONFor(t *testing.T, repo, coverageSource, runID string, body finalizeRequestBody) string {
+	t.Helper()
+	data, err := json.Marshal(finalizeRequestJSON{
+		SchemaVersion:       evidence.SchemaVersion,
+		RepoRoot:            repo,
+		CoverageSource:      coverageSource,
+		RunID:               runID,
+		finalizeRequestBody: body,
 	})
 	if err != nil {
 		t.Fatalf("marshal finalize request: %v", err)
 	}
-	return string(body)
+	return string(data)
+}
+
+// dispatchGaps is the layer-1 gap set of the trace the dispatch inputs came
+// from. The two documents are written side by side by the trace op, and the
+// report's own gap rule is what layer 2 is validated against, so a verdict a
+// proof records has to be decided from the same place.
+func dispatchGaps(t *testing.T, dispatchPath string) map[string]bool {
+	t.Helper()
+	tr, err := report.LoadTrace(filepath.Join(filepath.Dir(dispatchPath), traceEvidenceFile))
+	if err != nil {
+		t.Fatalf("LoadTrace beside %s: %v", dispatchPath, err)
+	}
+	return report.Layer1Gaps(tr)
+}
+
+// recordAllRowsReviewed records the layer-2 obligation of a run whose review is
+// not what the proof is about: one group over every dispatched row, HOLDS for a
+// bound row and MISSING for a layer-1 gap, through the real record-review op.
+func recordAllRowsReviewed(t *testing.T, repo, coverageSource, runID, dispatchPath string) {
+	t.Helper()
+	dispatch := readDispatchInputs(t, dispatchPath)
+	gaps := dispatchGaps(t, dispatchPath)
+
+	rows := make([]string, 0, len(dispatch.Rows))
+	verdicts := make([]map[string]string, 0, len(dispatch.Rows))
+	for _, row := range dispatch.Rows {
+		verdict := "HOLDS"
+		if gaps[row.RowID] {
+			verdict = "MISSING"
+		}
+		rows = append(rows, row.RowID)
+		verdicts = append(verdicts, map[string]string{
+			"rowId": row.RowID, "verdict": verdict, "reason": "critic verdict for " + row.RowID,
+		})
+	}
+	if len(rows) == 0 {
+		t.Fatalf("dispatch inputs %s name no row to review", dispatchPath)
+	}
+	runRecordReviewFor(t, repo, coverageSource, runID, map[string]any{
+		"groupId": "all", "status": "started", "rows": rows,
+	})
+	runRecordReviewFor(t, repo, coverageSource, runID, map[string]any{
+		"groupId": "all", "status": "completed", "verdicts": verdicts, "reads": []string{},
+	})
+}
+
+func runRecordReviewFor(t *testing.T, repo, coverageSource, runID string, extra map[string]any) {
+	t.Helper()
+	code, _, stderr := runVerifyOp(t, "record-review", opRequestJSON(t, repo, coverageSource, runID, extra))
+	if code != exitOK {
+		t.Fatalf("record-review exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+}
+
+// recordEnvironmentalMutations answers the layer-4 obligation of a run whose
+// mutation work is not what the proof is about: every required high-risk row
+// the run never opened is closed environmental through the real record-attempt
+// op, so no proof invokes a mutator to reach finalize. A row the run already
+// has a record for is left alone.
+func recordEnvironmentalMutations(t *testing.T, repo, coverageSource, runID, dispatchPath string) {
+	t.Helper()
+	recorded := map[string]bool{}
+	for _, row := range resumeFor(t, repo, coverageSource, runID).Mutation.Rows {
+		if row.Status != statusNone {
+			recorded[row.RowID] = true
+		}
+	}
+	for _, row := range readDispatchInputs(t, dispatchPath).Rows {
+		if row.Risk != "high" || row.Status == "gap" || row.Status == "ambiguity" || recorded[row.RowID] {
+			continue
+		}
+		code, _, stderr := runVerifyOp(t, "record-attempt", opRequestJSON(t, repo, coverageSource, runID, map[string]any{
+			"layer": 4, "rowID": row.RowID,
+			"refusal": "the mutation runner could not start in this environment",
+		}))
+		if code != exitOK {
+			t.Fatalf("record-attempt exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+		}
+	}
+}
+
+// liveFinalizeRequestJSON brings a pipeline run to the point where finalize has
+// everything it needs: the run's own bookkeeping, recorded through the real ops
+// into its ledger, and then the three-field request. It consults resume first,
+// so a proof that calls it twice records nothing twice.
+func liveFinalizeRequestJSON(t *testing.T, s *liveSubject, runID string) string {
+	t.Helper()
+	state := resumeFor(t, s.repo, s.coverageSource, runID)
+	if state.Trace.DispatchPath == "" {
+		t.Fatalf("resume %s = %+v, want a completed trace phase to finalize from", runID, state.Trace)
+	}
+	grouped := false
+	for _, group := range state.Review.Groups {
+		if group.ID == "all" {
+			grouped = true
+		}
+	}
+	if !grouped {
+		recordAllRowsReviewed(t, s.repo, s.coverageSource, runID, state.Trace.DispatchPath)
+	}
+	recordEnvironmentalMutations(t, s.repo, s.coverageSource, runID, state.Trace.DispatchPath)
+	return finalizeRequestJSONFor(t, s.repo, s.coverageSource, runID, freshFinalizeBody())
 }
 
 // liveRunID returns "<prefix>-<pid>". The process ID makes the run unique across

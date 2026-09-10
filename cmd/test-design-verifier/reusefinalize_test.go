@@ -26,20 +26,7 @@ import (
 // fields the op being driven adds.
 func readyRequestJSON(t *testing.T, s *liveSubject, runID string, extra map[string]any) string {
 	t.Helper()
-	body := map[string]any{
-		"schemaVersion":  evidence.SchemaVersion,
-		"repoRoot":       s.repo,
-		"coverageSource": s.coverageSource,
-		"runID":          runID,
-	}
-	for name, value := range extra {
-		body[name] = value
-	}
-	data, err := json.Marshal(body)
-	if err != nil {
-		t.Fatalf("marshal request: %v", err)
-	}
-	return string(data)
+	return opRequestJSON(t, s.repo, s.coverageSource, runID, extra)
 }
 
 // readyTrace runs the real trace op for runID and returns its output, failing
@@ -94,11 +81,10 @@ func readyRecordReview(t *testing.T, s *liveSubject, runID string, extra map[str
 // review groups, and whatever layer-4 record seed leaves behind — then traces a
 // fresh run and adopts every record the prior run proved. A refused record
 // fails here rather than later, so a proof reading the finalize report is never
-// reading an empty adoption. It returns the new run's ID and the trace evidence
-// finalize must be handed.
+// reading an empty adoption. It returns the new run's ID.
 func readyAdoptedRun(
 	t *testing.T, s *liveSubject, prefix string, seed func(*testing.T, *liveSubject, string),
-) (string, string) {
+) string {
 	t.Helper()
 	// One policy identity, written once: reuse compares the critic's
 	// instructions by path and digest, so a second file would read as a
@@ -113,14 +99,14 @@ func readyAdoptedRun(
 	}
 
 	runID := liveRunID(prefix + "-now")
-	now := readyTrace(t, s, runID)
+	readyTrace(t, s, runID)
 	out := readyReuse(t, s, runID, priorRunID, policy)
 	for _, decision := range slices.Concat(out.Review, out.Mutation) {
 		if !decision.Reused {
 			t.Fatalf("reuse refused %s %s: %s", decision.Kind, decision.ID, decision.Reason)
 		}
 	}
-	return runID, now.EvidencePath
+	return runID
 }
 
 func readyReuse(t *testing.T, s *liveSubject, runID, priorRunID string, policy *reviewPolicy) reuseOutput {
@@ -193,38 +179,17 @@ func readyEnvironmentalVersionRow(t *testing.T, s *liveSubject, runID string) {
 	}
 }
 
-// readyFinalizeRequestJSON is the finalize request over the subject: the
-// approval, the run's own trace, a fresh freshness answer, and whatever layer-2
-// and layer-4 bookkeeping the parent pastes — which for an adopting run is
-// usually nothing at all.
-func readyFinalizeRequestJSON(
-	t *testing.T, s *liveSubject, runID, tracePath string, batches []report.Batch, rows []report.MutationInput,
-) string {
+// readyFinalizeRequestJSON is the finalize request over the subject: the run's
+// three fields, and nothing about the layers — an adopting run and a fresh one
+// both answer for those from the ledger they built.
+func readyFinalizeRequestJSON(t *testing.T, s *liveSubject, runID string, body finalizeRequestBody) string {
 	t.Helper()
-	body, err := json.Marshal(finalizeRequestJSON{
-		SchemaVersion:  evidence.SchemaVersion,
-		RepoRoot:       s.repo,
-		CoverageSource: s.coverageSource,
-		RunID:          runID,
-		finalizeRequestBody: finalizeRequestBody{
-			Approval:      finalizeApproval,
-			TraceEvidence: tracePath,
-			Freshness:     report.Freshness{Result: "fresh"},
-			Layer2:        finalizeLayer2{Batches: batches},
-			Layer4:        finalizeLayer4{Rows: rows},
-		},
-	})
-	if err != nil {
-		t.Fatalf("marshal finalize request: %v", err)
-	}
-	return string(body)
+	return finalizeRequestJSONFor(t, s.repo, s.coverageSource, runID, body)
 }
 
-func readyFinalize(
-	t *testing.T, s *liveSubject, runID, tracePath string, batches []report.Batch, rows []report.MutationInput,
-) finalizeOutput {
+func readyFinalize(t *testing.T, s *liveSubject, runID string) finalizeOutput {
 	t.Helper()
-	code, stdout, stderr := runVerifyOp(t, "finalize", readyFinalizeRequestJSON(t, s, runID, tracePath, batches, rows))
+	code, stdout, stderr := runVerifyOp(t, "finalize", readyFinalizeRequestJSON(t, s, runID, freshFinalizeBody()))
 	if code != exitOK {
 		t.Fatalf("finalize exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
 	}
@@ -233,12 +198,9 @@ func readyFinalize(
 
 // readyWantRefusal drives finalize expecting the named refusal and the empty
 // working tree that says nothing was published.
-func readyWantRefusal(
-	t *testing.T, s *liveSubject, runID, tracePath string,
-	batches []report.Batch, rows []report.MutationInput, code string,
-) {
+func readyWantRefusal(t *testing.T, s *liveSubject, runID string, body finalizeRequestBody, code string) {
 	t.Helper()
-	exit, stdout, stderr := runVerifyOp(t, "finalize", readyFinalizeRequestJSON(t, s, runID, tracePath, batches, rows))
+	exit, stdout, stderr := runVerifyOp(t, "finalize", readyFinalizeRequestJSON(t, s, runID, body))
 	if exit != exitError || stdout != "" {
 		t.Fatalf("finalize was accepted: exit=%d stdout=%s stderr=%s", exit, stdout, stderr)
 	}
@@ -268,16 +230,6 @@ func readyBatch(t *testing.T, rep *report.Report, batchID string) report.BatchRe
 	return report.BatchReport{}
 }
 
-// readyHoldingBatch is the parent's own layer-2 bookkeeping for one row, in the
-// canary-free shape a parent may paste: enough to be admitted on its own, so a
-// refusal over it is about reuse and nothing else.
-func readyHoldingBatch(runID, batchID, row string) report.Batch {
-	return report.Batch{
-		BatchID: batchID, RunID: runID, Rows: []string{row},
-		Verdicts: []report.CriticVerdict{{RowID: row, Verdict: "HOLDS"}},
-	}
-}
-
 // TestFinalize_AdoptedRecordsCarryTheRunsLayer2AndLayer4 is the adopting run's
 // whole answer: a parent that pastes no bookkeeping at all still publishes a
 // PASS, because the records its own ledger holds are read, re-verified and
@@ -285,9 +237,9 @@ func readyHoldingBatch(runID, batchID, row string) report.Batch {
 // and each publishing a transcript copy of the original artifact.
 func TestFinalize_AdoptedRecordsCarryTheRunsLayer2AndLayer4(t *testing.T) {
 	s := readySubject(t, "not-applicable")
-	runID, tracePath := readyAdoptedRun(t, s, "rdy-adopt", readyCaughtVersionRow)
+	runID := readyAdoptedRun(t, s, "rdy-adopt", readyCaughtVersionRow)
 
-	out := readyFinalize(t, s, runID, tracePath, nil, nil)
+	out := readyFinalize(t, s, runID)
 	if out.Verdict != report.VerdictPass {
 		t.Fatalf("verdict = %q, want %s; reasons=%+v", out.Verdict, report.VerdictPass, out.Reasons)
 	}
@@ -329,44 +281,44 @@ func TestFinalize_AdoptedRecordsCarryTheRunsLayer2AndLayer4(t *testing.T) {
 	}
 }
 
-// TestFinalize_RefusesParentPastedEvidenceCarryingReuse holds the one door
-// adopted evidence may come through. A reuse reference is written by the reuse
-// op into the run's ledger; a parent that pastes one has bypassed the
-// staleness and canary rules a fresh batch answers to, so it is refused before
-// the report is computed at all.
-func TestFinalize_RefusesParentPastedEvidenceCarryingReuse(t *testing.T) {
-	pasted := &evidence.ReuseReference{
-		PriorRunID: "an-earlier-run", PriorRepoCommit: "0123456789abcdef", PriorSeq: 2, Outcome: "pass",
+// TestFinalize_RefusesAnyParentPastedEnvelope holds the one door evidence may
+// come through. Every layer a parent used to paste is now the run's own ledger
+// to answer for, so a request that still carries one of those fields is refused
+// by name before finalize touches the repository at all.
+func TestFinalize_RefusesAnyParentPastedEnvelope(t *testing.T) {
+	for _, retired := range []struct {
+		field string
+		value any
+	}{
+		{"traceEvidence", "/runs/run-9/trace-evidence.json"},
+		{"layer2", map[string]any{"batches": []map[string]any{{
+			"batchId": "b1", "runId": "fin-1", "rows": []string{"SC-01"},
+			"verdicts": []map[string]string{{"rowId": "SC-01", "verdict": "HOLDS"}},
+		}}}},
+		{"layer3", map[string]any{"evidencePath": "/runs/run-9/live-evidence.json"}},
+		{"layer4", map[string]any{"rows": []map[string]any{{"rowId": "SC-07", "outcome": "caught"}}}},
+	} {
+		t.Run(retired.field, func(t *testing.T) {
+			f := newFinalizeFixture(t)
+			f.seed()
+
+			exit, stdout, stderr := runVerifyOp(t, "finalize", f.legacyRequestJSON(retired.field, retired.value))
+
+			if exit != exitError || stdout != "" {
+				t.Fatalf("finalize was accepted: exit=%d stdout=%s stderr=%s", exit, stdout, stderr)
+			}
+			got := decodeCLIError(t, stderr)
+			if got.Code != codeEnvelopeNotAccepted {
+				t.Errorf("refusal code = %q, want %q; message=%s", got.Code, codeEnvelopeNotAccepted, got.Message)
+			}
+			if !strings.Contains(got.Message, retired.field) {
+				t.Errorf("message = %q, want it to name the retired field %s", got.Message, retired.field)
+			}
+			if lines := gitStatusLines(t, f.repo); len(lines) != 0 {
+				t.Errorf("git status = %v, want a refusal to publish nothing", lines)
+			}
+		})
 	}
-
-	t.Run("batch", func(t *testing.T) {
-		f := newFinalizeFixture(t)
-		named := slices.IndexFunc(f.body.Layer2.Batches, func(b report.Batch) bool { return b.BatchID == "b1" })
-		f.body.Layer2.Batches[named].Reuse = pasted
-		f.wantRefusal(report.CodeReuseNotAdmitted)
-	})
-
-	t.Run("layer-4 row", func(t *testing.T) {
-		f := newFinalizeFixture(t)
-		f.body.Layer4.Rows[0].Reuse = pasted
-		f.wantRefusal(report.CodeReuseNotAdmitted)
-	})
-}
-
-// TestFinalize_RefusesRepastingARowAnAdoptedRecordCovers keeps one row from
-// being answered twice. The run's ledger already answers for both rows; a
-// parent that also pastes an answer for one of them is describing the same row
-// from two sources, and finalize refuses rather than choosing between them.
-func TestFinalize_RefusesRepastingARowAnAdoptedRecordCovers(t *testing.T) {
-	s := readySubject(t, "not-applicable")
-	runID, tracePath := readyAdoptedRun(t, s, "rdy-repaste", readyEnvironmentalVersionRow)
-
-	readyWantRefusal(t, s, runID, tracePath,
-		[]report.Batch{readyHoldingBatch(runID, "b1", readyMarkerRow)}, nil, "reused-row-repasted")
-
-	readyWantRefusal(t, s, runID, tracePath, nil,
-		[]report.MutationInput{{RowID: readyVersionRow, Outcome: "unappliable", Reason: "pasted after the fact"}},
-		"reused-row-repasted")
 }
 
 // TestFinalize_AdoptedUnappliableRowBlocksWithItsArtifactReason proves an
@@ -375,9 +327,9 @@ func TestFinalize_RefusesRepastingARowAnAdoptedRecordCovers(t *testing.T) {
 // rather than as a caught row or a default sentence.
 func TestFinalize_AdoptedUnappliableRowBlocksWithItsArtifactReason(t *testing.T) {
 	s := readySubject(t, "not-applicable")
-	runID, tracePath := readyAdoptedRun(t, s, "rdy-unappl", readyUnappliableVersionRow)
+	runID := readyAdoptedRun(t, s, "rdy-unappl", readyUnappliableVersionRow)
 
-	out := readyFinalize(t, s, runID, tracePath, nil, nil)
+	out := readyFinalize(t, s, runID)
 	rep := readPublishedReport(t, s.repo, out.JSONPath)
 
 	if got := publishedRow(t, rep, readyVersionRow).Layer4.Status; got != "MUTATION-UNAPPLIABLE" {
@@ -404,9 +356,9 @@ func TestFinalize_AdoptedUnappliableRowBlocksWithItsArtifactReason(t *testing.T)
 // mutation evidence, and the partial reason the environment earned.
 func TestFinalize_AdoptedEnvironmentalRowReportsEnvironmental(t *testing.T) {
 	s := readySubject(t, "not-applicable")
-	runID, tracePath := readyAdoptedRun(t, s, "rdy-envt", readyEnvironmentalVersionRow)
+	runID := readyAdoptedRun(t, s, "rdy-envt", readyEnvironmentalVersionRow)
 
-	out := readyFinalize(t, s, runID, tracePath, nil, nil)
+	out := readyFinalize(t, s, runID)
 	rep := readPublishedReport(t, s.repo, out.JSONPath)
 
 	if got := publishedRow(t, rep, readyVersionRow).Layer4.Status; got != "MUTATION-N/A (environmental)" {
@@ -416,35 +368,6 @@ func TestFinalize_AdoptedEnvironmentalRowReportsEnvironmental(t *testing.T) {
 	if _, err := evidence.SHA256File(filepath.Join(s.repo,
 		filepath.FromSlash(readyTranscriptPath(s, runID, "reused-mutation-attempt-"+readyVersionRow+".json")))); err != nil {
 		t.Errorf("published attempt transcript: %v", err)
-	}
-}
-
-// TestFinalize_WithoutALedgerPublishesTheParentsBookkeepingAlone keeps the
-// unchanged path unchanged: a run that never opened a ledger has nothing to
-// adopt, and its report carries exactly what the parent pasted — no reuse
-// reference and no reused transcript.
-func TestFinalize_WithoutALedgerPublishesTheParentsBookkeepingAlone(t *testing.T) {
-	f := newFinalizeFixture(t)
-
-	exit, stdout, stderr := f.run()
-	if exit != exitOK {
-		t.Fatalf("finalize exit code = %d, want %d; stderr=%s", exit, exitOK, stderr)
-	}
-	out := decodeFinalizeOutput(t, stdout)
-	if out.Verdict != report.VerdictPass {
-		t.Fatalf("verdict = %q, want %s; reasons=%+v", out.Verdict, report.VerdictPass, out.Reasons)
-	}
-	rep := f.publishedReport(out.JSONPath)
-	for _, batch := range rep.Batches {
-		if batch.Reuse != nil {
-			t.Errorf("batch %s carries a reuse reference, want none without a ledger", batch.BatchID)
-		}
-	}
-	for _, transcript := range rep.Transcripts {
-		if strings.Contains(transcript.Path, "reused-") {
-			t.Errorf("transcripts = %+v, want no reused copy without a ledger", rep.Transcripts)
-			break
-		}
 	}
 }
 
@@ -529,13 +452,21 @@ func readyRestoreLedger(t *testing.T, s *liveSubject, runID string, original []b
 // answered. Finalize refuses instead, and publishes nothing.
 func TestFinalize_RefusesARecordWhoseCapturedInputsCannotBeRead(t *testing.T) {
 	s := readySubject(t, "not-applicable")
-	runID, tracePath := readyAdoptedRun(t, s, "rdy-unread", readyEnvironmentalVersionRow)
+	runID := readyAdoptedRun(t, s, "rdy-unread", readyEnvironmentalVersionRow)
 
-	for _, kind := range []runstate.Kind{runstate.KindReviewGroup, runstate.KindMutationRow} {
+	// A group whose shape cannot be read is an obligation resume reports as
+	// still owed, so finalize refuses it in resume's words. The environmental
+	// mutation row is a completed failure — an answer, not a gap — so resume
+	// lists nothing about it and finalize is the one that refuses to read past
+	// a record it cannot decode. Either way nothing is published.
+	for kind, code := range map[runstate.Kind]string{
+		runstate.KindReviewGroup: codeRunIncomplete,
+		runstate.KindMutationRow: "ledger-invalid",
+	} {
 		t.Run(string(kind), func(t *testing.T) {
 			original := readyBreakRecordInputs(t, s, runID, kind)
 			t.Cleanup(func() { readyRestoreLedger(t, s, runID, original) })
-			readyWantRefusal(t, s, runID, tracePath, nil, nil, "ledger-invalid")
+			readyWantRefusal(t, s, runID, freshFinalizeBody(), code)
 		})
 	}
 }
@@ -578,22 +509,6 @@ func readyResume(t *testing.T, s *liveSubject, runID string) resumeOutput {
 	return out
 }
 
-// readyLayer2 is the layer-2 bookkeeping a run that adopted nothing pastes for
-// the subject: the canary shape every published proof over a live subject
-// builds, over the rows this run's own trace bound.
-func readyLayer2(t *testing.T, s *liveSubject, runID, tracePath string) []report.Batch {
-	t.Helper()
-	src, cliErr := loadVerifiedSource("finalize", s.repo, s.coverageSource)
-	if cliErr != nil {
-		t.Fatalf("loadVerifiedSource: %s", cliErr.Message)
-	}
-	tr, err := report.LoadTrace(tracePath)
-	if err != nil {
-		t.Fatalf("LoadTrace: %v", err)
-	}
-	return layer2ForSubject(runID, report.ActiveRows(src), report.Layer1Gaps(tr))
-}
-
 // readyPublishedPriorRun drives the whole earlier run — trace, both review
 // groups under one policy, SC-02's mutation caught through the real mutation
 // ops — finalizes it to a published PASS, and commits what it published, so the
@@ -634,9 +549,7 @@ func readyPublishedPriorRun(t *testing.T, s *liveSubject, prefix string) *readyP
 		prior.artifacts[want.id], prior.seqs[want.id] = artifact.Path, rec.Seq
 	}
 
-	out := readyFinalize(t, s, prior.runID, tr.EvidencePath,
-		readyLayer2(t, s, prior.runID, tr.EvidencePath),
-		[]report.MutationInput{{RowID: readyVersionRow, EvidencePath: prior.artifacts[readyVersionRow]}})
+	out := readyFinalize(t, s, prior.runID)
 	if out.Verdict != report.VerdictPass {
 		t.Fatalf("prior run verdict = %q, want %s; reasons=%+v", out.Verdict, report.VerdictPass, out.Reasons)
 	}
@@ -704,11 +617,9 @@ func readyRefused(t *testing.T, decisions []reuseDecision, id, reason string) {
 // readyFinalizeRequest is the decoded finalize request, which is how a proof
 // reaches finalizeOp's between hook: the hook exists to change the world at the
 // one moment between the report being written and being published.
-func readyFinalizeRequest(
-	t *testing.T, s *liveSubject, runID, tracePath string, batches []report.Batch, rows []report.MutationInput,
-) *finalizeRequest {
+func readyFinalizeRequest(t *testing.T, s *liveSubject, runID string) *finalizeRequest {
 	t.Helper()
-	req, cliErr := decodeFinalizeRequest("finalize", []byte(readyFinalizeRequestJSON(t, s, runID, tracePath, batches, rows)))
+	req, cliErr := decodeFinalizeRequest("finalize", []byte(readyFinalizeRequestJSON(t, s, runID, freshFinalizeBody())))
 	if cliErr != nil {
 		t.Fatalf("decodeFinalizeRequest: %s", cliErr.Message)
 	}
@@ -758,14 +669,14 @@ func TestReuse_RejectsAlteredRetainedBytes(t *testing.T) {
 	// digests to what the reuse reference recorded for the original.
 	t.Run("tampered-at-finalize", func(t *testing.T) {
 		runID := liveRunID("rdy-alt-fin")
-		tracePath := readyTrace(t, s, runID).EvidencePath
+		readyTrace(t, s, runID)
 		out := readyReuse(t, s, runID, prior.runID, prior.policy)
 		readyReused(t, out.Review, readyMarkerGroup)
 		readyReused(t, out.Review, readyVersionGroup)
 		readyReused(t, out.Mutation, readyVersionRow)
 
 		original := readyArtifactBytes(t, reviewPath)
-		cliErr := finalizeOp(readyFinalizeRequest(t, s, runID, tracePath, nil, nil), io.Discard, func() {
+		cliErr := finalizeOp(readyFinalizeRequest(t, s, runID), io.Discard, func() {
 			readyWriteArtifact(t, reviewPath, append(slices.Clone(original), '\n'))
 		})
 		if cliErr == nil {
@@ -779,20 +690,15 @@ func TestReuse_RejectsAlteredRetainedBytes(t *testing.T) {
 		}
 		readyWriteArtifact(t, reviewPath, original)
 
-		// The other three doors into a report the ledger already answers for.
-		readyWantRefusal(t, s, runID, tracePath,
-			[]report.Batch{readyHoldingBatch(runID, "b1", readyMarkerRow)}, nil, codeReusedRowRepasted)
+		// The one remaining door into a report the ledger already answers for:
+		// a parent that pastes a layer at all is refused before finalize reads
+		// anything, adopted or not.
+		pasted := freshFinalizeBody()
+		pasted.Layer2 = json.RawMessage(`{"batches":[{"batchId":"b1","runId":"` + runID +
+			`","rows":["` + readyMarkerRow + `"],"verdicts":[{"rowId":"` + readyMarkerRow + `","verdict":"HOLDS"}]}]}`)
+		readyWantRefusal(t, s, runID, pasted, codeEnvelopeNotAccepted)
 
-		pasted := readyHoldingBatch(runID, "b1", readyMarkerRow)
-		pasted.Reuse = &evidence.ReuseReference{
-			PriorRunID: prior.runID, PriorRepoCommit: prior.commit, PriorSeq: 1, Outcome: "holds",
-		}
-		readyWantRefusal(t, s, runID, tracePath, []report.Batch{pasted}, nil, report.CodeReuseNotAdmitted)
-
-		readyWantRefusal(t, s, runID, tracePath, nil,
-			[]report.MutationInput{{RowID: readyVersionRow, Outcome: "caught"}}, codeReusedRowRepasted)
-
-		published := readyFinalize(t, s, runID, tracePath, nil, nil)
+		published := readyFinalize(t, s, runID)
 		if published.Verdict != report.VerdictPass {
 			t.Fatalf("verdict = %q, want %s; reasons=%+v", published.Verdict, report.VerdictPass, published.Reasons)
 		}
@@ -829,7 +735,7 @@ func TestReuse_PreservesOriginalProvenanceInReport(t *testing.T) {
 	}
 
 	runID := liveRunID("rdy-prov-now")
-	tracePath := readyTrace(t, s, runID).EvidencePath
+	readyTrace(t, s, runID)
 	adopted := readyReuse(t, s, runID, prior.runID, prior.policy)
 	readyReused(t, adopted.Review, readyMarkerGroup)
 	readyReused(t, adopted.Review, readyVersionGroup)
@@ -848,7 +754,7 @@ func TestReuse_PreservesOriginalProvenanceInReport(t *testing.T) {
 	}
 	reuseChangedPathFor(t, adopted, prior.reportPath)
 
-	out := readyFinalize(t, s, runID, tracePath, nil, nil)
+	out := readyFinalize(t, s, runID)
 	if out.Verdict != report.VerdictPass {
 		t.Fatalf("verdict = %q, want %s; reasons=%+v", out.Verdict, report.VerdictPass, out.Reasons)
 	}
@@ -963,10 +869,10 @@ func TestReuse_PreservesOriginalProvenanceInReport(t *testing.T) {
 // published, so the bytes the report names are the bytes that land.
 func TestFinalize_PublishesAdoptedArtifactsFromVerifiedStagedCopies(t *testing.T) {
 	s := readySubject(t, "not-applicable")
-	runID, tracePath := readyAdoptedRun(t, s, "rdy-stage", readyCaughtVersionRow)
+	runID := readyAdoptedRun(t, s, "rdy-stage", readyCaughtVersionRow)
 
 	var stdout strings.Builder
-	if cliErr := finalizeOp(readyFinalizeRequest(t, s, runID, tracePath, nil, nil), &stdout, nil); cliErr != nil {
+	if cliErr := finalizeOp(readyFinalizeRequest(t, s, runID), &stdout, nil); cliErr != nil {
 		t.Fatalf("finalizeOp refused %s: %s", cliErr.Code, cliErr.Message)
 	}
 	out := decodeFinalizeOutput(t, stdout.String())
@@ -1034,7 +940,7 @@ func TestReuse_AReadoptedRecordKeepsItsOriginalProducer(t *testing.T) {
 	stateB := readyResume(t, s, runB)
 
 	runC := liveRunID("rdy-chain-c")
-	trC := readyTrace(t, s, runC)
+	readyTrace(t, s, runC)
 	outC := readyReuse(t, s, runC, runB, policy)
 	for _, decision := range slices.Concat(outC.Review, outC.Mutation) {
 		if !decision.Reused {
@@ -1057,7 +963,7 @@ func TestReuse_AReadoptedRecordKeepsItsOriginalProducer(t *testing.T) {
 		}
 	}
 
-	out := readyFinalize(t, s, runC, trC.EvidencePath, nil, nil)
+	out := readyFinalize(t, s, runC)
 	if out.Verdict != report.VerdictPass {
 		t.Fatalf("verdict = %q, want %s; reasons=%+v", out.Verdict, report.VerdictPass, out.Reasons)
 	}
@@ -1071,53 +977,16 @@ func TestReuse_AReadoptedRecordKeepsItsOriginalProducer(t *testing.T) {
 	}
 }
 
-// TestFinalize_ACorruptRecordThisRunDidNotAdoptLeavesTheNoReusePathUnchanged
-// keeps finalize's reading of the ledger to what it needs: whether a record was
-// adopted. A run's own fresh records are pasted by the parent as they always
-// were, so a shape finalize never needed to decode is not one it refuses over.
-func TestFinalize_ACorruptRecordThisRunDidNotAdoptLeavesTheNoReusePathUnchanged(t *testing.T) {
-	s := readySubject(t, "not-applicable")
-	runID := liveRunID("rdy-own-corrupt")
-	tr := readyTrace(t, s, runID)
-	readyGroups(t, s, runID, readDispatchInputs(t, tr.DispatchPath), reusePolicy(t))
-	readyCaughtVersionRow(t, s, runID)
-	artifact, ok := ledgerRecord(t, readyResume(t, s, runID), runstate.KindMutationRow, readyVersionRow).Artifacts[artifactEvidence]
-	if !ok {
-		t.Fatalf("%s retained no evidence artifact", readyVersionRow)
-	}
-
-	original := readyBreakRecordInputs(t, s, runID, runstate.KindReviewGroup)
-	t.Cleanup(func() { readyRestoreLedger(t, s, runID, original) })
-	readyBreakRecordInputs(t, s, runID, runstate.KindMutationRow)
-
-	out := readyFinalize(t, s, runID, tr.EvidencePath,
-		readyLayer2(t, s, runID, tr.EvidencePath),
-		[]report.MutationInput{{RowID: readyVersionRow, EvidencePath: artifact.Path}})
-	if out.Verdict != report.VerdictPass {
-		t.Fatalf("verdict = %q, want %s; reasons=%+v", out.Verdict, report.VerdictPass, out.Reasons)
-	}
-	rep := readPublishedReport(t, s.repo, out.JSONPath)
-	for _, batch := range rep.Batches {
-		if batch.Reuse != nil {
-			t.Errorf("batch %s carries a reuse reference, want none: this run adopted nothing", batch.BatchID)
-		}
-	}
-}
-
-// TestFinalize_WithoutALedgerCreatesNothingUnderTheStateRoot keeps a run that
-// never opened a ledger from acquiring one at finalize: adopted evidence is
-// read from a ledger that exists, and a missing one is answered from disk.
-func TestFinalize_WithoutALedgerCreatesNothingUnderTheStateRoot(t *testing.T) {
+// / TestFinalize_WithoutALedgerIsRefusedTraceIncomplete answers a run that never
+// opened a ledger from disk: there is no trace phase to assemble a report from,
+// and the refusal acquires no state root of its own on the way out.
+func TestFinalize_WithoutALedgerIsRefusedTraceIncomplete(t *testing.T) {
 	f := newFinalizeFixture(t)
+	f.unseeded = true
 	stateRoot := os.Getenv(runstate.EnvStateDir)
 
-	exit, stdout, stderr := f.run()
-	if exit != exitOK {
-		t.Fatalf("finalize exit code = %d, want %d; stderr=%s", exit, exitOK, stderr)
-	}
-	if out := decodeFinalizeOutput(t, stdout); out.Verdict != report.VerdictPass {
-		t.Fatalf("verdict = %q, want %s; reasons=%+v", out.Verdict, report.VerdictPass, out.Reasons)
-	}
+	f.wantRefusal(codeTraceIncomplete)
+
 	entries, err := os.ReadDir(stateRoot)
 	if err != nil {
 		t.Fatalf("read state root %s: %v", stateRoot, err)

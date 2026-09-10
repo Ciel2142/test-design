@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"test-design/internal/live"
+	"test-design/internal/runstate"
 )
 
 const liveFinalCommandLine = `- final-command: ["/test-design:coverage-verification", "docs/superpowers/coverage/2026-08-30-fixture-coverage.md"]`
@@ -411,5 +412,105 @@ func assertAttemptEvidence(t *testing.T, path, wantRunID, wantProfile, wantRefus
 	}
 	if !strings.Contains(doc.Refusal, wantRefusalSubstring) {
 		t.Errorf("attempt evidence refusal = %q, want it to contain %q", doc.Refusal, wantRefusalSubstring)
+	}
+}
+
+// prepareLiveResume asks the real resume op what the run holds, which is how
+// these proofs read the ledger rather than the file it lives in.
+func prepareLiveResume(t *testing.T, repo, runID string) resumeOutput {
+	t.Helper()
+	code, stdout, stderr := runVerifyOp(t, "resume", prepareLiveRequestJSON(t, repo, runID))
+	if code != exitOK {
+		t.Fatalf("resume exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+	var out resumeOutput
+	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
+		t.Fatalf("resume stdout did not decode: %v\nstdout=%s", err, stdout)
+	}
+	return out
+}
+
+// verifierRunsDirs names every runs directory the process has allocated. Each
+// op call takes a controller of its own, so a run directory that was never
+// created leaves no directory here to find.
+func verifierRunsDirs(t *testing.T) []string {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(os.Getenv("TMPDIR"), "test-design-verifier-*", "runs"))
+	if err != nil {
+		t.Fatalf("glob runs dirs: %v", err)
+	}
+	return matches
+}
+
+// TestPrepareLive_ProfileRefusalRecordsTheUnavailableAttempt closes the hole a
+// refused profile used to leave in the run's own accounting: the attempt is the
+// whole of the live layer's life for this run, so it is recorded start to
+// finish, pointing at the document the refusal wrote.
+func TestPrepareLive_ProfileRefusalRecordsTheUnavailableAttempt(t *testing.T) {
+	repo := fixtureRepo(t)
+	addSmokeRow(t, repo)
+	profilePath := liveProfilePath("does-not-exist")
+	addLiveProfileHeader(t, repo, profilePath)
+	const runID = "live-unavailable-recorded"
+
+	code, _, stderr := runVerifyOp(t, "prepare-live", prepareLiveRequestJSON(t, repo, runID))
+	if code != exitError {
+		t.Fatalf("exit code = %d, want %d", code, exitError)
+	}
+	if got := decodeCLIError(t, stderr); got.Code != "profile-unavailable" {
+		t.Fatalf("error code = %q, want profile-unavailable", got.Code)
+	}
+
+	state := prepareLiveResume(t, repo, runID)
+	rec := ledgerRecord(t, state, runstate.KindLiveAttempt, liveAttemptID)
+	if rec.Status != runstate.StatusCompleted || rec.Outcome != "unavailable" {
+		t.Fatalf("live-attempt record = %s %q, want completed unavailable", rec.Status, rec.Outcome)
+	}
+	// The controller resolves its temp root through symlinks, so the recorded
+	// path is compared by the run-relative tail rather than spelled out.
+	attemptTail := filepath.Join("runs", runID, liveAttemptEvidenceFile)
+	if got := rec.Artifacts[artifactAttempt].Path; !strings.HasSuffix(got, attemptTail) {
+		t.Errorf("attempt artifact = %q, want the document the refusal wrote at .../%s", got, attemptTail)
+	}
+	if reasons := runstate.Verify(&rec); len(reasons) != 0 {
+		t.Errorf("record does not verify: %v, want the artifact digested as retained", reasons)
+	}
+	if state.Live.Status != string(runstate.StatusCompleted) || state.Live.EvidencePath != rec.Artifacts[artifactAttempt].Path {
+		t.Errorf("resume live = %+v, want the completed attempt at %s", state.Live, rec.Artifacts[artifactAttempt].Path)
+	}
+}
+
+// TestPrepareLive_SecondAttemptRefusedBeforeAnythingIsCreated holds the live
+// layer to the run-state rule every other obligation answers to: an attempt this
+// run already made is not made again without a repeat reason, and the refusal
+// arrives before a run directory or a worktree exists to clean up.
+func TestPrepareLive_SecondAttemptRefusedBeforeAnythingIsCreated(t *testing.T) {
+	repo := fixtureRepo(t)
+	addSmokeRow(t, repo)
+	addLiveProfileHeader(t, repo, liveProfilePath("does-not-exist"))
+	const runID = "live-attempt-twice"
+
+	if code, _, stderr := runVerifyOp(t, "prepare-live", prepareLiveRequestJSON(t, repo, runID)); code != exitError {
+		t.Fatalf("first prepare-live exit code = %d, want %d; stderr=%s", code, exitError, stderr)
+	}
+	before := verifierRunsDirs(t)
+
+	code, stdout, stderr := runVerifyOp(t, "prepare-live", prepareLiveRequestJSON(t, repo, runID))
+
+	if code != exitError || stdout != "" {
+		t.Fatalf("second prepare-live was accepted: exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	if got := decodeCLIError(t, stderr); got.Code != string(runstate.KindLiveAttempt)+"-completed" {
+		t.Errorf("refusal code = %q, want %s-completed; message=%s", got.Code, runstate.KindLiveAttempt, got.Message)
+	}
+	if after := verifierRunsDirs(t); len(after) != len(before) {
+		t.Errorf("runs dirs = %v, want the refusal to have created none beyond %v", after, before)
+	}
+	if left := verifierWorktrees(t); len(left) != 0 {
+		t.Errorf("worktrees registered = %v, want no worktree created before the refusal", left)
+	}
+	state := prepareLiveResume(t, repo, runID)
+	if got := len(state.Records); got != 1 {
+		t.Errorf("records = %+v, want the one attempt the first call recorded", state.Records)
 	}
 }

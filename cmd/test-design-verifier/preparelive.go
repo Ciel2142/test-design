@@ -12,6 +12,7 @@ import (
 	"test-design/internal/coverage"
 	"test-design/internal/evidence"
 	"test-design/internal/live"
+	"test-design/internal/runstate"
 	"test-design/internal/worktree"
 )
 
@@ -79,6 +80,24 @@ func prepareLiveHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer) 
 	if cliErr != nil {
 		return cliErr
 	}
+
+	// The live layer is one obligation per run, and this run may already have
+	// answered it — with a journey or with a refusal. The ledger is re-read
+	// under the lock when the record is written; asking here spares the caller
+	// a run directory and a worktree it would not keep.
+	store, cliErr := openLedger("prepare-live", req)
+	if cliErr != nil {
+		return cliErr
+	}
+	ledger, cliErr := loadLedgerFor("prepare-live", runstate.KindLiveAttempt, store)
+	if cliErr != nil {
+		return cliErr
+	}
+	current := runstate.Current(ledger, runstate.KindLiveAttempt, liveAttemptID)
+	if current != nil && current.Status == runstate.StatusCompleted && repeatReason(req) == "" {
+		return completedRecordRefusal("prepare-live", runstate.KindLiveAttempt, liveAttemptID)
+	}
+
 	runDir, err := ctrl.NewRunDir(req.RunID)
 	if err != nil {
 		return &cliError{Code: "run-dir-failed", Message: fmt.Sprintf("prepare-live: %v", err)}
@@ -104,20 +123,20 @@ func prepareLiveHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer) 
 	// Unreachable behind the decision gate, which refuses a required decision
 	// without a live-profile as target-missing; kept as this op's own guard.
 	if src.LiveProfile == "" {
-		return failProfileUnavailable(runDir, req.RunID, repoCommit, src, "", errors.New("no live-profile configured for coverage source "+src.Path))
+		return failProfileUnavailable(req, runDir, repoCommit, src, "", errors.New("no live-profile configured for coverage source "+src.Path))
 	}
 	profileRelPath, confineErr := confinedRelPath("prepare-live", "live-profile", "live-profile-outside-repo", src.LiveProfile)
 	if confineErr != nil {
-		return failProfileUnavailable(runDir, req.RunID, repoCommit, src, src.LiveProfile, fmt.Errorf("%s: %s", confineErr.Code, confineErr.Message))
+		return failProfileUnavailable(req, runDir, repoCommit, src, src.LiveProfile, fmt.Errorf("%s: %s", confineErr.Code, confineErr.Message))
 	}
 	profileAbsPath := filepath.Join(req.RepoRoot, filepath.FromSlash(profileRelPath))
 
 	profile, err := live.LoadProfile(profileAbsPath)
 	if err != nil {
-		return failProfileUnavailable(runDir, req.RunID, repoCommit, src, src.LiveProfile, err)
+		return failProfileUnavailable(req, runDir, repoCommit, src, src.LiveProfile, err)
 	}
 	if err := profile.ValidateTemplate(); err != nil {
-		return failProfileUnavailable(runDir, req.RunID, repoCommit, src, src.LiveProfile, err)
+		return failProfileUnavailable(req, runDir, repoCommit, src, src.LiveProfile, err)
 	}
 
 	descriptor := substituteRunID(profile, req.RunID)
@@ -173,13 +192,18 @@ func requireLiveDecision(op string, src *coverage.Source) *cliError {
 	return nil
 }
 
-// failProfileUnavailable writes attempt evidence first: a run that never
-// starts still leaves finalize an auditable record to yield PARTIAL against.
-func failProfileUnavailable(runDir, runID, repoCommit string, src *coverage.Source, profileName string, cause error) *cliError {
+// failProfileUnavailable writes attempt evidence first and records it second:
+// a run that never starts still leaves finalize an auditable record to yield
+// PARTIAL against, and the run's own ledger says the live layer was answered
+// rather than never attempted.
+func failProfileUnavailable(
+	req *verifyRequest, runDir, repoCommit string, src *coverage.Source, profileName string, cause error,
+) *cliError {
+	const op = "prepare-live"
 	attemptPath := filepath.Join(runDir, liveAttemptEvidenceFile)
 	doc := liveAttemptOutput{
 		Envelope:     evidence.Envelope{SchemaVersion: evidence.SchemaVersion, VerifierVersion: evidence.VerifierVersion},
-		RunID:        runID,
+		RunID:        req.RunID,
 		RepoCommit:   repoCommit,
 		Source:       src.Path,
 		SourceSHA256: src.SHA256,
@@ -189,13 +213,48 @@ func failProfileUnavailable(runDir, runID, repoCommit string, src *coverage.Sour
 	if err := evidence.WriteJSON(attemptPath, &doc); err != nil {
 		return &cliError{
 			Code:    "attempt-evidence-write-failed",
-			Message: fmt.Sprintf("prepare-live: %v (after profile refusal: %v)", err, cause),
+			Message: fmt.Sprintf("%s: %v (after profile refusal: %v)", op, err, cause),
 		}
+	}
+	if cliErr := recordUnavailableAttempt(op, req, src, repoCommit, runDir, attemptPath); cliErr != nil {
+		cliErr.Message = fmt.Sprintf("%s (after profile refusal: %v; attempt evidence: %s)", cliErr.Message, cause, attemptPath)
+		return cliErr
 	}
 	return &cliError{
 		Code:    "profile-unavailable",
-		Message: fmt.Sprintf("prepare-live: %v (attempt evidence: %s)", cause, attemptPath),
+		Message: fmt.Sprintf("%s: %v (attempt evidence: %s)", op, cause, attemptPath),
 	}
+}
+
+// recordUnavailableAttempt records the refused attempt exactly as a layer-3
+// record-attempt does: the obligation is opened and closed in one transaction,
+// because a refusal is the whole of that obligation's life. A record this run
+// already started is finished where it stands rather than replaced, so an
+// interrupted attempt keeps the workspace it was opened against.
+func recordUnavailableAttempt(
+	op string, req *verifyRequest, src *coverage.Source, repoCommit, runDir, attemptPath string,
+) *cliError {
+	const kind = runstate.KindLiveAttempt
+	store, cliErr := openLedger(op, req)
+	if cliErr != nil {
+		return cliErr
+	}
+	identity := ledgerIdentity(req, req.RepoRoot, repoCommit, src)
+	err := store.Update(identity, func(l *runstate.Ledger) error {
+		current := runstate.Current(l, kind, liveAttemptID)
+		if current != nil && current.Status == runstate.StatusCompleted && repeatReason(req) == "" {
+			return completedRecordRefusal(op, kind, liveAttemptID)
+		}
+		if current == nil || current.Status == runstate.StatusCompleted {
+			inputs := liveAttemptInputs{RunDir: runDir, ProfilePath: src.LiveProfile}
+			if _, err := l.Start(kind, liveAttemptID, inputs, "", repeatReason(req)); err != nil {
+				return err
+			}
+		}
+		_, err := l.Complete(kind, liveAttemptID, outcomeUnavailable, map[string]string{artifactAttempt: attemptPath}, "")
+		return err
+	})
+	return updateError(op, kind, err)
 }
 
 // substituteRunID copies p rather than mutating the loaded profile.

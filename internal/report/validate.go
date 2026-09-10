@@ -23,9 +23,6 @@ const (
 	CodeInvalidMutationOutcome = "invalid-mutation-outcome"
 	CodeInvalidVerdict         = "invalid-verdict"
 	CodeLiveDecisionIncomplete = "live-decision-incomplete"
-	// CodeReuseNotAdmitted refuses a parent-pasted batch or layer-4 row that
-	// carries a reuse reference: only reuse itself may adopt a prior record.
-	CodeReuseNotAdmitted = "reuse-not-admitted"
 	// CodeReuseIdentityMismatch refuses an adopted record whose own identity
 	// differs from the prior identity its reuse reference names.
 	CodeReuseIdentityMismatch = "reuse-identity-mismatch"

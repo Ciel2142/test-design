@@ -15,8 +15,12 @@ import (
 // The record keys of the run's two singleton obligations, and the roles a
 // record's artifacts are keyed by.
 const (
-	tracePhaseID  = "trace"
-	liveAttemptID = "live"
+	tracePhaseID = "trace"
+	// publishPhaseID keys the run's publication under the phase kind: one more
+	// record of the same shape, so a verifier that knows nothing about it reads
+	// past it rather than tripping over it.
+	publishPhaseID = "publish"
+	liveAttemptID  = "live"
 
 	artifactEvidence       = "evidence"
 	artifactDispatchInputs = "dispatchInputs"

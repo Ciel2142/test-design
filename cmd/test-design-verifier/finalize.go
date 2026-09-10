@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -26,39 +25,44 @@ const coverageSourceSuffix = "-coverage.md"
 // with when the environment, not the mutant, refused the measurement.
 const outcomeEnvironmental = "environmental"
 
-// The two refusals adopted evidence adds to finalize's vocabulary. The report
-// package owns the other two (reuse-not-admitted, reuse-identity-mismatch),
-// which it also raises for itself once the report is computed.
+// outcomeUnavailable is the live-attempt outcome an attempt the environment
+// refused is closed with; like environmental it leaves the obligation
+// incomplete rather than failed.
+const outcomeUnavailable = "unavailable"
+
+// codeReusedArtifactChanged is a prior run's artifact whose bytes no longer
+// digest to what the reuse reference recorded for them. The report package
+// owns the other adopted-evidence refusal (reuse-identity-mismatch), which it
+// also raises for itself once the report is computed.
+const codeReusedArtifactChanged = "reused-artifact-changed"
+
+// The three refusals finalize raises about the run itself: an envelope the
+// parent may no longer send, a run with no trace to assemble a report from, and
+// a run that still owes an obligation.
 const (
-	// codeReusedArtifactChanged is a prior run's artifact whose bytes no
-	// longer digest to what the reuse reference recorded for them.
-	codeReusedArtifactChanged = "reused-artifact-changed"
-	// codeReusedRowRepasted is a row this run's ledger already answers for
-	// that the parent pasted an answer for as well.
-	codeReusedRowRepasted = "reused-row-repasted"
+	codeEnvelopeNotAccepted = "envelope-not-accepted"
+	codeTraceIncomplete     = "trace-incomplete"
+	codeRunIncomplete       = "run-incomplete"
 )
 
-type finalizeLayer2 struct {
-	Batches []report.Batch `json:"batches"`
-}
-
-type finalizeLayer3 struct {
-	EvidencePath        string `json:"evidencePath,omitempty"`
-	AttemptEvidencePath string `json:"attemptEvidencePath,omitempty"`
-}
-
-type finalizeLayer4 struct {
-	Rows []report.MutationInput `json:"rows"`
-}
-
+// finalizeRequestBody is everything the parent still hands finalize: the
+// approval line, its answer about the specification's freshness and, for a
+// PARTIAL it accepts, the acknowledgement. Every layer of evidence comes from
+// the run's own ledger.
 type finalizeRequestBody struct {
 	Approval        string           `json:"approval"`
-	TraceEvidence   string           `json:"traceEvidence"`
 	Freshness       report.Freshness `json:"freshness"`
-	Layer2          finalizeLayer2   `json:"layer2"`
-	Layer3          *finalizeLayer3  `json:"layer3,omitempty"`
-	Layer4          finalizeLayer4   `json:"layer4"`
 	Acknowledgement string           `json:"acknowledgement,omitempty"`
+
+	// The retired envelope fields. They are decoded as raw JSON so a document
+	// of the previous protocol is refused by name rather than silently read as
+	// a request that pasted nothing: the layers it carries are answers the
+	// ledger already holds, and reading past them would publish a report over
+	// evidence nothing verified.
+	TraceEvidence string          `json:"traceEvidence,omitempty"`
+	Layer2        json.RawMessage `json:"layer2,omitempty"`
+	Layer3        json.RawMessage `json:"layer3,omitempty"`
+	Layer4        json.RawMessage `json:"layer4,omitempty"`
 }
 
 type finalizeRequest struct {
@@ -68,13 +72,14 @@ type finalizeRequest struct {
 
 type finalizeOutput struct {
 	evidence.Envelope
-	Verdict        string          `json:"verdict"`
-	Acknowledged   bool            `json:"acknowledged"`
-	Reasons        []report.Reason `json:"reasons"`
-	JSONPath       string          `json:"jsonPath"`
-	MarkdownPath   string          `json:"markdownPath"`
-	TranscriptsDir string          `json:"transcriptsDir"`
-	RunDir         string          `json:"runDir"`
+	Verdict        string            `json:"verdict"`
+	Acknowledged   bool              `json:"acknowledged"`
+	Reasons        []report.Reason   `json:"reasons"`
+	JSONPath       string            `json:"jsonPath"`
+	MarkdownPath   string            `json:"markdownPath"`
+	TranscriptsDir string            `json:"transcriptsDir"`
+	RunDir         string            `json:"runDir"`
+	Work           report.WorkCounts `json:"work"`
 }
 
 func newFinalizeFlags() *flag.FlagSet {
@@ -104,77 +109,136 @@ func decodeFinalizeRequest(op string, requestBody []byte) (*finalizeRequest, *cl
 	if err := json.Unmarshal(requestBody, &body); err != nil {
 		return nil, &cliError{Code: "malformed-request", Message: fmt.Sprintf("%s: decode request: %v", op, err)}
 	}
-	if body.TraceEvidence == "" {
-		return nil, &cliError{Code: "missing-trace-evidence", Message: fmt.Sprintf("%s: traceEvidence is required", op)}
-	}
-	if body.Layer3 != nil && body.Layer3.EvidencePath != "" && body.Layer3.AttemptEvidencePath != "" {
-		return nil, &cliError{
-			Code:    "malformed-request",
-			Message: fmt.Sprintf("%s: layer3 names both evidencePath and attemptEvidencePath", op),
-		}
+	if cliErr := refuseRetiredEnvelope(op, &body); cliErr != nil {
+		return nil, cliErr
 	}
 	return &finalizeRequest{verifyRequest: *base, finalizeRequestBody: body}, nil
+}
+
+// refuseRetiredEnvelope names the first field of the previous protocol the
+// request still carries. It is answered while the document is being decoded,
+// before finalize reaches the repository at all: a parent still pasting layers
+// is describing a run from outside it, and nothing it names is looked at.
+func refuseRetiredEnvelope(op string, body *finalizeRequestBody) *cliError {
+	refuse := func(field, was string) *cliError {
+		return &cliError{
+			Code: codeEnvelopeNotAccepted,
+			Message: fmt.Sprintf("%s: the request carries %s, which finalize no longer accepts: %s comes from the run's own ledger, recorded by the op that produced it",
+				op, field, was),
+		}
+	}
+	if body.TraceEvidence != "" {
+		return refuse("traceEvidence", "the trace phase")
+	}
+	for _, retired := range []struct {
+		field, was string
+		raw        json.RawMessage
+	}{
+		{"layer2", "every review group", body.Layer2},
+		{"layer3", "the live attempt", body.Layer3},
+		{"layer4", "every mutation row", body.Layer4},
+	} {
+		if carriesJSON(retired.raw) {
+			return refuse(retired.field, retired.was)
+		}
+	}
+	return nil
+}
+
+// carriesJSON reports whether a raw field was present with anything in it; an
+// absent field and an explicit null are both "the parent sent nothing".
+func carriesJSON(raw json.RawMessage) bool {
+	trimmed := strings.TrimSpace(string(raw))
+	return trimmed != "" && trimmed != "null"
 }
 
 // finalizeOp is the finalize op body. between runs after the report is written
 // into the run dir and before Publish; it is nil in production and exists so a
 // test can change the repository at the moment the snapshot gate must catch it.
 func finalizeOp(req *finalizeRequest, stdout io.Writer, between func()) *cliError {
+	const op = "finalize"
+
 	artifactDir, stem, cliErr := artifactStem(req.CoverageSource)
 	if cliErr != nil {
 		return cliErr
 	}
 
-	src, cliErr := loadVerifiedSource("finalize", req.RepoRoot, req.CoverageSource)
+	src, cliErr := loadVerifiedSource(op, req.RepoRoot, req.CoverageSource)
 	if cliErr != nil {
 		return cliErr
 	}
 
-	ctrl, err := worktree.NewController(req.RepoRoot)
-	if err != nil {
-		return &cliError{Code: "controller-failed", Message: fmt.Sprintf("finalize: %v", err)}
+	head, cliErr := headCommit(op, req.RepoRoot)
+	if cliErr != nil {
+		return cliErr
 	}
-	before, err := ctrl.TakeSnapshot()
-	if err != nil {
-		return &cliError{Code: "snapshot-failed", Message: fmt.Sprintf("finalize: %v", err)}
+
+	// A run that never opened a ledger is told so from what is on disk:
+	// finalize creates no ledger directory for it, and there is no trace to
+	// assemble a report from.
+	ledgerDir, cliErr := locateLedgerDir(op, &req.verifyRequest)
+	if cliErr != nil {
+		return cliErr
 	}
-	if !before.Clean() {
+	store, cliErr := openExistingLedger(op, ledgerDir)
+	if cliErr != nil {
+		return cliErr
+	}
+	var ledger *runstate.Ledger
+	if store != nil {
+		if ledger, cliErr = loadLedgerFor(op, runstate.KindPhase, store); cliErr != nil {
+			return cliErr
+		}
+	}
+	if ledger == nil {
 		return &cliError{
-			Code:    "source-not-reproducible",
-			Message: fmt.Sprintf("finalize: source not reproducible: %s", describeDirty(req.RepoRoot)),
+			Code:    codeTraceIncomplete,
+			Message: fmt.Sprintf("%s: run %s has no ledger: trace the run before finalizing it", op, req.RunID),
 		}
 	}
 
 	if req.Approval == "" {
 		return &cliError{
 			Code:    "missing-approval",
-			Message: "finalize: approval is required; record the approval line from the coverage gate",
+			Message: op + ": approval is required; record the approval line from the coverage gate",
 		}
 	}
 
-	head, cliErr := headCommit("finalize", req.RepoRoot)
-	if cliErr != nil {
+	// The revision the report measures is the one the run was opened against.
+	// A repository that moved under the run is a different subject, whatever
+	// the ledger still holds about the old one.
+	measured := ledger.Identity.RepoCommit
+	if measured != head {
+		return &cliError{
+			Code: "head-moved",
+			Message: fmt.Sprintf("%s: HEAD is %s but the run was opened at %s; a verification describes one commit, so start a new run at HEAD",
+				op, head, measured),
+		}
+	}
+
+	// resume is the accounting authority: what it says the run still owes is
+	// what finalize refuses to publish over.
+	state := buildResume(&req.verifyRequest, src, head, store.Dir(), ledger)
+	if cliErr := pendingRefusal(op, state.Pending); cliErr != nil {
 		return cliErr
 	}
 
-	tr, err := report.LoadTrace(req.TraceEvidence)
+	ctrl, err := worktree.NewController(req.RepoRoot)
 	if err != nil {
-		return evidenceLoadError(err)
+		return &cliError{Code: "controller-failed", Message: fmt.Sprintf("%s: %v", op, err)}
 	}
-	if tr.RepoCommit != head {
+	before, err := ctrl.TakeSnapshot()
+	if err != nil {
+		return &cliError{Code: "snapshot-failed", Message: fmt.Sprintf("%s: %v", op, err)}
+	}
+	if !before.Clean() {
 		return &cliError{
-			Code: "head-moved",
-			Message: fmt.Sprintf("finalize: HEAD is %s but the trace ran against %s; a verification describes one commit, so rerun trace at HEAD",
-				head, tr.RepoCommit),
+			Code:    "source-not-reproducible",
+			Message: fmt.Sprintf("%s: source not reproducible: %s", op, describeDirty(req.RepoRoot)),
 		}
 	}
 
-	transcripts := []worktree.PublishFile{{
-		RepoRelPath: repoPath(artifactDir, "transcripts", req.RunID, traceEvidenceFile),
-		SourcePath:  req.TraceEvidence,
-	}}
-
-	reusedBatches, reusedRows, reusedCopies, cliErr := reusedInputs("finalize", req)
+	run, cliErr := assembleRun(op, req, artifactDir, ledger, measured)
 	if cliErr != nil {
 		return cliErr
 	}
@@ -182,97 +246,51 @@ func finalizeOp(req *finalizeRequest, stdout io.Writer, between func()) *cliErro
 	in := &report.Inputs{
 		Source:          src,
 		RunID:           req.RunID,
-		HeadCommit:      head,
-		Trace:           tr,
+		HeadCommit:      measured,
+		Trace:           run.trace,
 		Freshness:       req.Freshness,
-		Batches:         slices.Concat(req.Layer2.Batches, reusedBatches),
-		Mutations:       req.Layer4.Rows,
+		Batches:         run.batches,
+		Live:            run.live,
+		LiveAttempt:     run.liveAttempt,
+		Mutations:       run.mutations,
 		Acknowledgement: req.Acknowledgement,
 	}
-
-	if l3 := req.Layer3; l3 != nil {
-		switch {
-		case l3.EvidencePath != "":
-			live, err := report.LoadLive(l3.EvidencePath)
-			if err != nil {
-				return evidenceLoadError(err)
-			}
-			in.Live = live
-			transcripts = append(transcripts, worktree.PublishFile{
-				RepoRelPath: repoPath(artifactDir, "transcripts", req.RunID, liveEvidenceFile),
-				SourcePath:  l3.EvidencePath,
-			})
-		case l3.AttemptEvidencePath != "":
-			attempt, err := report.LoadLiveAttempt(l3.AttemptEvidencePath)
-			if err != nil {
-				return evidenceLoadError(err)
-			}
-			in.LiveAttempt = attempt
-			transcripts = append(transcripts, worktree.PublishFile{
-				RepoRelPath: repoPath(artifactDir, "transcripts", req.RunID, liveAttemptEvidenceFile),
-				SourcePath:  l3.AttemptEvidencePath,
-			})
-		}
-	}
-
-	for i := range in.Mutations {
-		m := &in.Mutations[i]
-		if m.EvidencePath != "" {
-			ev, err := report.LoadMutation(m.EvidencePath)
-			if err != nil {
-				return evidenceLoadError(err)
-			}
-			m.Evidence = ev
-			transcripts = append(transcripts, worktree.PublishFile{
-				RepoRelPath: repoPath(artifactDir, "transcripts", req.RunID, "mutation-"+m.RowID+".json"),
-				SourcePath:  m.EvidencePath,
-			})
-		}
-		if m.AttemptEvidencePath != "" {
-			attempt, err := report.LoadAttempt(m.AttemptEvidencePath)
-			if err != nil {
-				return evidenceLoadError(err)
-			}
-			m.Attempt = attempt
-			transcripts = append(transcripts, worktree.PublishFile{
-				RepoRelPath: repoPath(artifactDir, "transcripts", req.RunID, "mutation-attempt-"+m.RowID+".json"),
-				SourcePath:  m.AttemptEvidencePath,
-			})
-		}
-	}
-
-	// The adopted entries arrive already loaded and already hashed, so they
-	// join the parent's after the loading loop rather than passing through it
-	// a second time under this run's transcript names. Their transcripts are
-	// not published from where the prior run left them: they are staged into
-	// this run's directory and verified there, once the report is written.
-	in.Mutations = slices.Concat(in.Mutations, reusedRows)
 
 	rep, err := report.Compute(in)
 	if err != nil {
 		var refusal *report.RefusalError
 		if errors.As(err, &refusal) {
-			return &cliError{Code: refusal.Code, Message: fmt.Sprintf("finalize: %s", refusal.Detail)}
+			return &cliError{Code: refusal.Code, Message: fmt.Sprintf("%s: %s", op, refusal.Detail)}
 		}
-		return &cliError{Code: "compute-failed", Message: fmt.Sprintf("finalize: %v", err)}
+		return &cliError{Code: "compute-failed", Message: fmt.Sprintf("%s: %v", op, err)}
 	}
 
 	// The report names every transcript by the digest of the bytes that will
 	// be published: this run's own are hashed here, an adopted one is named by
 	// the digest its reuse reference recorded, which the staged copy is held
 	// to before anything is published.
-	rep.Transcripts = make([]report.TranscriptRef, 0, len(transcripts)+len(reusedCopies))
-	for _, tf := range transcripts {
+	digests := make(map[string]string, len(run.transcripts)+len(run.copies))
+	rep.Transcripts = make([]report.TranscriptRef, 0, len(run.transcripts)+len(run.copies))
+	for _, tf := range run.transcripts {
 		sum, err := evidence.SHA256File(tf.SourcePath)
 		if err != nil {
-			return &cliError{Code: "evidence-unreadable", Message: fmt.Sprintf("finalize: %v", err)}
+			return &cliError{Code: "evidence-unreadable", Message: fmt.Sprintf("%s: %v", op, err)}
 		}
+		digests[tf.RepoRelPath] = sum
 		rep.Transcripts = append(rep.Transcripts, report.TranscriptRef{Path: tf.RepoRelPath, SHA256: sum})
 	}
-	for _, ref := range reusedCopies {
+	for _, ref := range run.copies {
+		digests[ref.RepoRelPath] = ref.SHA256
 		rep.Transcripts = append(rep.Transcripts, report.TranscriptRef{Path: ref.RepoRelPath, SHA256: ref.SHA256})
 	}
 	sort.Slice(rep.Transcripts, func(i, j int) bool { return rep.Transcripts[i].Path < rep.Transcripts[j].Path })
+
+	// Each work item is proved by the transcript published for its record, so
+	// the summary names the same bytes the transcripts section does.
+	for i := range run.work {
+		run.work[i].Artifact.SHA256 = digests[run.work[i].Artifact.Path]
+	}
+	rep.Work = report.WorkSummary{Items: run.work, Counts: report.WorkCountsOf(run.work)}
 	rep.Approval = req.Approval
 	rep.ToolVersions = map[string]string{"go": runtime.Version()}
 	rep.FinishedAt = time.Now().UTC().Format(time.RFC3339)
@@ -281,19 +299,19 @@ func finalizeOp(req *finalizeRequest, stdout io.Writer, between func()) *cliErro
 	// already allocated, and finalize must stay rerunnable over the same inputs.
 	runDir, err := ctrl.NewRunDir(fmt.Sprintf("%s-finalize-%d", req.RunID, time.Now().UnixNano()))
 	if err != nil {
-		return &cliError{Code: "run-dir-failed", Message: fmt.Sprintf("finalize: %v", err)}
+		return &cliError{Code: "run-dir-failed", Message: fmt.Sprintf("%s: %v", op, err)}
 	}
 	jsonPath := filepath.Join(runDir, stem+"-verification.json")
 	if err := evidence.WriteJSON(jsonPath, rep); err != nil {
-		return &cliError{Code: "report-write-failed", Message: fmt.Sprintf("finalize: %v", err)}
+		return &cliError{Code: "report-write-failed", Message: fmt.Sprintf("%s: %v", op, err)}
 	}
 	markdown, err := report.RenderMarkdown(rep)
 	if err != nil {
-		return &cliError{Code: "render-failed", Message: fmt.Sprintf("finalize: %v", err)}
+		return &cliError{Code: "render-failed", Message: fmt.Sprintf("%s: %v", op, err)}
 	}
 	markdownPath := filepath.Join(runDir, stem+"-verification.md")
 	if err := os.WriteFile(markdownPath, markdown, 0o644); err != nil {
-		return &cliError{Code: "report-write-failed", Message: fmt.Sprintf("finalize: %v", err)}
+		return &cliError{Code: "report-write-failed", Message: fmt.Sprintf("%s: %v", op, err)}
 	}
 
 	jsonRel := repoPath(artifactDir, stem+"-verification.json")
@@ -301,7 +319,7 @@ func finalizeOp(req *finalizeRequest, stdout io.Writer, between func()) *cliErro
 	files := append([]worktree.PublishFile{
 		{RepoRelPath: jsonRel, SourcePath: jsonPath},
 		{RepoRelPath: markdownRel, SourcePath: markdownPath},
-	}, transcripts...)
+	}, run.transcripts...)
 
 	if between != nil {
 		between()
@@ -312,7 +330,7 @@ func finalizeOp(req *finalizeRequest, stdout io.Writer, between func()) *cliErro
 	// held to the reference digest, and the copy is what is published: the
 	// bytes verified are the bytes that land, and a change to the original
 	// after this point reaches nothing.
-	staged, cliErr := stageReusedArtifacts("finalize", runDir, req.RunID, reusedCopies)
+	staged, cliErr := stageReusedArtifacts(op, runDir, req.RunID, run.copies)
 	if cliErr != nil {
 		return cliErr
 	}
@@ -323,7 +341,7 @@ func finalizeOp(req *finalizeRequest, stdout io.Writer, between func()) *cliErro
 		if strings.Contains(err.Error(), "repository changed since snapshot") {
 			code = "snapshot-mismatch"
 		}
-		return &cliError{Code: code, Message: fmt.Sprintf("finalize: %v; the report stays in %s", err, runDir)}
+		return &cliError{Code: code, Message: fmt.Sprintf("%s: %v; the report stays in %s", op, err, runDir)}
 	}
 
 	out := finalizeOutput{
@@ -335,8 +353,318 @@ func finalizeOp(req *finalizeRequest, stdout io.Writer, between func()) *cliErro
 		MarkdownPath:   markdownRel,
 		TranscriptsDir: repoPath(artifactDir, "transcripts", req.RunID),
 		RunDir:         runDir,
+		Work:           rep.Work.Counts,
 	}
 	return writeStdout(stdout, out)
+}
+
+// pendingRefusal turns resume's pending list into finalize's refusal. The two
+// ops read one ledger with one set of rules, so what resume says a run still
+// owes is exactly what finalize will not publish over; a run whose trace phase
+// is not closed at all is told so by its own code, because there is nothing
+// there to assemble a report from.
+func pendingRefusal(op string, pending []resumePending) *cliError {
+	entries := make([]string, 0, len(pending))
+	code := codeRunIncomplete
+	for _, owed := range pending {
+		// The publication is the very thing this call is about to redo.
+		if owed.Kind == runstate.KindPhase && owed.ID == publishPhaseID {
+			continue
+		}
+		if owed.Kind == runstate.KindPhase && owed.ID == tracePhaseID &&
+			(owed.Reason == reasonNeverStarted || owed.Reason == reasonNotCompleted) {
+			code = codeTraceIncomplete
+		}
+		entries = append(entries, fmt.Sprintf("%s %s: %s", owed.Kind, owed.ID, owed.Reason))
+	}
+	if len(entries) == 0 {
+		return nil
+	}
+	return &cliError{
+		Code: code,
+		Message: fmt.Sprintf("%s: the run still owes %s; answer it and rerun finalize. Nothing was published",
+			op, strings.Join(entries, "; ")),
+	}
+}
+
+// assembledRun is everything finalize reads from the ledger for one run: the
+// report inputs, the documents it publishes as transcripts, and one work item
+// per record. A fresh record and an adopted one travel the same path; the only
+// difference is where the record's document lives and the name it is published
+// under.
+type assembledRun struct {
+	trace       *report.TraceEvidence
+	batches     []report.Batch
+	live        *report.LiveEvidence
+	liveAttempt *report.LiveAttempt
+	mutations   []report.MutationInput
+	transcripts []worktree.PublishFile
+	copies      []transcriptCopy
+	work        []report.WorkItem
+}
+
+// publish records the document one record answers with. This run's own are
+// published from where the op wrote them; an adopted one is staged into the run
+// directory and verified there before anything lands.
+func (r *assembledRun) publish(adopted bool, sourcePath, repoRelPath, sha string) {
+	if adopted {
+		r.copies = append(r.copies, transcriptCopy{SourcePath: sourcePath, RepoRelPath: repoRelPath, SHA256: sha})
+		return
+	}
+	r.transcripts = append(r.transcripts, worktree.PublishFile{RepoRelPath: repoRelPath, SourcePath: sourcePath})
+}
+
+// assembleRun reads the run's current completed records — the trace phase,
+// every review group, the live attempt and every mutation row — verifies each
+// record's artifacts against what the ledger digested, loads the documents
+// through the report loaders and returns the report inputs, the transcripts to
+// publish and the work items. It is called only once pendingRefusal has found
+// nothing owed, so every obligation the run took on is answered here.
+func assembleRun(
+	op string, req *finalizeRequest, artifactDir string, ledger *runstate.Ledger, measured string,
+) (*assembledRun, *cliError) {
+	run := &assembledRun{work: []report.WorkItem{}}
+	transcript := func(name string) string {
+		return repoPath(artifactDir, "transcripts", req.RunID, name)
+	}
+
+	for i := range ledger.Records {
+		rec := &ledger.Records[i]
+		if rec.Status != runstate.StatusCompleted {
+			continue
+		}
+		// The publication record is bookkeeping about the report, not an
+		// obligation the report speaks for.
+		if rec.Kind == runstate.KindPhase && rec.ID != tracePhaseID {
+			continue
+		}
+		if reasons := runstate.Verify(rec); len(reasons) > 0 {
+			return nil, &cliError{
+				Code:    "ledger-invalid",
+				Message: fmt.Sprintf("%s: %s %s: %s", op, rec.Kind, rec.ID, strings.Join(reasons, ", ")),
+			}
+		}
+		adopted, err := recordCarriesReuse(rec)
+		if err != nil {
+			return nil, unreadableRecordError(op, rec, err)
+		}
+		item := report.WorkItem{
+			Kind: string(rec.Kind), ID: rec.ID, Rows: []string{},
+			Source: report.WorkFresh, Outcome: rec.Outcome, Standing: recordStanding(rec),
+		}
+		if adopted {
+			item.Source = report.WorkReused
+		}
+
+		var cliErr *cliError
+		switch rec.Kind {
+		case runstate.KindPhase:
+			cliErr = run.addTrace(op, rec, transcript, &item)
+		case runstate.KindReviewGroup:
+			cliErr = run.addReviewGroup(op, req.RunID, rec, transcript, &item)
+		case runstate.KindLiveAttempt:
+			cliErr = run.addLiveAttempt(op, rec, transcript, &item)
+		case runstate.KindMutationRow:
+			cliErr = run.addMutationRow(op, rec, transcript, &item)
+		default:
+			// A kind this op knows nothing about is not evidence it may quote.
+			continue
+		}
+		if cliErr != nil {
+			return nil, cliErr
+		}
+		run.work = append(run.work, item)
+	}
+
+	if run.trace == nil {
+		return nil, &cliError{
+			Code:    codeTraceIncomplete,
+			Message: fmt.Sprintf("%s: run %s has no completed trace phase to report on", op, req.RunID),
+		}
+	}
+	return run, nil
+}
+
+// recordStanding is how an obligation stands in the work summary: an outcome
+// the environment decided leaves it incomplete rather than failed, because
+// nothing was measured either way.
+func recordStanding(rec *runstate.Record) string {
+	switch rec.Outcome {
+	case outcomeEnvironmental, outcomeUnavailable:
+		return report.StandingIncomplete
+	}
+	if runstate.IsFailedOutcome(rec.Kind, rec.Outcome) {
+		return report.StandingFailed
+	}
+	return report.StandingOK
+}
+
+func (r *assembledRun) addTrace(
+	op string, rec *runstate.Record, transcript func(string) string, item *report.WorkItem,
+) *cliError {
+	path := rec.Artifacts[artifactEvidence].Path
+	if path == "" {
+		return missingArtifactError(op, rec, artifactEvidence)
+	}
+	tr, err := report.LoadTrace(path)
+	if err != nil {
+		return evidenceLoadError(err)
+	}
+	r.trace = tr
+	item.Artifact.Path = transcript(traceEvidenceFile)
+	r.publish(false, path, item.Artifact.Path, "")
+	return nil
+}
+
+// addReviewGroup admits one group's verdicts as a batch. A fresh group is this
+// run's own work and keeps this run's id; an adopted one keeps the run it was
+// judged in, because that is whose answer it is.
+func (r *assembledRun) addReviewGroup(
+	op, runID string, rec *runstate.Record, transcript func(string) string, item *report.WorkItem,
+) *cliError {
+	var inputs reviewGroupInputs
+	if err := recordInputs(rec, &inputs); err != nil {
+		return unreadableRecordError(op, rec, err)
+	}
+	item.Rows = append(item.Rows, inputs.Rows...)
+
+	batch := report.Batch{BatchID: rec.ID, RunID: runID, Rows: inputs.Rows}
+	path, sha, name := rec.Artifacts[artifactEvidence].Path, rec.Artifacts[artifactEvidence].SHA256, "review-"+rec.ID+".json"
+	ref := inputs.Reuse
+	if ref != nil {
+		path, sha, name = ref.Artifact.Path, ref.Artifact.SHA256, "reused-review-"+rec.ID+".json"
+		batch.BatchID, batch.RunID, batch.Reuse = "reuse:"+rec.ID, ref.PriorRunID, ref
+		item.Reuse = ref
+	}
+	if path == "" {
+		return missingArtifactError(op, rec, artifactEvidence)
+	}
+	art, err := report.LoadReviewArtifact(path, sha)
+	if err != nil {
+		return artifactLoadError(op, path, ref != nil, err)
+	}
+	if ref != nil {
+		if cliErr := checkReusedIdentity(op, rec.ID, ref, art.RunID, art.RepoCommit, art.SourceSHA256); cliErr != nil {
+			return cliErr
+		}
+	}
+	batch.Verdicts = art.Verdicts
+	r.batches = append(r.batches, batch)
+	item.Artifact.Path = transcript(name)
+	r.publish(ref != nil, path, item.Artifact.Path, sha)
+	return nil
+}
+
+// addLiveAttempt reads the run's layer-3 answer from the record: the journey's
+// evidence when there was one, the attempt document when the environment
+// refused before there could be.
+func (r *assembledRun) addLiveAttempt(
+	op string, rec *runstate.Record, transcript func(string) string, item *report.WorkItem,
+) *cliError {
+	if path := rec.Artifacts[artifactEvidence].Path; path != "" {
+		live, err := report.LoadLive(path)
+		if err != nil {
+			return evidenceLoadError(err)
+		}
+		r.live = live
+		item.Artifact.Path = transcript(liveEvidenceFile)
+		r.publish(false, path, item.Artifact.Path, "")
+		return nil
+	}
+	path := rec.Artifacts[artifactAttempt].Path
+	if path == "" {
+		return missingArtifactError(op, rec, artifactAttempt)
+	}
+	attempt, err := report.LoadLiveAttempt(path)
+	if err != nil {
+		return evidenceLoadError(err)
+	}
+	r.liveAttempt = attempt
+	item.Artifact.Path = transcript(liveAttemptEvidenceFile)
+	r.publish(false, path, item.Artifact.Path, "")
+	return nil
+}
+
+// addMutationRow reads one row's layer-4 answer. The record's outcome decides
+// which document its artifact is: mutation evidence for a row that ran, the
+// unappliable document for one that could not be applied, the attempt document
+// for one the environment refused.
+func (r *assembledRun) addMutationRow(
+	op string, rec *runstate.Record, transcript func(string) string, item *report.WorkItem,
+) *cliError {
+	item.Rows = append(item.Rows, rec.ID)
+
+	var adopted reusedMutationInputs
+	if err := recordInputs(rec, &adopted); err != nil {
+		return unreadableRecordError(op, rec, err)
+	}
+	if ref := adopted.Reuse; ref != nil {
+		entry, copy, cliErr := reusedMutationEntry(op, rec, ref, transcript)
+		if cliErr != nil {
+			return cliErr
+		}
+		r.mutations = append(r.mutations, entry)
+		r.copies = append(r.copies, copy)
+		item.Artifact.Path, item.Reuse = copy.RepoRelPath, ref
+		return nil
+	}
+
+	entry := report.MutationInput{RowID: rec.ID}
+	role, name := artifactEvidence, "mutation-"+rec.ID+".json"
+	if rec.Outcome == outcomeEnvironmental {
+		role, name = artifactAttempt, "mutation-attempt-"+rec.ID+".json"
+	} else if rec.Outcome == outcomeUnappliable {
+		name = "mutation-unappliable-" + rec.ID + ".json"
+	}
+	path := rec.Artifacts[role].Path
+	if path == "" {
+		return missingArtifactError(op, rec, role)
+	}
+
+	switch rec.Outcome {
+	case outcomeUnappliable:
+		doc, err := loadUnappliableEvidence(path)
+		if err != nil {
+			return evidenceLoadError(err)
+		}
+		entry.Outcome, entry.Reason = outcomeUnappliable, doc.Reason
+	case outcomeEnvironmental:
+		attempt, err := report.LoadAttempt(path)
+		if err != nil {
+			return evidenceLoadError(err)
+		}
+		entry.Outcome, entry.AttemptEvidencePath, entry.Attempt = outcomeEnvironmental, path, attempt
+		entry.Reason = attempt.Refusal
+	default:
+		ev, err := report.LoadMutation(path)
+		if err != nil {
+			return evidenceLoadError(err)
+		}
+		entry.EvidencePath, entry.Evidence = path, ev
+	}
+	r.mutations = append(r.mutations, entry)
+	item.Artifact.Path = transcript(name)
+	r.publish(false, path, item.Artifact.Path, "")
+	return nil
+}
+
+// missingArtifactError refuses a completed record that points at no document:
+// every completed record of the four kinds names the artifact its outcome
+// rests on, so one that does not is a checkpoint nothing can be read from.
+func missingArtifactError(op string, rec *runstate.Record, role string) *cliError {
+	return &cliError{
+		Code:    "ledger-invalid",
+		Message: fmt.Sprintf("%s: %s %s completed %q with no %s artifact", op, rec.Kind, rec.ID, rec.Outcome, role),
+	}
+}
+
+// artifactLoadError names what went wrong reading a record's document: an
+// adopted one speaks the reuse vocabulary, this run's own the evidence one.
+func artifactLoadError(op, path string, adopted bool, err error) *cliError {
+	if adopted {
+		return reusedArtifactError(op, path, err)
+	}
+	return evidenceLoadError(err)
 }
 
 // transcriptCopy is one adopted record's artifact: the original file, still
@@ -373,156 +701,6 @@ func stageReusedArtifacts(op, runDir, runID string, copies []transcriptCopy) ([]
 		staged = append(staged, worktree.PublishFile{RepoRelPath: ref.RepoRelPath, SourcePath: target})
 	}
 	return staged, nil
-}
-
-// reusedInputs collects the run's adopted records — the completed review-group
-// and mutation-row records of this run's own ledger whose inputs carry a reuse
-// reference — as report inputs. Each one's original artifact is re-hashed
-// against its reference before anything inside it is believed, decoded, and
-// checked to be the document the reference names; what comes back are the
-// batches and layer-4 entries the adopting run answers with, plus the
-// transcript copies it publishes. A run with no ledger has adopted nothing and
-// yields nothing.
-//
-// It also draws the line around adoption from the other side: a reuse
-// reference is written by the reuse op and read here, so a parent that pastes
-// one has bypassed the staleness and canary rules a fresh answer is held to,
-// and a parent that also pastes an answer for a row the ledger already answers
-// for is describing one row from two sources. Both are refused before the
-// report is computed.
-func reusedInputs(op string, req *finalizeRequest) ([]report.Batch, []report.MutationInput, []transcriptCopy, *cliError) {
-	if cliErr := refuseUnadmittedReuse(op, req); cliErr != nil {
-		return nil, nil, nil, cliErr
-	}
-	artifactDir, _, cliErr := artifactStem(req.CoverageSource)
-	if cliErr != nil {
-		return nil, nil, nil, cliErr
-	}
-	// A run with no ledger adopted nothing, and is told so from what is on
-	// disk: finalize creates no ledger directory for a run that never opened
-	// one.
-	dir, cliErr := locateLedgerDir(op, &req.verifyRequest)
-	if cliErr != nil {
-		return nil, nil, nil, cliErr
-	}
-	store, cliErr := openExistingLedger(op, dir)
-	if cliErr != nil || store == nil {
-		return nil, nil, nil, cliErr
-	}
-	ledger, cliErr := loadLedgerFor(op, runstate.KindReviewGroup, store)
-	if cliErr != nil || ledger == nil {
-		return nil, nil, nil, cliErr
-	}
-
-	transcript := func(name string) string {
-		return repoPath(artifactDir, "transcripts", req.RunID, name)
-	}
-
-	var (
-		batches  []report.Batch
-		rows     []report.MutationInput
-		copies   []transcriptCopy
-		reviewed = map[string]bool{}
-		mutated  = map[string]bool{}
-	)
-	// A record carrying no reuse reference is this run's own work, which the
-	// parent pastes as it always has, and finalize reads nothing more of it;
-	// only an adopted one is read here. An adopted record whose captured shape
-	// cannot be decoded is neither: it is a checkpoint this run cannot read,
-	// and reading it as "not adopted" would drop its rows out of what the
-	// ledger is known to answer for.
-	for i := range ledger.Records {
-		rec := &ledger.Records[i]
-		if rec.Status != runstate.StatusCompleted {
-			continue
-		}
-		carries, err := recordCarriesReuse(rec)
-		if err != nil {
-			return nil, nil, nil, unreadableRecordError(op, rec, err)
-		}
-		if !carries {
-			continue
-		}
-		switch rec.Kind {
-		case runstate.KindReviewGroup:
-			var inputs reviewGroupInputs
-			if err := recordInputs(rec, &inputs); err != nil {
-				return nil, nil, nil, unreadableRecordError(op, rec, err)
-			}
-			if inputs.Reuse == nil {
-				continue
-			}
-			ref := inputs.Reuse
-			art, err := report.LoadReviewArtifact(ref.Artifact.Path, ref.Artifact.SHA256)
-			if err != nil {
-				return nil, nil, nil, reusedArtifactError(op, ref.Artifact.Path, err)
-			}
-			if cliErr := checkReusedIdentity(op, rec.ID, ref, art.RunID, art.RepoCommit, art.SourceSHA256); cliErr != nil {
-				return nil, nil, nil, cliErr
-			}
-			// The batch keeps the run it was judged in; only the rows are
-			// this run's, because they are what this run answers for.
-			batches = append(batches, report.Batch{
-				BatchID:  "reuse:" + rec.ID,
-				RunID:    ref.PriorRunID,
-				Rows:     inputs.Rows,
-				Verdicts: art.Verdicts,
-				Reuse:    ref,
-			})
-			copies = append(copies, transcriptCopy{
-				SourcePath:  ref.Artifact.Path,
-				RepoRelPath: transcript("reused-review-" + rec.ID + ".json"),
-				SHA256:      ref.Artifact.SHA256,
-			})
-			for _, row := range inputs.Rows {
-				reviewed[row] = true
-			}
-			// A verdict the artifact carries for a row outside the record's
-			// own list is still an answer this run holds, and still not one
-			// the parent may give again.
-			for _, v := range art.Verdicts {
-				reviewed[v.RowID] = true
-			}
-
-		case runstate.KindMutationRow:
-			var inputs reusedMutationInputs
-			if err := recordInputs(rec, &inputs); err != nil {
-				return nil, nil, nil, unreadableRecordError(op, rec, err)
-			}
-			if inputs.Reuse == nil {
-				continue
-			}
-			entry, artifact, cliErr := reusedMutationEntry(op, rec, inputs.Reuse, transcript)
-			if cliErr != nil {
-				return nil, nil, nil, cliErr
-			}
-			rows = append(rows, entry)
-			copies = append(copies, artifact)
-			mutated[rec.ID] = true
-		}
-	}
-
-	for _, b := range req.Layer2.Batches {
-		for _, row := range batchRows(b) {
-			if reviewed[row] {
-				return nil, nil, nil, &cliError{
-					Code: codeReusedRowRepasted,
-					Message: fmt.Sprintf("%s: batch %s names row %s, which an adopted review group already answers for",
-						op, b.BatchID, row),
-				}
-			}
-		}
-	}
-	for _, m := range req.Layer4.Rows {
-		if mutated[m.RowID] {
-			return nil, nil, nil, &cliError{
-				Code: codeReusedRowRepasted,
-				Message: fmt.Sprintf("%s: layer4 names row %s, which an adopted mutation row already answers for",
-					op, m.RowID),
-			}
-		}
-	}
-	return batches, rows, copies, nil
 }
 
 // recordCarriesReuse reports whether a record's captured inputs name a reuse
@@ -587,32 +765,6 @@ func reusedMutationEntry(
 	}, nil
 }
 
-// refuseUnadmittedReuse rejects a reuse reference the parent wrote itself.
-// Only the reuse op may adopt a prior record, and it does so through the
-// ledger; a pasted reference would otherwise carry a batch past the staleness
-// and canary bookkeeping every fresh batch answers to.
-func refuseUnadmittedReuse(op string, req *finalizeRequest) *cliError {
-	for _, b := range req.Layer2.Batches {
-		if b.Reuse != nil {
-			return &cliError{
-				Code: report.CodeReuseNotAdmitted,
-				Message: fmt.Sprintf("%s: batch %s carries a reuse reference; adopted evidence reaches a report through the run's ledger, not the request",
-					op, b.BatchID),
-			}
-		}
-	}
-	for _, m := range req.Layer4.Rows {
-		if m.Reuse != nil {
-			return &cliError{
-				Code: report.CodeReuseNotAdmitted,
-				Message: fmt.Sprintf("%s: layer4 row %s carries a reuse reference; adopted evidence reaches a report through the run's ledger, not the request",
-					op, m.RowID),
-			}
-		}
-	}
-	return nil
-}
-
 // checkReusedIdentity holds an adopted artifact to the run it says it came
 // from. The digest already proves the bytes are the ones the reference was
 // written against; this proves the reference and the document agree about
@@ -674,18 +826,6 @@ func unreadableRecordError(op string, rec *runstate.Record, err error) *cliError
 		Code:    "ledger-invalid",
 		Message: fmt.Sprintf("%s: %s %s: %v", op, rec.Kind, rec.ID, err),
 	}
-}
-
-// batchRows names every row a batch speaks for: the rows it dispatched and the
-// rows it returned a verdict on.
-func batchRows(b report.Batch) []string {
-	rows := slices.Clone(b.Rows)
-	for _, v := range b.Verdicts {
-		if !slices.Contains(rows, v.RowID) {
-			rows = append(rows, v.RowID)
-		}
-	}
-	return rows
 }
 
 // artifactStem keeps coverage-doc names compatible and derives inline-spec

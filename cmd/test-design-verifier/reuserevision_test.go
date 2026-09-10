@@ -71,73 +71,21 @@ func revisionCommit(t *testing.T, s *liveSubject, message string) string {
 	return subjectHead(t, s.repo)
 }
 
-// revisionEnvironmentalRow leaves the run's own layer-4 answer for SC-02 —
-// the row is opened by prepare-mutation and closed by record-attempt as
-// environmental — and returns it as the layer-4 entry the parent pastes,
-// pointing at the attempt document record-attempt actually wrote.
-func revisionEnvironmentalRow(t *testing.T, s *liveSubject, runID string) report.MutationInput {
+// revisionEnvironmentalRow leaves the run's own layer-4 answer for SC-02 in the
+// ledger: the row is opened by prepare-mutation and closed by record-attempt as
+// environmental, pointing at the attempt document record-attempt wrote.
+func revisionEnvironmentalRow(t *testing.T, s *liveSubject, runID string) {
 	t.Helper()
 	readyEnvironmentalVersionRow(t, s, runID)
 	rec := ledgerRecord(t, readyResume(t, s, runID), runstate.KindMutationRow, readyVersionRow)
-	attempt := rec.Artifacts[artifactAttempt].Path
-	if attempt == "" {
+	if rec.Artifacts[artifactAttempt].Path == "" {
 		t.Fatalf("record-attempt left %s with artifacts %+v, want an attempt document", readyVersionRow, rec.Artifacts)
 	}
-	return report.MutationInput{
-		RowID:               readyVersionRow,
-		Outcome:             "environmental",
-		Reason:              "the mutation runner could not start in this environment",
-		AttemptEvidencePath: attempt,
-	}
 }
 
-// revisionBatches is the parent's own layer-2 bookkeeping for the revision: one
-// canary-free batch per review group, each answering for its single row. A run
-// that adopted nothing has no batch of its own in its ledger, so this is what a
-// parent pastes to answer for layer 2 at all.
-func revisionBatches(runID string) []report.Batch {
-	return []report.Batch{
-		readyHoldingBatch(runID, readyMarkerGroup, readyMarkerRow),
-		readyHoldingBatch(runID, readyVersionGroup, readyVersionRow),
-	}
-}
-
-// revisionFinalizeRequestJSON is the finalize request over the subject with a
-// layer-3 evidence path, which the shared ready request does not carry: the
-// live decision here is required, so every finalize of this subject answers for
-// the live layer with a document.
-func revisionFinalizeRequestJSON(
-	t *testing.T, s *liveSubject, runID, tracePath, livePath string,
-	batches []report.Batch, rows []report.MutationInput,
-) string {
+func revisionFinalize(t *testing.T, s *liveSubject, runID string) finalizeOutput {
 	t.Helper()
-	body, err := json.Marshal(finalizeRequestJSON{
-		SchemaVersion:  evidence.SchemaVersion,
-		RepoRoot:       s.repo,
-		CoverageSource: s.coverageSource,
-		RunID:          runID,
-		finalizeRequestBody: finalizeRequestBody{
-			Approval:      finalizeApproval,
-			TraceEvidence: tracePath,
-			Freshness:     report.Freshness{Result: "fresh"},
-			Layer2:        finalizeLayer2{Batches: batches},
-			Layer3:        &finalizeLayer3{EvidencePath: livePath},
-			Layer4:        finalizeLayer4{Rows: rows},
-		},
-	})
-	if err != nil {
-		t.Fatalf("marshal finalize request: %v", err)
-	}
-	return string(body)
-}
-
-func revisionFinalize(
-	t *testing.T, s *liveSubject, runID, tracePath, livePath string,
-	batches []report.Batch, rows []report.MutationInput,
-) finalizeOutput {
-	t.Helper()
-	code, stdout, stderr := runVerifyOp(t, "finalize",
-		revisionFinalizeRequestJSON(t, s, runID, tracePath, livePath, batches, rows))
+	code, stdout, stderr := runVerifyOp(t, "finalize", readyFinalizeRequestJSON(t, s, runID, freshFinalizeBody()))
 	if code != exitOK {
 		t.Fatalf("finalize exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
 	}
@@ -146,13 +94,9 @@ func revisionFinalize(
 
 // revisionRefuseFinalize drives finalize expecting an op-level refusal, and
 // holds it to publishing nothing.
-func revisionRefuseFinalize(
-	t *testing.T, s *liveSubject, runID, tracePath, livePath string,
-	batches []report.Batch, rows []report.MutationInput,
-) cliError {
+func revisionRefuseFinalize(t *testing.T, s *liveSubject, runID string, body finalizeRequestBody) cliError {
 	t.Helper()
-	code, stdout, stderr := runVerifyOp(t, "finalize",
-		revisionFinalizeRequestJSON(t, s, runID, tracePath, livePath, batches, rows))
+	code, stdout, stderr := runVerifyOp(t, "finalize", readyFinalizeRequestJSON(t, s, runID, body))
 	if code != exitError || stdout != "" {
 		t.Fatalf("finalize was accepted: exit=%d stdout=%s stderr=%s", code, stdout, stderr)
 	}
@@ -178,10 +122,9 @@ func TestReuse_NewRevisionGetsFreshSuiteAndLive(t *testing.T) {
 		t.Fatalf("live verdict for %s at the approved revision = %q, want LIVE-PASS", readyMarkerRow, got)
 	}
 	readyGroups(t, s, runA, readDispatchInputs(t, traceA.DispatchPath), policy)
-	envRowA := revisionEnvironmentalRow(t, s, runA)
+	revisionEnvironmentalRow(t, s, runA)
 
-	outA := revisionFinalize(t, s, runA, traceA.EvidencePath, execA.EvidencePath,
-		revisionBatches(runA), []report.MutationInput{envRowA})
+	outA := revisionFinalize(t, s, runA)
 	if outA.Verdict != report.VerdictPartial {
 		t.Fatalf("run A verdict = %q, want %s; reasons=%+v", outA.Verdict, report.VerdictPartial, outA.Reasons)
 	}
@@ -287,16 +230,20 @@ func TestReuse_NewRevisionGetsFreshSuiteAndLive(t *testing.T) {
 		}
 
 		// The prior run's live evidence is asked for first, while the tree is
-		// still clean: finalize's staleness rule keeps another run's journey
-		// out however convenient it would be here.
-		if got := revisionRefuseFinalize(t, s, runB2, tr.EvidencePath, execA.EvidencePath,
-			revisionBatches(runB2), []report.MutationInput{}); got.Code != "stale-evidence" {
-			t.Errorf("refusal code = %q, want stale-evidence for run A's live evidence; message=%s", got.Code, got.Message)
+		// still clean: a request may no longer name a journey at all, so run A's
+		// is refused one gate earlier than the staleness rule that used to
+		// answer for it, and the report still reads this run's own record.
+		pasted := freshFinalizeBody()
+		pasted.Layer3 = json.RawMessage(`{"evidencePath":"` + execA.EvidencePath + `"}`)
+		if got := revisionRefuseFinalize(t, s, runB2, pasted); got.Code != codeEnvelopeNotAccepted {
+			t.Errorf("refusal code = %q, want %q for run A's live evidence; message=%s",
+				got.Code, codeEnvelopeNotAccepted, got.Message)
 		}
 
-		envRow := revisionEnvironmentalRow(t, s, runB2)
-		final := revisionFinalize(t, s, runB2, tr.EvidencePath, exec.EvidencePath,
-			revisionBatches(runB2), []report.MutationInput{envRow})
+		// This revision adopted nothing, so it answers for every layer itself.
+		readyGroups(t, s, runB2, readDispatchInputs(t, tr.DispatchPath), policy)
+		revisionEnvironmentalRow(t, s, runB2)
+		final := revisionFinalize(t, s, runB2)
 		if final.Verdict != report.VerdictBlocked {
 			t.Fatalf("verdict = %q, want %s; reasons=%+v", final.Verdict, report.VerdictBlocked, final.Reasons)
 		}
@@ -307,8 +254,8 @@ func TestReuse_NewRevisionGetsFreshSuiteAndLive(t *testing.T) {
 		if rep.HeadCommit != headB2 {
 			t.Errorf("published headCommit = %q, want the new revision %q", rep.HeadCommit, headB2)
 		}
-		if len(rep.Batches) != len(revisionBatches(runB2)) {
-			t.Fatalf("published batches = %+v, want the two the parent pasted", rep.Batches)
+		if len(rep.Batches) != 2 {
+			t.Fatalf("published batches = %+v, want the run's own two review groups", rep.Batches)
 		}
 		for _, batch := range rep.Batches {
 			if batch.Reuse != nil {
