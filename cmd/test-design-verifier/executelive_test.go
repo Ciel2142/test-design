@@ -93,9 +93,40 @@ func liveFixturePrepareRequestJSON(t *testing.T, repo, runID string) string {
 	return string(body)
 }
 
+// liveFixturePrepareRepeatRequestJSON is the prepare-live request with the
+// caller's deliberate repetition of an attempt the run already completed: the
+// same field execute-live's repeat request carries, read by the same
+// repeatReason.
+func liveFixturePrepareRepeatRequestJSON(t *testing.T, repo, runID, reason string) string {
+	t.Helper()
+	body, err := json.Marshal(map[string]any{
+		"schemaVersion":  "1",
+		"repoRoot":       repo,
+		"coverageSource": liveFixtureCoverageSource,
+		"runID":          runID,
+		"repeat":         map[string]string{"reason": reason},
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	return string(body)
+}
+
 func preparedLive(t *testing.T, repo, runID string) prepareLiveOutput {
 	t.Helper()
-	code, stdout, stderr := runVerifyOp(t, "prepare-live", liveFixturePrepareRequestJSON(t, repo, runID))
+	return preparedLiveFrom(t, liveFixturePrepareRequestJSON(t, repo, runID))
+}
+
+// preparedLiveRepeat prepares a workspace for a run whose live attempt is
+// already answered, which only a stated reason admits.
+func preparedLiveRepeat(t *testing.T, repo, runID, reason string) prepareLiveOutput {
+	t.Helper()
+	return preparedLiveFrom(t, liveFixturePrepareRepeatRequestJSON(t, repo, runID, reason))
+}
+
+func preparedLiveFrom(t *testing.T, request string) prepareLiveOutput {
+	t.Helper()
+	code, stdout, stderr := runVerifyOp(t, "prepare-live", request)
 	if code != exitOK {
 		t.Fatalf("prepare-live exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
 	}
@@ -1651,15 +1682,20 @@ func executeLiveRepeatRequestJSON(t *testing.T, repo, runDir, planPath, tracePat
 }
 
 // TestExecuteLive_CompletedAttemptRefusedUntilRepeated locks the run-level
-// obligation: one run ID buys one live attempt. A second execute-live is
-// refused by name before it starts anything, and a caller who repeats it with a
-// reason gets a run that recovers the previous attempt's resources first.
+// obligation: one run ID buys one live attempt, and both ops that could spend
+// it say so. After a completed attempt, a second prepare-live is refused by
+// name before a run directory exists to clean up; prepared again with a repeat
+// reason, execute-live still refuses without one of its own, and the repeated
+// call recovers the previous attempt's resources before running.
 func TestExecuteLive_CompletedAttemptRefusedUntilRepeated(t *testing.T) {
 	repo := liveFixtureRepo(t)
 	tracePath := writeGapTraceEvidence(t, "SC-13")
 	planPath := filepath.Join(repo, filepath.FromSlash(liveFixturePlanPath))
+	const runID = "live-restart"
+	// Named once: prepare-live and execute-live each want the caller's reason.
+	const interrupted = "the first attempt was interrupted"
 
-	first := preparedLive(t, repo, "live-restart")
+	first := preparedLive(t, repo, runID)
 	code, stdout, stderr := runVerifyOp(t, "execute-live",
 		executeLiveRequestJSON(t, repo, first.RunDir, planPath, tracePath))
 	if code != exitOK {
@@ -1673,9 +1709,24 @@ func TestExecuteLive_CompletedAttemptRefusedUntilRepeated(t *testing.T) {
 		t.Errorf("recovery = %+v, want it omitted: a first attempt has nothing to recover", out.Recovery)
 	}
 
+	// Preparing the same run again is the first refusal, and it arrives before
+	// a workspace exists: the obligation is the run's, not the run directory's.
+	before := verifierRunsDirs(t)
+	code, stdout, stderr = runVerifyOp(t, "prepare-live", liveFixturePrepareRequestJSON(t, repo, runID))
+	if code != exitError || stdout != "" {
+		t.Fatalf("second prepare-live was accepted: exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	if got := decodeCLIError(t, stderr); got.Code != "live-attempt-completed" {
+		t.Errorf("prepare-live refusal code = %q, want live-attempt-completed; message=%s", got.Code, got.Message)
+	}
+	if after := verifierRunsDirs(t); len(after) != len(before) {
+		t.Errorf("runs dirs = %v, want the refusal to have created none beyond %v", after, before)
+	}
+
 	// The prepared workspace of the first attempt is gone with it, so the
-	// repeated attempt is prepared afresh the way an operator would.
-	second := preparedLive(t, repo, "live-restart")
+	// repeated attempt is prepared afresh the way an operator would: with the
+	// reason that makes repeating it deliberate.
+	second := preparedLiveRepeat(t, repo, runID, interrupted)
 	code, stdout, stderr = runVerifyOp(t, "execute-live",
 		executeLiveRequestJSON(t, repo, second.RunDir, planPath, tracePath))
 	if code != exitError {
@@ -1689,7 +1740,7 @@ func TestExecuteLive_CompletedAttemptRefusedUntilRepeated(t *testing.T) {
 	}
 
 	code, stdout, stderr = runVerifyOp(t, "execute-live",
-		executeLiveRepeatRequestJSON(t, repo, second.RunDir, planPath, tracePath, "the first attempt was interrupted"))
+		executeLiveRepeatRequestJSON(t, repo, second.RunDir, planPath, tracePath, interrupted))
 	if code != exitOK {
 		t.Fatalf("repeated execute-live exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
 	}
