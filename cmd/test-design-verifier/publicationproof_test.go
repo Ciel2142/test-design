@@ -118,17 +118,13 @@ func pubProofPlantDir(t *testing.T, s *liveSubject, relPath string) string {
 	return full
 }
 
-// pubProofWrite plants a file the run never published and returns its absolute
-// path.
+// pubProofWrite plants a file the run never published, through the same writer
+// every other subject file goes through, and returns its absolute path so a
+// proof can digest the file it left behind.
 func pubProofWrite(t *testing.T, s *liveSubject, relPath, content string) string {
 	t.Helper()
 	full := filepath.Join(s.repo, filepath.FromSlash(relPath))
-	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-		t.Fatalf("mkdir for %s: %v", relPath, err)
-	}
-	if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
-		t.Fatalf("write %s: %v", relPath, err)
-	}
+	writeSubjectFile(t, s.repo, relPath, content)
 	t.Cleanup(func() { _ = os.Remove(full) })
 	return full
 }
