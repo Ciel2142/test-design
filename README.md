@@ -23,7 +23,7 @@ nominally guard against. A green suite proves tests pass, not that they bite.
 
 1. **trace** — every scenario has a tagged test that the runner reports as *executed and passed*
 2. **adversarial read** — a fresh subagent judges whether each test would fail if the named bug returned
-3. **live** — smoke and e2e rows plus derived happy and non-happy walkthroughs run against the real system
+3. **live** — the journeys the live decision names, plus every active `smoke` or `e2e` row, run against the real system
 4. **mutation** — for high-risk rows, the named mutation is applied and the test must fail
 
 ## Supported runners
@@ -42,21 +42,26 @@ runs as `go run -C "$CLAUDE_PLUGIN_ROOT" ./cmd/test-design-verifier <op> …`.
 
 Both skills drive every mechanical step — the repository snapshot, the disposable
 worktrees, the suite runs, the tag binding, the live plan execution, the mutation
-apply/evaluate cycle, and the verdict computation — through ten ops of one Go
+apply/evaluate cycle, and the verdict computation — through fifteen ops of one Go
 executable:
 
 | Op | What it does |
 |---|---|
 | `next-id` | allocates the next unused `SC-nn` for an area, scanning every coverage document and floor-rule table in the repository |
 | `preflight` | validates a coverage source and its runner block, and computes the approval-gate summary, without touching the repository |
+| `resume` | reports what a run's ledger has already answered and what it still owes; the one op that only reads, safe to call at any point |
 | `baseline` | snapshots the repository at the baseline commit, runs the suite there, and publishes baseline evidence |
 | `trace` | runs the suite in a disposable worktree, binds every `covers:` tag to its declaration, and joins each binding to the runner's records as layer-1 evidence |
+| `reuse` | judges which of a prior run's review groups and mutation rows still match this run's trace and worktree, so the run can adopt them instead of re-dispatching |
+| `record-review` | records a layer-2 review group's start and completion in the run's ledger, the evidence `finalize` later reads as the group's batch |
 | `prepare-mutation` | resolves a row's bound test identity and opens a disposable worktree for layer 4 |
 | `evaluate-mutation` | runs a mutated site's targeted test, requires it to fail, restores the source, and reruns it to require a pass |
+| `record-mutation` | records a row's mutation as unappliable in the run's ledger when no site of its verification mutation applies as a code-level fault |
+| `recover-mutation` | restores or recreates an interrupted mutation row's worktree so evaluation can continue |
 | `prepare-live` | opens a disposable worktree and the run's live-profile descriptor for layer 3 |
 | `execute-live` | validates and runs a live plan against the real system, capturing reduced transcripts |
-| `finalize` | validates the evidence from all four layers, computes the verdict, and publishes the report |
 | `record-attempt` | records an observed live or mutation refusal with verifier-stamped run, source, and commit identity |
+| `finalize` | validates the evidence from all four layers, computes the verdict, and publishes the report |
 
 ## Lifecycle vocabulary
 
@@ -77,6 +82,9 @@ docs/superpowers/coverage/YYYY-MM-DD-<feature>-baseline.json     baseline eviden
 docs/superpowers/coverage/YYYY-MM-DD-<feature>-verification.json the canonical verification report `finalize` publishes
 docs/superpowers/coverage/YYYY-MM-DD-<feature>-verification.md   that report rendered to Markdown
 docs/superpowers/coverage/transcripts/<run-id>/                  every evidence document one verification run produced
+  review-<groupId>.json                                          one layer-2 review group's verdicts
+  mutation-unappliable-<rowId>.json                              a row whose verification mutation could not be applied
+  reused-*                                                       an adopted record's own artifact, copied here and re-verified
 ```
 
 ## Install
@@ -104,5 +112,5 @@ composition.
 ## Further reading
 
 - [docs/opt-in.md](docs/opt-in.md) — the per-feature opt-in and how it composes with `wave-planning`
-- [docs/live-profile.md](docs/live-profile.md) — writing the committed live profile that `smoke` and `e2e` rows require
+- [docs/live-profile.md](docs/live-profile.md) — writing the committed live profile that a required live decision names
 - [docs/upgrading-1.0.md](docs/upgrading-1.0.md) — moving a machine or repository from 0.x: global rule and hook removal, coverage-doc migration, dropped runners

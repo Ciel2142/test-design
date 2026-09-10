@@ -101,13 +101,22 @@ first run:
 
 - **`PARTIAL` needs an acknowledgement.** `finalize` publishes a `PARTIAL` report with
   `acknowledged: false`. It is not a finished gate until rerun with the user's actual
-  acknowledgement after publication. Keep HEAD unchanged: preserve scratch evidence,
-  then restore/remove only the exact generated publication files before that rerun.
-  Committing the first report moves HEAD and requires a new full verification run.
-  Follow the mandatory [finalize/recovery procedure](../skills/coverage-verification/references/finalize-recovery.md).
-- **A dirty tree refuses.** There is no `--force`. Resolve user/source changes without
-  deleting unrelated work; a changed commit requires fresh evidence. Generated PARTIAL
-  publication recovery is the exact-file procedure linked above, not a blanket discard.
+  acknowledgement. Rerunning `finalize` with `acknowledgement` set recovers this run's own
+  published files itself — proven by digest against what it wrote, restoring what was
+  tracked at HEAD and removing what was not — before it republishes; nothing needs manual
+  restoring or removing first. Follow the mandatory
+  [finalize/recovery procedure](../skills/coverage-verification/references/finalize-recovery.md).
+- **Committing the first report does not move the measured revision.** A commit that touches
+  only this run's own publication paths (the report JSON/Markdown and its transcripts) leaves
+  `finalize` and `resume` still reporting the trace commit: publishing a report is not a
+  change to what it describes. Commit the first `PARTIAL` report, then rerun `finalize` with
+  the acknowledgement at the new HEAD — the recovery step above has nothing left to do once
+  the publication itself is committed. Any other commit — production code, the coverage
+  source, another run's artifacts — is `head-moved`: mint a new run ID and repeat every
+  layer, reusing the approval when the scope is unchanged.
+- **A dirty tree still refuses everything else.** There is no `--force`. `finalize` recovers
+  only its own proven publication; any other uncommitted change — yours, or an editor's —
+  refuses `source-not-reproducible` naming it, untouched. Resolve it, by hand, then rerun.
 
 ## 1.1 evidence hardening
 
@@ -118,7 +127,7 @@ run; do not fill missing fields from current HEAD or rename/re-stamp old evidenc
 The executable's `record-attempt` operation records actual agent/environment refusals;
 controllers no longer hand-write attempt envelopes.
 
-## 1.2 evidence reuse
+## 1.2 evidence reuse and executable-owned finalize
 
 Version 1.2.0 retains schemaVersion `"1"` and every 1.1 evidence field. Review artifacts and
 their ledger records now carry `inputs.manifest`, itself versioned (`version "1"` today) and
@@ -141,15 +150,50 @@ alongside the ones a fresh run writes, named `reused-review-<groupId>.json`,
 immediately before publishing, and refuses rather than publish anything when an adopted
 record does not hold up: `reused-artifact-changed` (an adopted artifact's bytes no longer
 digest to what its reference recorded), `reuse-identity-mismatch` (an adopted artifact's own
-run/commit/source identity does not match its reference), `reused-row-repasted` (the parent
-also pasted a fresh answer for a row an adopted record already answers for),
-`reuse-not-admitted` (the parent pasted a reuse reference itself, rather than letting one
-reach the report through the run's ledger), and `ledger-invalid` (a record carrying a reuse
-reference whose captured inputs will not decode, so nothing about it can be told either way;
-a record with no reuse reference is the run's own work and finalize never decodes it). Adopted
-artifacts are copied into the run directory, verified there against their reference, and
-published from those verified copies. A run with no ledger reads nothing and creates nothing
-under the verifier's state root.
+run/commit/source identity does not match its reference), and `ledger-invalid` (a record
+carrying a reuse reference whose captured inputs will not decode, so nothing about it can be
+told either way; a record with no reuse reference is the run's own work and finalize never
+decodes it). Adopted artifacts are copied into the run directory, verified there against
+their reference, and published from those verified copies.
+
+**`finalize`'s own request narrows to three fields.** `approval`, `freshness`, and, for a
+`PARTIAL` it accepts, `acknowledgement`. Every layer of evidence — the trace phase, every
+review group, the live attempt, every mutation row — now comes from the run's own ledger; a
+request still carrying `traceEvidence`, `layer2`, `layer3`, or `layer4` is refused
+`envelope-not-accepted`, naming the field. A run with no ledger at all, or one whose trace
+phase never completed, is refused `trace-incomplete` outright — reading and creating nothing
+under the verifier's state root — rather than publishing from whatever the parent pasted; an
+older evidence-reuse build's fallback to publish on pasted bookkeeping alone no longer exists.
+Some other obligation `resume` still lists pending is `run-incomplete`, naming each entry as
+`<kind> <id>: <reason>`.
+
+**Canary bookkeeping is gone.** Synthetic weakened copies, canary-bearing or voided batches,
+higher-tier retries, and inheritance across batches no longer exist in the report package,
+the executable, the skills, or the agents: layer 2 is one verdict per active row from an
+independently produced review, and every approved high-risk row still keeps its mutation
+obligation. A batch document carrying the retired `canary`, `inheritsFrom`, `voided`, or
+`canaryUnavailableReason` fields decodes with them ignored — nothing about evidence already
+on disk needs migrating for their removal. `reused-row-repasted` and `reuse-not-admitted`,
+which policed the old pasted-layer request against an adopted record, are retired along with
+it; the blanket `envelope-not-accepted` above replaces both.
+
+**The report gains a `work` summary.** Every obligation the run answered is named `fresh` or
+`reused` (with the original run, sequence, outcome and matching basis), standing `ok`,
+`failed`, or `incomplete`, with the published transcript that proves it. `resume` reports the
+same reused count in `counts.reused`.
+
+**Every publication is recorded in the ledger, as `phase/publish`.** It names the measured
+revision, the run directory, the report's digest, whether it carries an acknowledgement, and
+every file it writes with the digest of the bytes it writes. A publication that fails, in
+whole or in part, leaves that record started; rerunning `finalize` recovers exactly the files
+that record names — proven by digest, restoring what was tracked at HEAD and removing what
+was not — and republishes from the same ledger evidence, with no suite, critic, live, or
+mutation work repeated. An own path whose bytes are not what this run wrote refuses
+`publication-unverifiable` instead of being silently discarded; `recovery-failed` exists as
+an internal code for the (not expected in ordinary use) case where a proven-safe recovery
+step itself cannot complete. See the
+[finalize/recovery reference](../skills/coverage-verification/references/finalize-recovery.md)
+for the complete refusal table and the acknowledgement procedure.
 
 ## What did not change
 

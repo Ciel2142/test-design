@@ -123,7 +123,7 @@ Output (fields relevant here; `records[]` carries the raw ledger too):
     {"kind": "mutation-row", "id": "SC-07", "reason": "started-not-completed"},
     {"kind": "phase", "id": "publish", "reason": "started-not-completed"}
   ],
-  "counts": {"started": 1, "completed": 2, "failed": 0, "superseded": 0, "invalid": 0, "pending": 3, "reused": 0}
+  "counts": {"started": 3, "completed": 2, "failed": 0, "superseded": 0, "invalid": 0, "pending": 3, "reused": 0}
 }
 ```
 
@@ -281,7 +281,7 @@ the spelling each example shows is the one the op documents and the one its outp
 | `recover-mutation` | `residue-remains` | The restored worktree still carries ignored or untracked paths after reset |
 | `recover-mutation` | `wrong-revision` | The restored worktree's HEAD is not the prepared commit |
 | `record-attempt` | `mutation-row-completed` | Layer 4's row is already completed for this run |
-| `record-attempt`, `execute-live` | `live-attempt-completed` | The live attempt is already completed for this run and the request carried no `repeat.reason` |
+| `prepare-live`, `record-attempt`, `execute-live` | `live-attempt-completed` | The live attempt is already completed for this run and the request carried no `repeat.reason` |
 | `execute-live` | `stale-evidence` | HEAD is no longer the commit `prepare-live` prepared the workspace at; run `prepare-live` again — refused before the ledger is opened, the way `evaluate-mutation` and `recover-mutation` refuse it, so no record is created under a commit the evidence does not name |
 
 `evaluate-mutation`'s `lastSite` call both appends the site's evidence and completes the row

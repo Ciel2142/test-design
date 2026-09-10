@@ -9,8 +9,8 @@ description: Use only at the finishing-a-development-branch handoff when an expl
 Measure an explicitly approved coverage source across four layers. Each layer's
 self-report is checked by something other than itself. The executable owns snapshots,
 worktrees, real runners, structural binding, live execution, mutation restore checks,
-evidence, and verdicts. This thread owns approval, production-diff freshness, critic
-canaries and dispatch, and the semantic check of each mutation diff.
+evidence, and verdicts. This thread owns approval, production-diff freshness, agent
+dispatch, and the semantic check of each mutation diff.
 
 **Announce:** "I'm using the coverage-verification skill to verify coverage for this feature."
 **When:** only at the `superpowers:finishing-a-development-branch` handoff, after final
@@ -64,7 +64,10 @@ On success ask the user, on an actual user turn, to approve the run. State the b
 
 Anything except an actual go-ahead ends the run; silence is not approval. Preserve the
 reply verbatim as finalize's `approval`. Mint `run-YYYY-MM-DD-nnnn` only at approval.
-A rerun after a fix requires another gate, a new run ID, and all four layers.
+A repair rerun within the approved scope — same coverage source digest, same live profile
+and target — needs no new gate: mint a new run ID, pass the original approval line verbatim,
+run `trace`, then `reuse` naming the prior run, dispatch only what `resume` still lists
+pending; expanded rows, targets or permissions need a new gate.
 
 ## State router — mandatory reads at each phase
 
@@ -72,7 +75,7 @@ A rerun after a fix requires another gate, a new run ID, and all four layers.
 |---|---|---|
 | Restart or resume | Run `resume` and read [run state](references/run-state.md) in full before repeating any op | Wherever `resume` reports work still owed |
 | Approved | Run trace below; consume its immutable dispatch payload; classify freshness | Critic |
-| Critic | **Read [critic phase](references/critic.md) in full before dispatch** | Live |
+| Critic | **Read [critic phase](references/critic.md) in full before dispatch.** Run `reuse` first when a prior run exists to stand on | Live |
 | Live | **Read [live phase](references/live.md) in full before applicability/prepare/dispatch** | Mutation |
 | Mutation | **Read [mutation phase](references/mutation.md) in full before any mutator dispatch** | Finalize |
 | Finalize or refusal/recovery | **Read [finalize/recovery](references/finalize-recovery.md) in full before publishing or retrying** | Finish only on PASS or acknowledged PARTIAL |
@@ -103,9 +106,9 @@ assertions. Do not reread/re-search tests or reconstruct rows from the coverage 
 Gap/ambiguous rows have no fabricated source; dispatch `no source found` for them.
 
 Findings: `gap` = untagged/not run; `ambiguity` = not uniquely bindable/normalizable;
-`drift` = unknown non-retired ID; `overclaim` = more than two active IDs on one test;
-`red` = newly failed against baseline. Finalize can add `red-runner` for nonzero runner
-exit without a normalized report. Use the executable's findings and row statuses unchanged.
+`drift` = unknown non-retired ID; `red` = newly failed against baseline. Finalize can add
+`red-runner` for nonzero runner exit without a normalized report. Use the executable's
+findings and row statuses unchanged.
 
 Read the branch's **production-only diff** and compare every externally observable change
 against dispatch rows' behavior groups. The parent supplies finalize's semantic freshness:
@@ -120,14 +123,13 @@ Stale requires named hunks and behaviors and blocks; amend the approved source, 
 ## Run-wide invariants
 
 - One approved source, commit, source hash, and run ID across every layer; never re-stamp
-  or combine evidence from different runs. Version 1.1.0 retains schemaVersion `"1"`;
+  or combine evidence from different runs. Version 1.2.0 retains schemaVersion `"1"`;
   old live/mutation evidence or attempts missing identity must be regenerated, not inferred.
 - All four layers remain required subject only to runtime-derived applicability. Gaps stay
   visible; a missing environment is an evidenced attempt, never a fabricated success.
-- Every critic paste is complete and authoritative; only a synthetic canary's prompt copy
-  is weakened. Never write it to disk. Exclude test files from the production diff.
-- Every batch needs a caught canary, valid inheritance for a synthetic real-source retry,
-  or an explicit canary-unavailable reason yielding PARTIAL. Natural canary verdicts count.
+- The executable assembles the report from the run's ledger: the parent pastes no batch,
+  evidence path or verdict into finalize.
+- Only the executable removes or restores a published file, and only its own.
 - Only the executable runs live commands and targeted tests, restores mutations and checks
   restore success. Parent must confirm the applied production diff is the row's named fault.
 - Report the executable's verdict and reasons verbatim. PARTIAL needs a user acknowledgement
@@ -135,8 +137,9 @@ Stale requires named hunks and behaviors and blocks; amend the approved source, 
 
 ## Completion
 
-Approval, all row/layer accounting, canary audit, real evidence, mutation semantic checks,
-and freshness must reach finalize. Preserve the report and transcripts in the target repo.
-PASS or acknowledged PARTIAL returns to `superpowers:finishing-a-development-branch`;
-BLOCKED requires repair and a full freshly approved run. The final phase owns exact
-publication, acknowledgement recovery, artifact paths and refusal handling.
+Approval, all row/layer accounting, real evidence, mutation semantic checks, and freshness
+must reach finalize. Preserve the report and transcripts in the target repo. PASS or
+acknowledged PARTIAL returns to `superpowers:finishing-a-development-branch`; BLOCKED
+requires repair and a new run under the same approval when the scope is unchanged. The
+final phase owns exact publication, acknowledgement recovery, artifact paths and refusal
+handling.
