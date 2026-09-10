@@ -1330,3 +1330,161 @@ func TestFinalize_MutationAttemptRequiresMatchingIdentity(t *testing.T) {
 		})
 	}
 }
+
+// pointReviewArtifactAt rewrites one seeded review group's recorded artifact —
+// path and digest together — at another document. That is the shape a damaged
+// or tampered record has: the ledger's own digest check and the loader's both
+// pass, because both are asked about the file the record now names.
+func (f *finalizeFixture) pointReviewArtifactAt(groupID, path string) {
+	f.t.Helper()
+	sum, err := evidence.SHA256File(path)
+	if err != nil {
+		f.t.Fatalf("digest %s: %v", path, err)
+	}
+	ledgerPath := filepath.Join(f.ledgerDir(), runstate.LedgerFile)
+	original, err := os.ReadFile(ledgerPath)
+	if err != nil {
+		f.t.Fatalf("read ledger: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(original, &doc); err != nil {
+		f.t.Fatalf("decode ledger: %v", err)
+	}
+	records, _ := doc["records"].([]any)
+	rewritten := 0
+	for _, entry := range records {
+		rec, _ := entry.(map[string]any)
+		if rec["kind"] != string(runstate.KindReviewGroup) || rec["id"] != groupID {
+			continue
+		}
+		rec["artifacts"] = map[string]any{
+			artifactEvidence: map[string]any{"path": path, "sha256": sum},
+		}
+		rewritten++
+	}
+	if rewritten == 0 {
+		f.t.Fatalf("ledger %s holds no review-group record %s", ledgerPath, groupID)
+	}
+	data, err := json.Marshal(doc)
+	if err != nil {
+		f.t.Fatalf("encode ledger: %v", err)
+	}
+	if err := os.WriteFile(ledgerPath, data, 0o644); err != nil {
+		f.t.Fatalf("write ledger: %v", err)
+	}
+}
+
+// writeForeignReview writes a review artifact whose own identity is bent away
+// from the record that will point at it, while every field the loaders require
+// stays present and this run's commit and source stay untouched.
+func (f *finalizeFixture) writeForeignReview(name, runID, groupID string, rows []string) string {
+	f.t.Helper()
+	verdicts := make([]report.CriticVerdict, 0, len(f.groups[0].Rows))
+	for _, row := range f.groups[0].Rows {
+		verdicts = append(verdicts, report.CriticVerdict{RowID: row, Verdict: "HOLDS"})
+	}
+	path := filepath.Join(f.dir, name)
+	f.writeJSON(path, &report.ReviewArtifact{
+		Envelope:     f.trace.Envelope,
+		RunID:        runID,
+		RepoCommit:   f.trace.RepoCommit,
+		Source:       f.src.Path,
+		SourceSHA256: f.src.SHA256,
+		GroupID:      groupID,
+		Rows:         rows,
+		Verdicts:     verdicts,
+	})
+	return path
+}
+
+// TestFinalize_FreshReviewArtifactMustBeThisRunsOwn holds a fresh review
+// record's document to the record itself. Both digest checks pass for a record
+// whose evidence path and digest were rewritten at a prior run's HOLDS
+// artifact, and the batch is stamped with this run's id before the verdicts are
+// copied — so without the artifact's own identity being checked, foreign
+// verdicts publish as this run's work.
+func TestFinalize_FreshReviewArtifactMustBeThisRunsOwn(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		artifact    func(f *finalizeFixture) string
+		wantMessage func(f *finalizeFixture) []string
+	}{
+		{
+			name: "another run's HOLDS artifact",
+			artifact: func(f *finalizeFixture) string {
+				return f.writeForeignReview("foreign-review.json", "prior-run-9", "g1", f.groups[0].Rows)
+			},
+			wantMessage: func(f *finalizeFixture) []string { return []string{"g1", "prior-run-9", f.runID} },
+		},
+		{
+			name: "another group's artifact",
+			artifact: func(f *finalizeFixture) string {
+				return f.writeForeignReview("other-group-review.json", f.runID, "g2", f.groups[0].Rows)
+			},
+			wantMessage: func(f *finalizeFixture) []string { return []string{"g1", "g2"} },
+		},
+		{
+			name: "an artifact answering other rows",
+			artifact: func(f *finalizeFixture) string {
+				return f.writeForeignReview("other-rows-review.json", f.runID, "g1", []string{f.groups[0].Rows[0]})
+			},
+			wantMessage: func(f *finalizeFixture) []string { return []string{"g1", f.groups[0].Rows[0]} },
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFinalizeFixture(t)
+			f.seed()
+			f.pointReviewArtifactAt("g1", tc.artifact(f))
+
+			got := f.wantRefusal("ledger-invalid")
+
+			for _, want := range tc.wantMessage(f) {
+				if !strings.Contains(got.Message, want) {
+					t.Errorf("message = %q, want it to name %s", got.Message, want)
+				}
+			}
+		})
+	}
+}
+
+// TestFinalize_RequestFieldRefusalKeepsThePreviousPublication is the ordering
+// rule recovery rests on: a request that cannot produce a report at all is
+// refused before the previous publication is taken back. Otherwise a retry that
+// merely forgot a request field leaves the repository without the publication
+// its own ledger still describes as completed.
+func TestFinalize_RequestFieldRefusalKeepsThePreviousPublication(t *testing.T) {
+	f := newFinalizeFixture(t)
+	exit, stdout, stderr := f.run()
+	if exit != exitOK {
+		t.Fatalf("initial finalize: %s", stderr)
+	}
+	first := decodeFinalizeOutput(t, stdout)
+	published := pubTreeDigests(t, f.repo)
+	if _, ok := published[first.JSONPath]; !ok {
+		t.Fatalf("tree = %v, want it to carry the published report %s", published, first.JSONPath)
+	}
+	status := gitStatusLines(t, f.repo)
+
+	f.body.Freshness = report.Freshness{}
+	exit, stdout, stderr = f.run()
+
+	if exit != exitError {
+		t.Fatalf("exit = %d, want %d; stdout=%s", exit, exitError, stdout)
+	}
+	var got cliError
+	if err := json.Unmarshal([]byte(stderr), &got); err != nil {
+		t.Fatalf("stderr did not decode as a cliError: %v; stderr=%s", err, stderr)
+	}
+	if got.Code != report.CodeMissingFreshness {
+		t.Errorf("refusal code = %q, want %q; message=%s", got.Code, report.CodeMissingFreshness, got.Message)
+	}
+	if stdout != "" {
+		t.Errorf("stdout = %q, want a refusal to report no recovery", stdout)
+	}
+	if after := pubTreeDigests(t, f.repo); !reflect.DeepEqual(after, published) {
+		t.Errorf("tree digests = %+v, want the refusal to have kept the publication: %+v", after, published)
+	}
+	if lines := gitStatusLines(t, f.repo); !reflect.DeepEqual(lines, status) {
+		t.Errorf("git status = %v, want it unchanged: %v", lines, status)
+	}
+}

@@ -134,6 +134,8 @@ func TestIsPublicationPath(t *testing.T) {
 		{"another run's transcript", pubDir, pubDir + "/transcripts/other-run/trace-evidence.json", false},
 		{"a run whose id this one prefixes", pubDir, pubDir + "/transcripts/" + pubRunID + "0/trace-evidence.json", false},
 		{"the transcripts directory itself", pubDir, pubDir + "/transcripts/" + pubRunID, false},
+		{"an executable committed among this run's transcripts", pubDir, pubDir + "/transcripts/" + pubRunID + "/x_test.go", false},
+		{"a transcript-shaped file below this run's transcripts", pubDir, pubDir + "/transcripts/" + pubRunID + "/sub/a.json", false},
 		{"the coverage source", pubDir, pubSource, false},
 		{"a sibling report", pubDir, pubDir + "/2026-08-30-other-verification.json", false},
 		{"a production file", pubDir, "orders/orders.go", false},
@@ -211,6 +213,28 @@ func TestMeasuredCommit_PublicationDriftKeepsTheRunsCommit(t *testing.T) {
 		}
 		if commit != "" || offending != other {
 			t.Errorf("measuredCommit = (%q, %q), want (\"\", %q)", commit, offending, other)
+		}
+	})
+
+	// A run's transcripts directory is a place this run wrote JSON documents
+	// into, not a place anything may be committed to: an executable landing
+	// there is a change to the subject, whoever put it there.
+	t.Run("an executable committed under this run's transcripts names the path", func(t *testing.T) {
+		repo := pubRepo(t)
+		opened := pubHead(t, repo)
+		planted := pubDir + "/transcripts/" + pubRunID + "/x_test.go"
+		pubWrite(t, repo, pubTrace, "{}\n")
+		pubWrite(t, repo, planted, "package x\n")
+		mustGit(t, repo, "add", pubTrace, planted)
+		mustGit(t, repo, "commit", "-q", "-m", "a test file among the transcripts")
+
+		commit, offending, err := measuredCommit(repo, pubDir, pubStem, pubRunID, opened, pubHead(t, repo))
+
+		if err != nil {
+			t.Fatalf("measuredCommit err = %v", err)
+		}
+		if commit != "" || offending != planted {
+			t.Errorf("measuredCommit = (%q, %q), want (\"\", %q)", commit, offending, planted)
 		}
 	})
 
@@ -526,6 +550,127 @@ func TestRecoverOwnPublication_TrackednessDecidesOnlyWhenItIsAnswered(t *testing
 		}
 		if got := pubDigest(t, repo, pubJSON); got != committed {
 			t.Errorf("%s digest = %q, want the committed bytes %q", pubJSON, got, committed)
+		}
+	})
+}
+
+// pubLedger opens a ledger holding one completed review group — the shape
+// finalize loads before it assembles a report — and returns the store and the
+// identity every later transition must present.
+func pubLedger(t *testing.T) (*runstate.Store, runstate.Identity) {
+	t.Helper()
+	store, err := runstate.Open(filepath.Join(t.TempDir(), "ledger"))
+	if err != nil {
+		t.Fatalf("runstate.Open: %v", err)
+	}
+	identity := runstate.Identity{
+		RunID: pubRunID, RepoRoot: t.TempDir(), RepoCommit: strings.Repeat("a", 40),
+		Source: pubSource, SourceSHA256: strings.Repeat("b", 64),
+	}
+	if err := store.Update(identity, func(l *runstate.Ledger) error {
+		if _, err := l.Start(runstate.KindReviewGroup, "g1", reviewGroupInputs{Rows: []string{"SC-01"}}, "", ""); err != nil {
+			return err
+		}
+		_, err := l.Complete(runstate.KindReviewGroup, "g1", "holds", nil, "")
+		return err
+	}); err != nil {
+		t.Fatalf("seed ledger: %v", err)
+	}
+	return store, identity
+}
+
+// TestStartPublication_RefusesALedgerThatChangedSinceFinalizeReadIt is the
+// publication's own read-your-writes rule. The report finalize is about to
+// publish was assembled from the ledger it loaded; the ledger lives outside the
+// repository, so another caller repeating a review group and closing it WEAK
+// between that load and the publish record is invisible to the Git snapshot
+// gate. The transaction that opens the publication holds the store lock, and is
+// therefore the only place the change can be caught.
+func TestStartPublication_RefusesALedgerThatChangedSinceFinalizeReadIt(t *testing.T) {
+	t.Run("a ledger changed under finalize is refused", func(t *testing.T) {
+		store, identity := pubLedger(t)
+		loaded, err := store.Load()
+		if err != nil {
+			t.Fatalf("load ledger: %v", err)
+		}
+		read := fingerprintLedger(loaded)
+
+		// Another caller repeats the group and closes it WEAK.
+		if err := store.Update(identity, func(l *runstate.Ledger) error {
+			if _, err := l.Start(runstate.KindReviewGroup, "g1",
+				reviewGroupInputs{Rows: []string{"SC-01"}}, "", "second opinion"); err != nil {
+				return err
+			}
+			_, err := l.Complete(runstate.KindReviewGroup, "g1", "weak", nil, "")
+			return err
+		}); err != nil {
+			t.Fatalf("repeat the group: %v", err)
+		}
+		changed, err := store.Load()
+		if err != nil {
+			t.Fatalf("load the changed ledger: %v", err)
+		}
+
+		cliErr := startPublication("finalize", store, identity, read, publishInputs{MeasuredCommit: identity.RepoCommit})
+
+		if cliErr == nil {
+			t.Fatal("startPublication = nil, want the ledger-changed refusal")
+		}
+		if cliErr.Code != "ledger-changed" {
+			t.Errorf("refusal code = %q, want %q; message=%s", cliErr.Code, "ledger-changed", cliErr.Message)
+		}
+		for _, want := range []string{"review-group", "g1", "weak", "rerun finalize"} {
+			if !strings.Contains(cliErr.Message, want) {
+				t.Errorf("message = %q, want it to name %s", cliErr.Message, want)
+			}
+		}
+		after, err := store.Load()
+		if err != nil {
+			t.Fatalf("load ledger after the refusal: %v", err)
+		}
+		if rec := runstate.Current(after, runstate.KindPhase, publishPhaseID); rec != nil {
+			t.Errorf("phase/%s record = %+v, want a refused publication to have written none", publishPhaseID, rec)
+		}
+		if !reflect.DeepEqual(after.Records, changed.Records) {
+			t.Errorf("records = %+v, want the refusal to have left the ledger as it stood: %+v", after.Records, changed.Records)
+		}
+	})
+
+	t.Run("an unchanged ledger starts the record", func(t *testing.T) {
+		store, identity := pubLedger(t)
+		loaded, err := store.Load()
+		if err != nil {
+			t.Fatalf("load ledger: %v", err)
+		}
+		inputs := publishInputs{
+			MeasuredCommit: identity.RepoCommit,
+			RunDir:         t.TempDir(),
+			ReportSHA256:   strings.Repeat("c", 64),
+			Acknowledged:   true,
+			Files:          []evidence.FileRef{{Path: pubJSON, SHA256: strings.Repeat("d", 64)}},
+		}
+
+		if cliErr := startPublication("finalize", store, identity, fingerprintLedger(loaded), inputs); cliErr != nil {
+			t.Fatalf("startPublication: %s: %s", cliErr.Code, cliErr.Message)
+		}
+
+		after, err := store.Load()
+		if err != nil {
+			t.Fatalf("load ledger: %v", err)
+		}
+		rec := runstate.Current(after, runstate.KindPhase, publishPhaseID)
+		if rec == nil {
+			t.Fatalf("records = %+v, want a started phase/%s record", after.Records, publishPhaseID)
+		}
+		if rec.Status != runstate.StatusStarted || rec.Detail != "acknowledged" {
+			t.Errorf("record = %+v, want it started with detail %q", rec, "acknowledged")
+		}
+		var got publishInputs
+		if err := recordInputs(rec, &got); err != nil {
+			t.Fatalf("decode publish inputs: %v", err)
+		}
+		if !reflect.DeepEqual(got, inputs) {
+			t.Errorf("publish inputs = %+v, want %+v", got, inputs)
 		}
 	})
 }

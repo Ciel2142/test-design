@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -46,6 +47,11 @@ const (
 	// codePublicationUnverifiable is an own published path whose bytes are not
 	// what this run wrote; every other dirty path is source-not-reproducible.
 	codePublicationUnverifiable = "publication-unverifiable"
+	// codeLedgerChanged is the run's own ledger having moved between the read
+	// the report was assembled from and the transaction that opens the
+	// publication. The ledger is not in the repository, so the snapshot gate
+	// cannot see it; this is that gate's counterpart for the run's own state.
+	codeLedgerChanged = "ledger-changed"
 )
 
 // finalizeRequestBody is everything the parent still hands finalize: the
@@ -208,6 +214,15 @@ func finalizeOp(req *finalizeRequest, stdout io.Writer, between func()) *cliErro
 			Message: op + ": approval is required; record the approval line from the coverage gate",
 		}
 	}
+	// Everything the request itself can be refused for is refused here, before
+	// the repository is touched. report.Compute would raise these for itself,
+	// but only at the end — after recovery had already taken back the previous
+	// publication for a call that was never going to produce a report to put in
+	// its place, leaving the repository without the publication its own ledger
+	// still describes as completed.
+	if cliErr := requestFieldRefusal(op, &req.finalizeRequestBody); cliErr != nil {
+		return cliErr
+	}
 
 	// The revision the report measures is the one the run was opened against.
 	// Committing what a previous finalize published is not a change to the
@@ -365,7 +380,7 @@ func finalizeOp(req *finalizeRequest, stdout io.Writer, between func()) *cliErro
 		published = append(published, evidence.FileRef{Path: ref.Path, SHA256: ref.SHA256})
 	}
 	sort.Slice(published, func(i, j int) bool { return published[i].Path < published[j].Path })
-	if cliErr := startPublication(op, store, identity, publishInputs{
+	if cliErr := startPublication(op, store, identity, fingerprintLedger(ledger), publishInputs{
 		MeasuredCommit: measured,
 		RunDir:         runDir,
 		ReportSHA256:   reportSHA,
@@ -421,6 +436,33 @@ func finalizeOp(req *finalizeRequest, stdout io.Writer, between func()) *cliErro
 		Work:           rep.Work.Counts,
 	}
 	return writeStdout(stdout, out)
+}
+
+// requestFieldRefusal answers, from the request alone, every refusal
+// report.Compute raises about the three fields the parent still sends.
+// `approval` is finalize's own gate above and `acknowledgement` is free text
+// the report only quotes, so freshness is the whole of it. The codes and the
+// wording mirror internal/report/validate.go's validateFreshness exactly: a
+// caller must see the same refusal whether it is decided here or there, and
+// deciding it here is what keeps a request that can never produce a report from
+// reaching recovery.
+func requestFieldRefusal(op string, body *finalizeRequestBody) *cliError {
+	refuse := func(code, format string, args ...any) *cliError {
+		return &cliError{Code: code, Message: fmt.Sprintf("%s: %s", op, fmt.Sprintf(format, args...))}
+	}
+	switch f := body.Freshness; f.Result {
+	case "":
+		return refuse(report.CodeMissingFreshness, "freshness result is empty")
+	case "fresh":
+		return nil
+	case "stale":
+		if len(f.Stale) == 0 {
+			return refuse(report.CodeInvalidFreshness, "freshness result is stale with no stale findings")
+		}
+		return nil
+	default:
+		return refuse(report.CodeInvalidFreshness, "freshness result %q outside fresh|stale", f.Result)
+	}
 }
 
 // pendingRefusal turns resume's pending list into finalize's refusal. The two
@@ -612,6 +654,8 @@ func (r *assembledRun) addReviewGroup(
 		if cliErr := checkReusedIdentity(op, rec.ID, ref, art.RunID, art.RepoCommit, art.SourceSHA256); cliErr != nil {
 			return cliErr
 		}
+	} else if cliErr := checkFreshReviewIdentity(op, runID, rec.ID, inputs.Rows, art); cliErr != nil {
+		return cliErr
 	}
 	batch.Verdicts = art.Verdicts
 	r.batches = append(r.batches, batch)
@@ -828,6 +872,42 @@ func reusedMutationEntry(
 		RepoRelPath: transcript(name + rec.ID + ".json"),
 		SHA256:      ref.Artifact.SHA256,
 	}, nil
+}
+
+// checkFreshReviewIdentity holds a fresh group's document to the record that
+// points at it. The digest proves only that the bytes are the ones the record
+// was completed over — a record whose evidence path and digest were both
+// rewritten at a prior run's artifact passes it, and the batch is stamped with
+// this run's id before the verdicts are read. So the document is asked whose
+// answer it is: this run, this group, these rows. An adopted record answers the
+// same three questions against its reuse reference (checkReusedIdentity); a
+// fresh one has this run to answer to.
+func checkFreshReviewIdentity(op, runID, groupID string, rows []string, art *report.ReviewArtifact) *cliError {
+	refuse := func(format string, args ...any) *cliError {
+		return &cliError{
+			Code: "ledger-invalid",
+			Message: fmt.Sprintf("%s: %s %s: %s", op, runstate.KindReviewGroup, groupID,
+				fmt.Sprintf(format, args...)),
+		}
+	}
+	switch {
+	case art.RunID != runID:
+		return refuse("its evidence answers for run %q, not this run %q", art.RunID, runID)
+	case art.GroupID != groupID:
+		return refuse("its evidence answers for group %q", art.GroupID)
+	}
+	// The rows are a set: the record fixes which rows the group covers, the
+	// document says which it answered, and the order either lists them in is
+	// nobody's contract.
+	sorted := func(in []string) []string {
+		out := slices.Clone(in)
+		slices.Sort(out)
+		return out
+	}
+	if bound, answered := sorted(rows), sorted(art.Rows); !slices.Equal(bound, answered) {
+		return refuse("the record binds rows %v and its evidence answers rows %v", bound, answered)
+	}
+	return nil
 }
 
 // checkReusedIdentity holds an adopted artifact to the run it says it came

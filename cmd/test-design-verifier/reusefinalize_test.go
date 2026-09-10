@@ -977,7 +977,7 @@ func TestReuse_AReadoptedRecordKeepsItsOriginalProducer(t *testing.T) {
 	}
 }
 
-// / TestFinalize_WithoutALedgerIsRefusedTraceIncomplete answers a run that never
+// TestFinalize_WithoutALedgerIsRefusedTraceIncomplete answers a run that never
 // opened a ledger from disk: there is no trace phase to assemble a report from,
 // and the refusal acquires no state root of its own on the way out.
 func TestFinalize_WithoutALedgerIsRefusedTraceIncomplete(t *testing.T) {

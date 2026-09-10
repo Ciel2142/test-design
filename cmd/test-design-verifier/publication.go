@@ -57,8 +57,15 @@ const republicationReason = "republication"
 type dirtyEntry struct{ Code, Path string }
 
 // isPublicationPath reports whether path is one this run may publish:
-// <dir>/<stem>-verification.json, <dir>/<stem>-verification.md, or anything
-// under <dir>/transcripts/<runID>/ (dir "" = repository root).
+// <dir>/<stem>-verification.json, <dir>/<stem>-verification.md, or a .json
+// document directly under <dir>/transcripts/<runID>/ (dir "" = repository
+// root).
+//
+// The exemption is the shape of a publication, not the directory it lands in.
+// Every transcript this run writes is a JSON document it puts in that directory
+// itself; a file of any other kind there — an executable above all — and
+// anything in a subdirectory below it are changes to the subject the report
+// describes, whoever committed them, and finalize never published them.
 func isPublicationPath(artifactDir, stem, runID, path string) bool {
 	if path == "" {
 		return false
@@ -69,7 +76,8 @@ func isPublicationPath(artifactDir, stem, runID, path string) bool {
 	}
 	// The trailing separator is what keeps another run whose id this one is a
 	// prefix of — and the transcripts directory itself — outside the set.
-	return strings.HasPrefix(path, repoPath(artifactDir, "transcripts", runID)+"/")
+	name, under := strings.CutPrefix(path, repoPath(artifactDir, "transcripts", runID)+"/")
+	return under && name != "" && !strings.Contains(name, "/") && strings.HasSuffix(name, ".json")
 }
 
 // measuredCommit returns ledgerCommit when head == ledgerCommit, or when every
@@ -282,16 +290,100 @@ func notOwnPathRefusal(op string, entry dirtyEntry, ours bool) *cliError {
 	}
 }
 
+// recordFingerprint is one record reduced to what a report rests on: which
+// obligation it answers, where it stands and what it answered. Nothing here is
+// a timestamp or a path, so two fingerprints differ exactly when the ledger's
+// account of the run's work differs.
+type recordFingerprint struct {
+	Seq     int
+	Kind    runstate.Kind
+	ID      string
+	Status  runstate.Status
+	Outcome string
+}
+
+func (f recordFingerprint) String() string {
+	return fmt.Sprintf("seq %d %s %s %s %q", f.Seq, f.Kind, f.ID, f.Status, f.Outcome)
+}
+
+// ledgerFingerprint is a whole ledger's records in order, each fingerprinted.
+type ledgerFingerprint []recordFingerprint
+
+// fingerprintLedger takes the fingerprint of the ledger finalize assembled the
+// report from, so the transaction that opens the publication can hold the
+// ledger it re-reads under the lock to that same account.
+func fingerprintLedger(l *runstate.Ledger) ledgerFingerprint {
+	if l == nil {
+		return ledgerFingerprint{}
+	}
+	f := make(ledgerFingerprint, 0, len(l.Records))
+	for _, rec := range l.Records {
+		f = append(f, recordFingerprint{
+			Seq: rec.Seq, Kind: rec.Kind, ID: rec.ID, Status: rec.Status, Outcome: rec.Outcome,
+		})
+	}
+	return f
+}
+
+// differsFrom names the first way now is not the ledger before was — the record
+// count, the last record's seq, then each record in turn — and returns "" when
+// the two accounts agree.
+func (before ledgerFingerprint) differsFrom(now ledgerFingerprint) string {
+	switch {
+	case len(before) != len(now):
+		return fmt.Sprintf("finalize read %d records ending at %s, and the ledger now holds %d ending at %s",
+			len(before), before.last(), len(now), now.last())
+	case before.lastSeq() != now.lastSeq():
+		return fmt.Sprintf("the last record was %s and is now %s", before.last(), now.last())
+	}
+	for i, was := range before {
+		if is := now[i]; is != was {
+			return fmt.Sprintf("%s is now %s", was, is)
+		}
+	}
+	return ""
+}
+
+func (f ledgerFingerprint) last() string {
+	if len(f) == 0 {
+		return "no record"
+	}
+	return f[len(f)-1].String()
+}
+
+func (f ledgerFingerprint) lastSeq() int {
+	if len(f) == 0 {
+		return 0
+	}
+	return f[len(f)-1].Seq
+}
+
 // startPublication opens the run's phase/publish record. A publication that was
 // interrupted is restarted where it stands; one that completed is superseded
 // with the republication reason, because publishing the report again repeats no
 // verification work and so needs no repeat reason from the caller.
-func startPublication(op string, store *runstate.Store, identity runstate.Identity, inputs publishInputs) *cliError {
+//
+// read is the fingerprint of the ledger the report was assembled from. The
+// ledger lives outside the repository, so the Git snapshot gate cannot see a
+// concurrent caller repeating an obligation and answering it differently; this
+// transaction holds the store lock, and is where the ledger that was read and
+// the ledger that stands are held to each other. A ledger that moved refuses
+// ledger-changed and writes nothing.
+func startPublication(
+	op string, store *runstate.Store, identity runstate.Identity, read ledgerFingerprint, inputs publishInputs,
+) *cliError {
 	detail := ""
 	if inputs.Acknowledged {
 		detail = "acknowledged"
 	}
 	err := store.Update(identity, func(l *runstate.Ledger) error {
+		if differs := read.differsFrom(fingerprintLedger(l)); differs != "" {
+			return &cliError{
+				Code: codeLedgerChanged,
+				Message: fmt.Sprintf("%s: the run's ledger changed since finalize read it (%s); rerun finalize",
+					op, differs),
+			}
+		}
 		repeat := ""
 		if cur := runstate.Current(l, runstate.KindPhase, publishPhaseID); cur != nil && cur.Status == runstate.StatusCompleted {
 			repeat = republicationReason
