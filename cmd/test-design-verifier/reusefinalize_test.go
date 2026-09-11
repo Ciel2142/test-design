@@ -961,6 +961,71 @@ func TestReuse_PreservesOriginalProvenanceInReport(t *testing.T) {
 			t.Errorf("%s %s = %s %q, want completed %q", want.kind, want.id, rec.Status, rec.Detail, detail)
 		}
 	}
+
+	// A record adopted from a run that itself adopted it was produced by the
+	// first run still. The third run's report names that producer — its run,
+	// commit, document, record and artifact — not the run it read the record
+	// from; only the basis names the run it compared against.
+	t.Run("a twice-adopted record keeps its original producer", func(t *testing.T) {
+		if state.Identity == nil {
+			t.Fatalf("resume %s reported no identity; the middle run must name the commit it verified", runID)
+		}
+		middleCommit := state.Identity.RepoCommit
+		mustGit(t, s.repo, "add", "-A")
+		mustGit(t, s.repo, "commit", "-q", "-m", "publish the middle run's verification")
+		if lines := gitStatusLines(t, s.repo); len(lines) != 0 {
+			t.Fatalf("git status = %v, want the subject clean once the middle run's report is committed", lines)
+		}
+
+		thirdRun := liveRunID("rdy-prov-third")
+		readyTrace(t, s, thirdRun)
+		again := readyReuse(t, s, thirdRun, runID, prior.policy)
+		readyReused(t, again.Review, readyMarkerGroup)
+		readyReused(t, again.Review, readyVersionGroup)
+		readyReused(t, again.Mutation, readyVersionRow)
+
+		third := readyFinalize(t, s, thirdRun)
+		if third.Verdict != report.VerdictPass {
+			t.Fatalf("verdict = %q, want %s; reasons=%+v", third.Verdict, report.VerdictPass, third.Reasons)
+		}
+		rep := readPublishedReport(t, s.repo, third.JSONPath)
+
+		for _, group := range []string{readyMarkerGroup, readyVersionGroup} {
+			batch := readyBatch(t, rep, "reuse:"+group)
+			if batch.RunID != prior.runID {
+				t.Errorf("batch %s runId = %q, want the run it was judged in %q, not the run it was read from %q",
+					batch.BatchID, batch.RunID, prior.runID, runID)
+			}
+			ref := batch.Reuse
+			if ref == nil {
+				t.Errorf("batch %s carries no reuse reference", batch.BatchID)
+				continue
+			}
+			if ref.PriorRunID != prior.runID || ref.PriorRepoCommit != prior.commit || ref.PriorSourceSHA256 != prior.sourceSHA256 {
+				t.Errorf("batch %s reference = %+v, want the original producer %s at %s over %s",
+					batch.BatchID, ref, prior.runID, prior.commit, prior.sourceSHA256)
+			}
+			if ref.PriorSeq != prior.seqs[group] {
+				t.Errorf("batch %s priorSeq = %d, want the original record's %d", batch.BatchID, ref.PriorSeq, prior.seqs[group])
+			}
+			if ref.Artifact.Path != prior.artifacts[group] {
+				t.Errorf("batch %s artifact path = %q, want the original %q", batch.BatchID, ref.Artifact.Path, prior.artifacts[group])
+			}
+			if ref.Basis.PriorCommit != middleCommit {
+				t.Errorf("batch %s basis priorCommit = %q, want the middle run's commit %q this run compared against",
+					batch.BatchID, ref.Basis.PriorCommit, middleCommit)
+			}
+		}
+		layer4 := publishedRow(t, rep, readyVersionRow).Layer4
+		if layer4.Reuse == nil {
+			t.Fatalf("%s layer4 = %+v, want a reuse reference", readyVersionRow, layer4)
+		}
+		if layer4.Reuse.PriorRunID != prior.runID || layer4.Reuse.PriorSeq != prior.seqs[readyVersionRow] ||
+			layer4.Reuse.Artifact.Path != prior.artifacts[readyVersionRow] {
+			t.Errorf("%s layer4 reuse = %+v, want the original producer %s seq %d at %s",
+				readyVersionRow, layer4.Reuse, prior.runID, prior.seqs[readyVersionRow], prior.artifacts[readyVersionRow])
+		}
+	})
 }
 
 // TestFinalize_PublishesAdoptedArtifactsFromVerifiedStagedCopies closes the

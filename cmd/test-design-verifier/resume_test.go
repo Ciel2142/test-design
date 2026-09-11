@@ -948,6 +948,34 @@ func TestResume_PreservesFailedOutcomes(t *testing.T) {
 		}
 	})
 
+	// The trace phase is read the same way: a trace interrupted before it
+	// closed its record holds an open record with no outcome, and the rerun
+	// that completes it is reported under the outcome its record carries.
+	t.Run("the trace phase carries the outcome its own record holds", func(t *testing.T) {
+		const traceRun = "resume-trace-outcome"
+		startLedgerRecord(t, repo, traceRun, runstate.KindPhase, tracePhaseID, phaseInputs{RunDir: t.TempDir()})
+
+		interrupted := runResume(t, repo, traceRun).Trace
+		if interrupted.Status != string(runstate.StatusStarted) {
+			t.Errorf("trace.status = %q, want started", interrupted.Status)
+		}
+		if interrupted.Outcome != "" {
+			t.Errorf("trace.outcome = %q, want none: a phase that never finished has no answer to report", interrupted.Outcome)
+		}
+
+		if code, _, stderr := runVerifyOp(t, "trace", verifyRequestJSON(t, repo, traceRun)); code != exitOK {
+			t.Fatalf("trace exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+		}
+		state := runResume(t, repo, traceRun)
+		finished, rec := state.Trace, ledgerRecord(t, state, runstate.KindPhase, tracePhaseID)
+		if finished.Status != string(runstate.StatusCompleted) || finished.Outcome != rec.Outcome {
+			t.Errorf("trace = %+v, want completed carrying the record's own outcome %q", finished, rec.Outcome)
+		}
+		if finished.Outcome != "ok" {
+			t.Errorf("trace.outcome = %q, want ok: the outcome the finished trace recorded", finished.Outcome)
+		}
+	})
+
 	// The live layer's answer, over a subject whose live decision is required:
 	// a refused live attempt completes the layer unavailable, and the restart
 	// keeps it a failure — counted as one, never reported as a verified layer.
