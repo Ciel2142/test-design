@@ -906,6 +906,48 @@ func TestResume_PreservesFailedOutcomes(t *testing.T) {
 		t.Errorf("counts.completed = %d, want 0", fresh.Counts.Completed)
 	}
 
+	// The publication is an operation like the others, and resume reports the
+	// answer its record carries rather than one the summary chose: a run whose
+	// publication failed holds an open record with no outcome at all, and only
+	// the rerun that finishes it carries the outcome the record completed with.
+	t.Run("the publication carries the outcome its own record holds", func(t *testing.T) {
+		f := newFinalizeFixture(t)
+		planted := filepath.Join(f.repo, "docs", "superpowers", "coverage", "transcripts", f.runID, traceEvidenceFile)
+		cliErr := finalizeOp(f.request(), io.Discard, func() {
+			if err := os.MkdirAll(planted, 0o755); err != nil {
+				t.Fatalf("MkdirAll %s: %v", planted, err)
+			}
+		})
+		if cliErr == nil || cliErr.Code != "publish-failed" {
+			t.Fatalf("finalizeOp = %+v, want the publish-failed refusal", cliErr)
+		}
+
+		unfinished := runResume(t, f.repo, f.runID).Publication
+		if unfinished.Status != string(runstate.StatusStarted) {
+			t.Errorf("publication.status = %q, want started", unfinished.Status)
+		}
+		if unfinished.Outcome != "" {
+			t.Errorf("publication.outcome = %q, want none: an operation that never finished has no answer to report", unfinished.Outcome)
+		}
+
+		// The destination alone is repaired, and the rerun publishes.
+		if err := os.RemoveAll(planted); err != nil {
+			t.Fatalf("remove the planted directory: %v", err)
+		}
+		if exit, _, stderr := f.run(); exit != exitOK {
+			t.Fatalf("finalize exit code = %d, want %d; stderr=%s", exit, exitOK, stderr)
+		}
+
+		state := runResume(t, f.repo, f.runID)
+		finished, rec := state.Publication, ledgerRecord(t, state, runstate.KindPhase, publishPhaseID)
+		if finished.Status != string(runstate.StatusCompleted) || finished.Outcome != rec.Outcome {
+			t.Errorf("publication = %+v, want completed carrying the record's own outcome %q", finished, rec.Outcome)
+		}
+		if finished.Outcome != "ok" {
+			t.Errorf("publication.outcome = %q, want ok: the outcome the finished publication recorded", finished.Outcome)
+		}
+	})
+
 	// The live layer's answer, over a subject whose live decision is required:
 	// a refused live attempt completes the layer unavailable, and the restart
 	// keeps it a failure — counted as one, never reported as a verified layer.

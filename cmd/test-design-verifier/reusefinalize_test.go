@@ -705,6 +705,64 @@ func TestReuse_RejectsAlteredRetainedBytes(t *testing.T) {
 		}
 	})
 
+	// The accounting is not the only reader of a record's bytes. A completed
+	// failure is an answer resume never offers again, so nothing in the
+	// obligations it publishes re-reads what that record retained: the recheck
+	// finalize runs over every record it is about to quote is the one gate
+	// left, and a row whose retained evidence no longer answers to its recorded
+	// digest leaves nothing published at all.
+	t.Run("tampered-past-the-accounting", func(t *testing.T) {
+		// A subject of its own: this proof ends by publishing, and what a
+		// publication leaves in the tree is not the next proof's business.
+		subject := readySubject(t, "not-applicable")
+		runID := liveRunID("rdy-alt-ledger")
+		tr := readyTrace(t, subject, runID)
+		readyGroups(t, subject, runID, readDispatchInputs(t, tr.DispatchPath), reusePolicy(t))
+		readyUnappliableVersionRow(t, subject, runID)
+
+		state := readyResume(t, subject, runID)
+		rec := ledgerRecord(t, state, runstate.KindMutationRow, readyVersionRow)
+		if rec.Outcome != outcomeUnappliable {
+			t.Fatalf("%s outcome = %q, want %s", readyVersionRow, rec.Outcome, outcomeUnappliable)
+		}
+		retained := rec.Artifacts[artifactEvidence].Path
+		original := readyArtifactBytes(t, retained)
+		readyWriteArtifact(t, retained, append(slices.Clone(original), '\n'))
+
+		// The failed row is an answer, not a gap: the run owes nothing over it,
+		// which is what leaves its bytes unread until the report is assembled.
+		after := readyResume(t, subject, runID)
+		for _, owed := range after.Pending {
+			if owed.Kind == runstate.KindMutationRow && owed.ID == readyVersionRow {
+				t.Fatalf("pending = %+v, want the completed failure not owed again", after.Pending)
+			}
+		}
+
+		exit, stdout, stderr := runVerifyOp(t, "finalize", readyFinalizeRequestJSON(t, subject, runID, freshFinalizeBody()))
+		if exit != exitError || stdout != "" {
+			t.Fatalf("finalize published over a record whose retained bytes changed: exit=%d stdout=%s stderr=%s", exit, stdout, stderr)
+		}
+		got := decodeCLIError(t, stderr)
+		if got.Code != "ledger-invalid" {
+			t.Errorf("refusal code = %q, want ledger-invalid; message=%s", got.Code, got.Message)
+		}
+		if !strings.Contains(got.Message, readyVersionRow) ||
+			!strings.Contains(got.Message, "artifact-digest-mismatch:"+artifactEvidence) {
+			t.Errorf("refusal = %+v, want it to name %s and the digest that no longer answers", got, readyVersionRow)
+		}
+		if lines := gitStatusLines(t, subject.repo); len(lines) != 0 {
+			t.Errorf("git status = %v, want the refusal to have published nothing", lines)
+		}
+
+		// With the bytes restored the same request publishes, and the row is
+		// reported as the failure it measured rather than dropped from it.
+		readyWriteArtifact(t, retained, original)
+		published := readyFinalize(t, subject, runID)
+		if published.Verdict != report.VerdictBlocked {
+			t.Errorf("verdict = %q, want %s; reasons=%+v", published.Verdict, report.VerdictBlocked, published.Reasons)
+		}
+	})
+
 	// Adoption is not the last time the bytes are read. Finalize re-hashes every
 	// adopted artifact immediately before it publishes, so bytes that changed
 	// after the ledger was read leave nothing published at all; with them

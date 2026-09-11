@@ -783,6 +783,54 @@ func TestRestart_RestoresMutationWorkspaceBeforeMeasuring(t *testing.T) {
 		requireOriginalRepoUntouched(t, repo, before, "the repeated site")
 	})
 
+	// A workspace the clean could not empty is not a baseline either: the
+	// leftover path is read back from the workspace's own status after the
+	// restoration ran, so residue git merely warned about refuses the recovery
+	// by name instead of passing for a clean revision.
+	t.Run("residue that survives the clean is refused before anything is measured", func(t *testing.T) {
+		if os.Geteuid() == 0 {
+			t.Skip("running as root: an unwritable directory does not stop root from emptying it")
+		}
+		repo := fixtureRepoWith(t, slowFixtureEdit(t))
+		const runID = "restart-mutation-residue"
+		before := captureOriginalRepo(t, repo)
+
+		prep := interruptMutationAtSiteB(t, repo, runID)
+		requireOriginalRepoUntouched(t, repo, before, "the interruption")
+		requireInterruptedWorkspace(t, prep.WorktreePath)
+
+		// An untracked directory nothing can unlink from: `git clean` reports
+		// what it could not remove as a warning and still leaves the file
+		// behind, which is the case a clean exit status would hide.
+		guarded := filepath.Join(prep.WorktreePath, "residue")
+		if err := os.Mkdir(guarded, 0o700); err != nil {
+			t.Fatalf("create the guarded directory: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(guarded, "leftover.txt"), []byte("left behind\n"), 0o644); err != nil {
+			t.Fatalf("write the guarded residue: %v", err)
+		}
+		if err := os.Chmod(guarded, 0o500); err != nil {
+			t.Fatalf("make the guarded directory unwritable: %v", err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(guarded, 0o700) })
+
+		got := refuseRecoverMutation(t, repo, runID, prep.RunDir)
+		if got.Code != "residue-remains" {
+			t.Errorf("error code = %q, want residue-remains (message %q)", got.Code, got.Message)
+		}
+		if !strings.Contains(got.Message, "residue/leftover.txt") {
+			t.Errorf("message = %q, want it to name the path that survived the clean", got.Message)
+		}
+		requireOriginalRepoUntouched(t, repo, before, "the refused recovery")
+
+		// The row is measured on a workspace somebody vouched for or not at
+		// all: the marker the refused recovery left standing keeps the second
+		// site refused, and the row stays open.
+		requireSiteInterruptedRefusal(t, repo, runID, prep.RunDir)
+		requireInterruptedRow(t, repo, runID)
+		requireOriginalRepoUntouched(t, repo, before, "the refused evaluation")
+	})
+
 	t.Run("a restoration that fails leaves the row where the interruption left it", func(t *testing.T) {
 		repo := fixtureRepoWith(t, slowFixtureEdit(t))
 		const runID = "restart-mutation-unrestorable"
