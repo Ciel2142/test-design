@@ -1,46 +1,21 @@
 {
   "schemaVersion": "1",
   "verifierVersion": "0.6.0",
-  "runId": "run-2026-09-11-0002",
+  "runId": "run-2026-09-11-0003",
   "source": "docs/superpowers/coverage/2026-09-07-verification-workflow-redesign-coverage.md",
-  "sourceSha256": "ddf7a90910b294cb6b9aadc6d189bde21925a02e0388bcaaa565021f8358cf20",
-  "headCommit": "b2d1b229fe98deb6a70689b6fd4ee0ef7abd23b1",
+  "sourceSha256": "69ade28c44a0645c13fb93bc6f7b16fa1313e2777675744422b4d45860c2b98d",
+  "headCommit": "4421051232853bdf50a9f61154d3ce2fa18404aa",
   "baselineCommit": "122401156dbf639afb5d7ce021e3a0ae2dbb0824",
   "baselineStatus": "ok",
-  "approval": "go",
-  "verdict": "BLOCKED",
+  "approval": "щл ok",
+  "verdict": "PASS",
   "acknowledged": false,
-  "reasons": [
-    {
-      "layer": "4",
-      "rowId": "SC-20",
-      "code": "MUTATION-SURVIVED",
-      "detail": "the tagged test did not fail at site-1"
-    },
-    {
-      "layer": "4",
-      "rowId": "SC-22",
-      "code": "MUTATION-SURVIVED",
-      "detail": "the tagged test did not fail at site-1"
-    },
-    {
-      "layer": "4",
-      "rowId": "SC-27",
-      "code": "MUTATION-SURVIVED",
-      "detail": "the tagged test did not fail at site-1"
-    },
-    {
-      "layer": "4",
-      "rowId": "SC-28",
-      "code": "MUTATION-SURVIVED",
-      "detail": "the tagged test did not fail at site-2"
-    }
-  ],
+  "reasons": [],
   "layers": {
     "layer1": {
       "status": "pass",
       "suite": {
-        "passed": 1496,
+        "passed": 1498,
         "failed": 0,
         "skipped": 2
       },
@@ -64,10 +39,10 @@
       "na": 0
     },
     "layer4": {
-      "status": "blocked",
+      "status": "pass",
       "applicable": 22,
-      "caught": 18,
-      "survived": 4,
+      "caught": 22,
+      "survived": 0,
       "unappliable": 0,
       "na": 0
     }
@@ -85,7 +60,7 @@
       "layer2": {
         "verdict": "HOLDS",
         "batchId": "rb-01",
-        "dispatchId": "dispatch-rb-01"
+        "dispatchId": "dispatch-13"
       },
       "layer3": "N/A",
       "layer4": {
@@ -161,7 +136,7 @@
       "layer2": {
         "verdict": "HOLDS",
         "batchId": "rb-05",
-        "dispatchId": "dispatch-rb-05"
+        "dispatchId": "dispatch-14"
       },
       "layer3": "N/A",
       "layer4": {
@@ -199,7 +174,7 @@
       "layer2": {
         "verdict": "HOLDS",
         "batchId": "rb-07",
-        "dispatchId": "dispatch-rb-07"
+        "dispatchId": "dispatch-15"
       },
       "layer3": "N/A",
       "layer4": {
@@ -236,8 +211,8 @@
       },
       "layer2": {
         "verdict": "HOLDS",
-        "batchId": "batch-4",
-        "dispatchId": "dispatch-4"
+        "batchId": "batch-12",
+        "dispatchId": "dispatch-12"
       },
       "layer3": "N/A",
       "layer4": {
@@ -255,8 +230,8 @@
       },
       "layer2": {
         "verdict": "HOLDS",
-        "batchId": "batch-4",
-        "dispatchId": "dispatch-4"
+        "batchId": "batch-12",
+        "dispatchId": "dispatch-12"
       },
       "layer3": "LIVE-PASS",
       "layer4": {
@@ -274,8 +249,8 @@
       },
       "layer2": {
         "verdict": "HOLDS",
-        "batchId": "batch-4",
-        "dispatchId": "dispatch-4"
+        "batchId": "batch-12",
+        "dispatchId": "dispatch-12"
       },
       "layer3": "N/A",
       "layer4": {
@@ -293,8 +268,8 @@
       },
       "layer2": {
         "verdict": "HOLDS",
-        "batchId": "batch-4",
-        "dispatchId": "dispatch-4"
+        "batchId": "batch-12",
+        "dispatchId": "dispatch-12"
       },
       "layer3": "N/A",
       "layer4": {
@@ -312,8 +287,8 @@
       },
       "layer2": {
         "verdict": "HOLDS",
-        "batchId": "batch-4",
-        "dispatchId": "dispatch-4"
+        "batchId": "batch-12",
+        "dispatchId": "dispatch-12"
       },
       "layer3": "N/A",
       "layer4": {
@@ -332,7 +307,7 @@
       "layer2": {
         "verdict": "HOLDS",
         "batchId": "rb-14",
-        "dispatchId": "dispatch-rb-14"
+        "dispatchId": "dispatch-16"
       },
       "layer3": "N/A",
       "layer4": {
@@ -370,7 +345,7 @@
       "layer2": {
         "verdict": "HOLDS",
         "batchId": "rb-16",
-        "dispatchId": "dispatch-rb-16"
+        "dispatchId": "dispatch-17"
       },
       "layer3": "N/A",
       "layer4": {
@@ -450,10 +425,7 @@
       },
       "layer3": "N/A",
       "layer4": {
-        "status": "MUTATION-SURVIVED",
-        "sites": [
-          "site-1"
-        ]
+        "status": "MUTATION-CAUGHT"
       }
     },
     {
@@ -468,7 +440,7 @@
       "layer2": {
         "verdict": "HOLDS",
         "batchId": "rb-21",
-        "dispatchId": "dispatch-rb-21"
+        "dispatchId": "dispatch-18"
       },
       "layer3": "N/A",
       "layer4": {
@@ -491,10 +463,7 @@
       },
       "layer3": "N/A",
       "layer4": {
-        "status": "MUTATION-SURVIVED",
-        "sites": [
-          "site-1"
-        ]
+        "status": "MUTATION-CAUGHT"
       }
     },
     {
@@ -546,8 +515,8 @@
       },
       "layer2": {
         "verdict": "HOLDS",
-        "batchId": "batch-12",
-        "dispatchId": "dispatch-12"
+        "batchId": "batch-7",
+        "dispatchId": "dispatch-7"
       },
       "layer3": "N/A",
       "layer4": {
@@ -566,7 +535,7 @@
       "layer2": {
         "verdict": "HOLDS",
         "batchId": "rb-26",
-        "dispatchId": "dispatch-rb-26"
+        "dispatchId": "dispatch-19"
       },
       "layer3": "N/A",
       "layer4": {
@@ -584,15 +553,12 @@
       },
       "layer2": {
         "verdict": "HOLDS",
-        "batchId": "batch-12",
-        "dispatchId": "dispatch-12"
+        "batchId": "batch-7",
+        "dispatchId": "dispatch-7"
       },
       "layer3": "N/A",
       "layer4": {
-        "status": "MUTATION-SURVIVED",
-        "sites": [
-          "site-1"
-        ]
+        "status": "MUTATION-CAUGHT"
       }
     },
     {
@@ -606,15 +572,12 @@
       },
       "layer2": {
         "verdict": "HOLDS",
-        "batchId": "rb-28",
-        "dispatchId": "dispatch-rb-28"
+        "batchId": "batch-7",
+        "dispatchId": "dispatch-7"
       },
       "layer3": "N/A",
       "layer4": {
-        "status": "MUTATION-SURVIVED",
-        "sites": [
-          "site-2"
-        ]
+        "status": "MUTATION-CAUGHT"
       }
     },
     {
@@ -629,7 +592,7 @@
       "layer2": {
         "verdict": "HOLDS",
         "batchId": "rb-29",
-        "dispatchId": "dispatch-rb-29"
+        "dispatchId": "dispatch-20"
       },
       "layer3": "N/A",
       "layer4": {
@@ -686,7 +649,7 @@
       "layer2": {
         "verdict": "HOLDS",
         "batchId": "rb-32",
-        "dispatchId": "dispatch-rb-32"
+        "dispatchId": "dispatch-21"
       },
       "layer3": "N/A",
       "layer4": {
@@ -705,7 +668,7 @@
       "layer2": {
         "verdict": "HOLDS",
         "batchId": "rb-33",
-        "dispatchId": "dispatch-rb-33"
+        "dispatchId": "dispatch-22"
       },
       "layer3": "N/A",
       "layer4": {
@@ -743,7 +706,7 @@
       "layer2": {
         "verdict": "HOLDS",
         "batchId": "rb-35",
-        "dispatchId": "dispatch-rb-35"
+        "dispatchId": "dispatch-23"
       },
       "layer3": "N/A",
       "layer4": {
@@ -774,7 +737,7 @@
     {
       "batchId": "batch-1",
       "dispatchId": "dispatch-1",
-      "runId": "run-2026-09-11-0002",
+      "runId": "run-2026-09-11-0003",
       "rows": [
         "SC-01"
       ],
@@ -790,7 +753,7 @@
     {
       "batchId": "batch-2",
       "dispatchId": "dispatch-2",
-      "runId": "run-2026-09-11-0002",
+      "runId": "run-2026-09-11-0003",
       "rows": [
         "SC-02",
         "SC-03",
@@ -808,24 +771,24 @@
         {
           "rowId": "SC-02",
           "verdict": "HOLDS",
-          "reason": "fixture's one site cites three active IDs; restoring the len(activeIDs)>2 rejection drops all bindings and len(ev.RowResults)!=3 flips"
+          "reason": "fixture cites SC-01, SC-02, SC-03 from one site; restoring the len(activeIDs) > 2 rejection with its continue leaves bindings empty, so trace.Join emits three gap findings and zero RowResults — len(ev.RowResults) != 3 Fatalf flips (and len(ev.Findings) != 0 too)"
         },
         {
           "rowId": "SC-03",
           "verdict": "HOLDS",
-          "reason": "SC-01/SC-02 are each bound by two sites; the restored ambiguity branch emits an ambiguity finding and mustRowResult fails"
+          "reason": "both SC-01 and SC-02 are bound by two sites each; restoring the default multi-site branch emits Kind \"ambiguity\" findings and appends no RowResult, so the f.Kind == \"ambiguity\" Errorf fires and mustRowResult(ev, \"SC-01\") Fatalfs on zero results"
         },
         {
           "rowId": "SC-04",
           "verdict": "HOLDS",
-          "reason": "collapsing a skipped contributor as passed makes the row passed, flipping the skipped.Status assertion"
+          "reason": "SC-01's contributors are [skipped, passed]; treating the skipped (or unexecuted) contributor as passed makes runrecord.Collapse return \"passed\", so skipped.Status != \"skipped\" flips (if the mutation rewrites c.Status instead, the Contributors[0].Status != \"skipped\" and unexecuted.Status != \"\" checks flip as well)"
         }
       ]
     },
     {
       "batchId": "batch-3",
       "dispatchId": "dispatch-3",
-      "runId": "run-2026-09-11-0002",
+      "runId": "run-2026-09-11-0003",
       "rows": [
         "SC-06",
         "SC-07",
@@ -842,19 +805,19 @@
         {
           "rowId": "SC-06",
           "verdict": "HOLDS",
-          "reason": "the no-section case asserts errors.As plus lde.Code == \"missing\"; defaulting to N/A returns nil and the fatal fires"
+          "reason": "\"no section at all\" (live-incomplete-missing.md, no smoke/e2e rows) and \"not-applicable without a reason\" both require errors.As(err, &lde) with Code \"missing\"/\"reason-missing\"; defaulting missing/incomplete metadata to N/A makes ValidateLiveDecision return nil for those inputs, so the errors.As Fatalf fires"
         },
         {
           "rowId": "SC-08",
           "verdict": "HOLDS",
-          "reason": "reinstating gap-row-bound makes Plan.Validate error, so gap.Verdict != LIVE-PASS and the layer3 summary assertions fail"
+          "reason": "handoffPlan binds SC-02, which layer 1 reports as a gap (only SC-01 has a tagged test); reinstating gap-row-bound in Plan.Validate makes execute-live exit non-OK, so runLivePipeline's \"execute-live exit code\" Fatalf fires — and had it somehow run, gap.Verdict != \"LIVE-PASS\" and the LIVE-N/A prefix check would flip"
         }
       ]
     },
     {
       "batchId": "batch-4",
       "dispatchId": "dispatch-4",
-      "runId": "run-2026-09-11-0002",
+      "runId": "run-2026-09-11-0003",
       "rows": [
         "SC-09",
         "SC-10",
@@ -867,41 +830,41 @@
         "rowId": "SC-14",
         "kind": "synthesized",
         "weakening": "env and verdict assertions dropped, leaving a step-count shape check and a non-empty env check",
-        "caught": true
+        "caught": false
       },
-      "voided": false,
+      "voided": true,
       "verdicts": [
         {
           "rowId": "SC-09",
           "verdict": "HOLDS",
-          "reason": "template-only {run-id} validation applied to the resolved descriptor refuses descriptor-invalid; runLivePipeline fatals before the evidence is read"
+          "reason": "the mutated ValidateResolved rejects the resolved prefix \"scratch-handoff-resource\" (no literal {run-id}), so execute-live exits non-zero with descriptor-invalid and runLivePipeline's execute-live exit code Fatalf fires before any later assertion"
         },
         {
           "rowId": "SC-10",
           "verdict": "HOLDS",
-          "reason": "with the start loop omitted, len(ev.StartSteps)!=1 || StartSteps[0].Result!=\"pass\" fatals, and the stale-deployment mirror check fatals too"
+          "reason": "the second subtest pre-deploys the prior revision under the run root, then requires len(ev.StartSteps) == 1 && Result == \"fail\" plus the start-phase unboundFailure naming the root; with the start loop omitted StartSteps is empty and that Fatalf flips (an unconditional omission also empties StartSteps in the first subtest)"
         },
         {
           "rowId": "SC-11",
           "verdict": "HOLDS",
-          "reason": "requireBusinessNeverRan asserts len(ev.Steps)==0 and no check line in the phase log after a failed start or health"
+          "reason": "with walkthroughRan forced true after a failed start/health, the plan's check step executes and is reduced, so requireBusinessNeverRan's len(ev.Steps) != 0 flips and the row verdict becomes LIVE-FAIL instead of the asserted LIVE-INCONCLUSIVE in the first two subtests"
         },
         {
           "rowId": "SC-12",
           "verdict": "HOLDS",
-          "reason": "requireOwnedCleanup's requireAbsent plus the CleanupOK and profile-cleanup pass checks fail when execute returns before cleanup"
+          "reason": "returning before the cleanup section leaves CleanupOK=false, no \"profile cleanup command 1\" step, and the phase run root on disk, so requireOwnedCleanup's requireAbsent / cleanupOK / stepByExpectation assertions flip; the first subtest's DeepEqual on UnboundFailures also loses the plan-cleanup entry"
         },
         {
           "rowId": "SC-13",
           "verdict": "HOLDS",
-          "reason": "a cleanup resolved to the digit-stripped prefix leaves run A's root in place, flipping requireAbsent for run A and execOut.CleanupOK"
+          "reason": "the cleanup group resolved to \"livetruth-confined-a-\" (pid stripped) makes recipe.py cleanup act on a non-existent root and report absent, leaving /tmp/test-design-workflow-livetruth-confined-a-<pid> in place, so requireAbsent(t, \"run A after its own cleanup\", ...) flips"
         }
       ]
     },
     {
       "batchId": "batch-5",
       "dispatchId": "dispatch-5",
-      "runId": "run-2026-09-11-0002",
+      "runId": "run-2026-09-11-0003",
       "rows": [
         "SC-15",
         "SC-16",
@@ -920,29 +883,29 @@
         {
           "rowId": "SC-15",
           "verdict": "HOLDS",
-          "reason": "reflect.DeepEqual(ev.UnboundFailures, want) and the live-unbound-assertion-failed reason are exactly what the mutation deletes"
+          "reason": "asserts reflect.DeepEqual(ev.UnboundFailures, [{step,2,...}] / [{plan-cleanup,1,...}]) and finalize verdict BLOCKED with reason live-unbound-assertion-failed; keeping failure recording only inside the SCBindings loop leaves UnboundFailures empty (recordUnboundFailure in runPlanStep's len(SCBindings)==0 branch is gone), so the DeepEqual and the BLOCKED assertion both flip"
         },
         {
           "rowId": "SC-17",
           "verdict": "HOLDS",
-          "reason": "requireCleanupState pins cleanupOK=false/cleanupFailed=true while the last command passes; last-command-only judging flips it"
+          "reason": "first subtest (\"remove\" fails, \"absent\" checker passes) asserts requireCleanupState(..., false, true) on both op output and evidence, and finalize PARTIAL with live-cleanup-failed; computing cleanupOK from the last command alone makes cleanupOK=true/cleanupFailed=false, so the state assertion and the reason assertion flip (the \"refusal before a held command\" subtest flips the same way)"
         },
         {
           "rowId": "SC-18",
           "verdict": "HOLDS",
-          "reason": "the per-step loop demands LIVE-INCONCLUSIVE and len(ev.Steps)==2 forbids reducing interrupted steps to results"
+          "reason": "asserts SC-03 (exit-code -1 predicate on a timed-out step) is LIVE-INCONCLUSIVE and len(ev.Steps)==2; converting the timeout to a completed exit -1 result would reduce a third step and satisfy that predicate (LIVE-PASS), flipping both; the subtest also asserts EvaluatePredicates returns (false, all) once partial.Err is set, which flips if the Err gate itself is the thing removed"
         },
         {
           "rowId": "SC-19",
           "verdict": "HOLDS",
-          "reason": "readLiveEvidence(...).RepoCommit != subject.head fails once repoCommit is omitted from the serialized evidence"
+          "reason": "final assertion reads the execute-live evidence file and requires ev.RepoCommit == subject.head; omitting repoCommit from serialization decodes as \"\" and the assertion fails"
         }
       ]
     },
     {
       "batchId": "batch-6",
       "dispatchId": "dispatch-6",
-      "runId": "run-2026-09-11-0002",
+      "runId": "run-2026-09-11-0003",
       "rows": [
         "SC-20",
         "SC-21",
@@ -961,154 +924,29 @@
         {
           "rowId": "SC-20",
           "verdict": "HOLDS",
-          "reason": "out.Review.Complete must be false while B is open with five uncovered rows, and out.Mutation.Complete after SC-10's digest changes"
+          "reason": "(a) after the trace evidence is tampered, dropping the Reason conjunct makes traceComplete true so review/mutation reasons stop being trace-incomplete and groups are reported — lines 298/302/306 flip; (b) after A's evidence is tampered every row is grouped and A is invalid, so a non-empty-status settle makes review.complete true — line 185 (and 271) flips; (c) existence-only mutationComplete stays true after SC-10's evidence is tampered — line 235 flips; (d) reportedStatus never yielding invalid reports A as \"completed\" — line 172 flips (also 229, 292); (e) dropping duplicate-completion lets the second A completion succeed, so refuseRecordReview fatals (\"was accepted\") at line 108-115; (f) dropping missing-verdict lets B complete on SC-03 alone (no duplicate/foreign/invalid verdict, inputs match), so refuseRecordReview fatals at line 136-140"
         },
         {
           "rowId": "SC-22",
           "verdict": "HOLDS",
-          "reason": "resumeGroupFor(A).Outcome==\"blocked\", the per-row outcome loop, Counts.Failed==3 and live.Outcome==\"unavailable\" all fail under restored-as-success"
+          "reason": "(a) trace subtest: a started phase record reported with constant \"ok\" flips interrupted.Outcome != \"\" (line 631); (b) live subtest: constant \"success\" flips live.Live.Outcome != \"unavailable\" (line 672); (c) publication subtest: the started publish record reported \"ok\" flips unfinished.Outcome != \"\" (line 598); (d) constant \"holds\" flips group A Outcome != \"blocked\" (line 499); (e) constant \"success\" flips SC-09 \"survived\" / SC-10 \"environmental\" (lines 502-505)"
         },
         {
           "rowId": "SC-23",
           "verdict": "HOLDS",
-          "reason": "ev.Recovery non-nil with Performed and OK, plus the exact phase log, fail when recovery is skipped for a started attempt"
+          "reason": "skipping recovery makes ev.Recovery nil (fatal at line 745) or Steps empty (fatal at 751), and the phase log loses its first \"cleanup\" so the DeepEqual at line 768 fatals; in the second subtest the deploy count becomes 2 and the verdict PASS instead of INCONCLUSIVE (lines 863, 870) flip as well"
         },
         {
           "rowId": "SC-24",
           "verdict": "HOLDS",
-          "reason": "rec.Recreated and rec.WorktreePath != prep.WorktreePath, plus residue-remains and restore-failed codes, depend on restoreMutationWorkspace running"
+          "reason": "if evaluate-mutation proceeds over the marker, requireSiteInterruptedRefusal fatals on exit code/\"site-interrupted\" in subtests 1, 3 and 4; if recover-mutation skips restoreMutationWorkspace, requireRestoredWorkspace's empty-status/residue-gone checks flip (subtest 1), rec.Recreated/rec.WorktreePath == prep.WorktreePath flip (subtest 2), and the expected residue-remains / restore-failed refusals become successes so refuseRecoverMutation fatals (subtests 3, 4)"
         }
       ]
     },
     {
       "batchId": "batch-7",
       "dispatchId": "dispatch-7",
-      "runId": "run-2026-09-11-0002",
-      "rows": [
-        "SC-25",
-        "SC-26",
-        "SC-27",
-        "SC-28"
-      ],
-      "canary": {
-        "rowId": "SC-28",
-        "kind": "synthesized",
-        "weakening": "prior-run identity equality on the reuse reference and on the published copies replaced with non-empty presence checks",
-        "caught": false
-      },
-      "voided": true,
-      "verdicts": [
-        {
-          "rowId": "SC-25",
-          "verdict": "HOLDS",
-          "reason": "voided"
-        },
-        {
-          "rowId": "SC-26",
-          "verdict": "HOLDS",
-          "reason": "voided"
-        },
-        {
-          "rowId": "SC-27",
-          "verdict": "HOLDS",
-          "reason": "voided"
-        }
-      ]
-    },
-    {
-      "batchId": "batch-8",
-      "dispatchId": "dispatch-8",
-      "runId": "run-2026-09-11-0002",
-      "rows": [
-        "SC-29"
-      ],
-      "canary": {
-        "rowId": "SC-29",
-        "kind": "synthesized",
-        "weakening": "out.Trace/out.Live freshness assertions and the resumed pending block deleted; trace repoCommit equality loosened to non-empty",
-        "caught": true
-      },
-      "voided": false,
-      "verdicts": []
-    },
-    {
-      "batchId": "batch-9",
-      "dispatchId": "dispatch-9",
-      "runId": "run-2026-09-11-0002",
-      "rows": [
-        "SC-30",
-        "SC-31",
-        "SC-32"
-      ],
-      "canary": {
-        "rowId": "SC-32",
-        "kind": "synthesized",
-        "weakening": "measured-commit equality assertions replaced with non-empty checks",
-        "caught": true
-      },
-      "voided": false,
-      "verdicts": [
-        {
-          "rowId": "SC-30",
-          "verdict": "HOLDS",
-          "reason": "the live-answered subtest asserts slices.Equal(state.Pending, wantOwed) against a one-element publish-only list"
-        },
-        {
-          "rowId": "SC-31",
-          "verdict": "HOLDS",
-          "reason": "three digest assertions bind exactness: the ignored scratch.log, the neighbouring notes.local.md and foreign trace evidence, and the assume-unchanged main.go edit"
-        }
-      ]
-    },
-    {
-      "batchId": "batch-10",
-      "dispatchId": "dispatch-10",
-      "runId": "run-2026-09-11-0002",
-      "rows": [
-        "SC-33"
-      ],
-      "canary": {
-        "rowId": "SC-33",
-        "kind": "synthesized",
-        "weakening": "proofRefused and the counts/uncovered assertions dropped, leaving a decision-exists check",
-        "caught": true
-      },
-      "voided": false,
-      "verdicts": []
-    },
-    {
-      "batchId": "batch-11",
-      "dispatchId": "dispatch-11",
-      "runId": "run-2026-09-11-0002",
-      "rows": [
-        "SC-34",
-        "SC-35",
-        "SC-36"
-      ],
-      "canary": {
-        "rowId": "SC-35",
-        "kind": "synthesized",
-        "weakening": "layer4Applicable length assertion loosened to len(got) > 1 and the missing-refusal assertion guarded behind errors.As",
-        "caught": true
-      },
-      "voided": false,
-      "verdicts": [
-        {
-          "rowId": "SC-34",
-          "verdict": "HOLDS",
-          "reason": "greenBatches carries no canary fields, so reinstated validateCanaryBookkeeping refuses and mustCompute fatals on the first line"
-        },
-        {
-          "rowId": "SC-36",
-          "verdict": "HOLDS",
-          "reason": "repB.Work.Counts is compared to {Fresh:3,Reused:6,Incomplete:1} and freshB is DeepEqual-compared to run B's own three obligations"
-        }
-      ]
-    },
-    {
-      "batchId": "batch-12",
-      "dispatchId": "dispatch-12",
-      "runId": "run-2026-09-11-0002",
+      "runId": "run-2026-09-11-0003",
       "rows": [
         "SC-25",
         "SC-26",
@@ -1126,19 +964,161 @@
         {
           "rowId": "SC-25",
           "verdict": "HOLDS",
-          "reason": "proofRefused compares decision.Reason for exact equality on manifest-incomplete:unidentifiable-read and reads-unrecorded; source-hash-only matching adopts both"
+          "reason": "the \"claim\", \"exempt-read\", \"runner\", \"toolchain\", \"policy\" and \"no-policy\" cases leave the test-file bytes identical and expect proofRefused with claim-changed:SC-11 / context-changed / runner-changed / toolchain-changed / policy-changed / policy-unspecified (all produced by evidence.Mismatch in reviewRefusal/mutationRefusal), and \"unchanged\" expects G-orders/G-pay refused manifest-incomplete:*; comparing only TestSourceSHA256 adopts every one of them, so each proofRefused flips (plus the Counts Refused:2 check)"
         },
         {
           "rowId": "SC-27",
           "verdict": "HOLDS",
-          "reason": "readyRefused on artifact-digest-mismatch after a one-byte truncation, plus ledger-invalid and codeReusedArtifactChanged, all flip to a successful publish"
+          "reason": "(a) \"tampered-past-the-accounting\": fresh unappliable row's evidence gets a trailing newline; addMutationRow's loadUnappliableEvidence has no digest check, so skipping runstate.Verify in assembleRun publishes and exit != exitError || stdout != \"\" Fatalf flips. (b)/(d) \"tampered-at-finalize\": the between hook runs after assembleRun and immediately before stageReusedArtifacts, so with the staged VerifyEvidenceDigest skipped (or VerifyFile ignoring mismatch) cliErr == nil Fatalf flips (any other refusal would flip the codeReusedArtifactChanged check). (c) \"tampered-during-adoption\": reuseBeforeAdopt fires after readPriorGroup's Verify, so dropping adopt's SHA256 equality makes reuse exit 0 and code != exitError Fatalf flips"
+        },
+        {
+          "rowId": "SC-28",
+          "verdict": "HOLDS",
+          "reason": "(a) ref.PriorRunID != prior.runID || ref.PriorRepoCommit != prior.commit ... (line 718) and ref.Basis.PriorCommit != prior.commit (731) flip for the consuming run's identity (finalize would also refuse via checkReusedIdentity, failing the VerdictPass Fatalf). (b) the twice-adopted subtest's ref.PriorRunID != prior.runID (834) and layer4.Reuse.PriorRunID != prior.runID (853) flip when the third run references the middle run instead of the producer. (c) batch.RunID != prior.runID (710, and 825 in the subtest) flips when addReviewGroup stamps the consuming runID"
+        }
+      ]
+    },
+    {
+      "batchId": "batch-8",
+      "dispatchId": "dispatch-8",
+      "runId": "run-2026-09-11-0003",
+      "rows": [
+        "SC-29"
+      ],
+      "canary": {
+        "rowId": "SC-29",
+        "kind": "synthesized",
+        "weakening": "out.Trace/out.Live freshness assertions and the resumed pending block deleted; trace repoCommit equality loosened to non-empty",
+        "caught": true
+      },
+      "voided": false,
+      "verdicts": []
+    },
+    {
+      "batchId": "batch-9",
+      "dispatchId": "dispatch-9",
+      "runId": "run-2026-09-11-0003",
+      "rows": [
+        "SC-30",
+        "SC-31",
+        "SC-32"
+      ],
+      "canary": {
+        "rowId": "SC-32",
+        "kind": "synthesized",
+        "weakening": "measured-commit equality assertions replaced with non-empty checks",
+        "caught": true
+      },
+      "voided": false,
+      "verdicts": [
+        {
+          "rowId": "SC-30",
+          "verdict": "HOLDS",
+          "reason": "\"live-answered\" asserts slices.Equal(state.Pending, wantOwed) with only the publish phase owed; re-owing the completed groups/live attempt/mutation row adds entries and flips it. Independently, finalize's pendingRefusal (finalize.go:253) refuses on any non-publish pending entry, so the retry pubProofFinalize in \"zero-written\" would exit non-OK and Fatalf instead of yielding VerdictPass"
+        },
+        {
+          "rowId": "SC-31",
+          "verdict": "HOLDS",
+          "reason": "per-path recovery (publication.go:286 git checkout -- <path>, :295 os.Remove) is pinned from both sides: \"ignored-sentinel-survives\" and \"artifact-directory-neighbours-survive\" digest ignored files inside the transcripts/artifact dirs after finalize (readyDigest Fatalfs if a RemoveAll took them), and \"assumed-unchanged-edit-survives-restore\" digests cmd/ready/main.go, which a tree-wide checkout -- ./reset --hard rewrites (git ignores CE_VALID there). Either mutation variant flips a digest assertion"
+        }
+      ]
+    },
+    {
+      "batchId": "batch-10",
+      "dispatchId": "dispatch-10",
+      "runId": "run-2026-09-11-0003",
+      "rows": [
+        "SC-33"
+      ],
+      "canary": {
+        "rowId": "SC-33",
+        "kind": "synthesized",
+        "weakening": "proofRefused and the counts/uncovered assertions dropped, leaving a decision-exists check",
+        "caught": true
+      },
+      "voided": false,
+      "verdicts": []
+    },
+    {
+      "batchId": "batch-11",
+      "dispatchId": "dispatch-11",
+      "runId": "run-2026-09-11-0003",
+      "rows": [
+        "SC-34",
+        "SC-35",
+        "SC-36"
+      ],
+      "canary": {
+        "rowId": "SC-35",
+        "kind": "synthesized",
+        "weakening": "layer4Applicable length assertion loosened to len(got) > 1 and the missing-refusal assertion guarded behind errors.As",
+        "caught": true
+      },
+      "voided": false,
+      "verdicts": [
+        {
+          "rowId": "SC-34",
+          "verdict": "HOLDS",
+          "reason": "greenBatches() are canary-free with no inheritsFrom; a reinstated validateCanaryBookkeeping refuses \"canary-free batch batch-1 does not inherit\", so mustCompute's t.Fatalf fires before the PASS/summary/Batches assertions ever run"
+        },
+        {
+          "rowId": "SC-36",
+          "verdict": "HOLDS",
+          "reason": "classifying the six adopted records as fresh makes repB.Work.Counts {9,0,...} instead of the asserted {Fresh:3, Reused:6}, freshB no longer DeepEquals logB.entries, and greet.Source != report.WorkReused t.Fatalf's"
+        }
+      ]
+    },
+    {
+      "batchId": "batch-12",
+      "dispatchId": "dispatch-12",
+      "runId": "run-2026-09-11-0003",
+      "rows": [
+        "SC-09",
+        "SC-10",
+        "SC-11",
+        "SC-12",
+        "SC-13",
+        "SC-14"
+      ],
+      "canary": {
+        "rowId": "SC-14",
+        "kind": "synthesized",
+        "weakening": "allowlist equality, SC-1 verdict, step exit-status, canary-on-disk and empty-allowlist assertions all dropped; only a non-empty env and a non-empty runDir presence check remain",
+        "caught": true
+      },
+      "voided": false,
+      "verdicts": [
+        {
+          "rowId": "SC-09",
+          "verdict": "HOLDS",
+          "reason": "the mutation makes ValidateResolved (executelive.go:186) demand a literal \"{run-id}\" in resourcePrefixes; the resolved \"scratch-handoff-resource\" has none, so execute-live refuses and runLivePipeline's exit-code Fatalf fires before the body's assertions; even if it returned, len(ev.StartSteps) != 1 (Fatalf, line 39) flips because no start step ran"
+        },
+        {
+          "rowId": "SC-10",
+          "verdict": "HOLDS",
+          "reason": "subtest 1: with no start loop ev.StartSteps is empty, so len(ev.StartSteps) != 1 Fatalf (line 143) flips; subtest 2: same Fatalf (line 197) flips, and because readiness now passes against the older reachable deployment len(ev.HealthSteps) != 0 and the LIVE-INCONCLUSIVE verdict assertion flip too"
+        },
+        {
+          "rowId": "SC-11",
+          "verdict": "HOLDS",
+          "reason": "removing the startFailed/healthFailed gate runs pl.Steps in the \"deploy fail\" and \"ready fail\" subtests, so requireBusinessNeverRan's len(ev.Steps) != 0 flips (a reduced step is recorded) and the row verdict becomes LIVE-PASS/LIVE-FAIL instead of LIVE-INCONCLUSIVE"
+        },
+        {
+          "rowId": "SC-12",
+          "verdict": "HOLDS",
+          "reason": "an early return skips pl.Cleanup and runProfileCleanup: in the start-fails and health-fails subtests the run root survives so requireOwnedCleanup's requireAbsent flips, out.CleanupOK stays false, the phase log has no \"cleanup\" line, and subtest 1's UnboundFailures DeepEqual flips because the plan-cleanup entry is never produced"
+        },
+        {
+          "rowId": "SC-13",
+          "verdict": "HOLDS",
+          "reason": "liveRunID appends the PID, so the mutated cleanup argv becomes cleanup livetruth-confined-a-; recipe.py resolves that to a non-existent root, prints absent:true and exits 0 (cleanupOK stays true), but run A's real root /tmp/test-design-workflow-livetruth-confined-a-<pid> is never removed, so requireAbsent(t, \"run A after its own cleanup\", redesignRunRoot(runA)) flips"
         }
       ]
     },
     {
       "batchId": "rb-01",
-      "dispatchId": "dispatch-rb-01",
-      "runId": "run-2026-09-11-0002",
+      "dispatchId": "dispatch-13",
+      "runId": "run-2026-09-11-0003",
       "rows": [
         "SC-01"
       ],
@@ -1148,14 +1128,14 @@
         {
           "rowId": "SC-01",
           "verdict": "HOLDS",
-          "reason": "the fixture retires the highest SC; ignoring inactive owners returns 2 and the Next != 3 assertion flips"
+          "reason": "fixture registers SC-01 active and SC-02 retired (Owner.Active=false) as the highest number; the next-id handler calls Registry.NextID, so skipping inactive owners yields highest=1 and Next=2, flipping the unprefixed.Next != 3 assertion (t.Errorf \"want 3\")"
         }
       ]
     },
     {
       "batchId": "rb-05",
-      "dispatchId": "dispatch-rb-05",
-      "runId": "run-2026-09-11-0002",
+      "dispatchId": "dispatch-14",
+      "runId": "run-2026-09-11-0003",
       "rows": [
         "SC-05"
       ],
@@ -1165,14 +1145,14 @@
         {
           "rowId": "SC-05",
           "verdict": "HOLDS",
-          "reason": "wantReason(t, r, \"2\", \"SC-03\", verdict) requires a layer-2 blocked reason whose code is the critic verdict; deleting the branch removes it"
+          "reason": "greenInputs is all-green (PASS with zero reasons); the test overrides batch-2's SC-03 verdict to WEAK/VACUOUS/MISSING and asserts Verdict==\"BLOCKED\" plus a layer-2 reason keyed {row:SC-03, code:<verdict>} whose Detail carries the critic reason. Deleting the case body in deriveLayer2 (internal/report/verdict.go:280-285) leaves no reason, so wantVerdict fails on PASS; deleting the case label instead routes to default, emitting code \"invalid-verdict\", so wantReason(t, r, \"2\", \"SC-03\", verdict) fatals. Either form of the mutation flips an assertion"
         }
       ]
     },
     {
       "batchId": "rb-07",
-      "dispatchId": "dispatch-rb-07",
-      "runId": "run-2026-09-11-0002",
+      "dispatchId": "dispatch-15",
+      "runId": "run-2026-09-11-0003",
       "rows": [
         "SC-07"
       ],
@@ -1182,31 +1162,31 @@
         {
           "rowId": "SC-07",
           "verdict": "HOLDS",
-          "reason": "the first case's exact want string requires SC-1/unit and SC-3/integration, which level-only filtering drops"
+          "reason": "the \"required journeys widen the set past smoke and e2e\" case asserts the exact rendered set \"SC-1/unit, SC-2/smoke, SC-3/integration, SC-4/e2e\"; if ApplicableRows (internal/live/applicable.go:52) kept only the smoke/e2e level gate under LiveRequired, the journeyed SC-1/unit and SC-3/integration rows would drop and got becomes \"SC-2/smoke, SC-4/e2e\", so the equality assertion flips (the retired/unknown case fails the same way, losing SC-3/integration)"
         }
       ]
     },
     {
       "batchId": "rb-14",
-      "dispatchId": "dispatch-rb-14",
-      "runId": "run-2026-09-11-0002",
+      "dispatchId": "dispatch-16",
+      "runId": "run-2026-09-11-0003",
       "rows": [
         "SC-14"
       ],
-      "inheritsFrom": "batch-4",
+      "inheritsFrom": "batch-12",
       "voided": false,
       "verdicts": [
         {
           "rowId": "SC-14",
           "verdict": "HOLDS",
-          "reason": "len(run.env)!=1 || !HasPrefix(PATH=) fails under the full parent environment, and the printenv exit-code 1 predicate flips too"
+          "reason": "run.env is built from live.SanitizedEnv(parentEnv, allowlist) at executelive.go:477 and is the exact slice passed to ExecuteStep (line 707); returning the full parent env flips len(run.env) != 1 (os.Environ() has many entries), makes /usr/bin/printenv find the t.Setenv canary so ExitStatus becomes 0 and verdicts[\"SC-1\"] != verdictPass, and flips len(empty.env) != 0 for the empty-allowlist profile — four assertions fail"
         }
       ]
     },
     {
       "batchId": "rb-16",
-      "dispatchId": "dispatch-rb-16",
-      "runId": "run-2026-09-11-0002",
+      "dispatchId": "dispatch-17",
+      "runId": "run-2026-09-11-0003",
       "rows": [
         "SC-16"
       ],
@@ -1216,14 +1196,14 @@
         {
           "rowId": "SC-16",
           "verdict": "HOLDS",
-          "reason": "the failure-then-success case asserts LIVE-FAIL; last-write-wins overwrites it with LIVE-PASS"
+          "reason": "the run.verdicts[\"SC-1\"] != tc.want check in the \"failure then success\" subcase flips: with mergeVerdict reduced to unconditional assignment (executelive.go:741-746) the later passing step overwrites FAIL with PASS, and \"failure then inconclusive\" likewise flips to LIVE-INCONCLUSIVE, so the test fails on real end state rather than a mock"
         }
       ]
     },
     {
       "batchId": "rb-21",
-      "dispatchId": "dispatch-rb-21",
-      "runId": "run-2026-09-11-0002",
+      "dispatchId": "dispatch-18",
+      "runId": "run-2026-09-11-0003",
       "rows": [
         "SC-21"
       ],
@@ -1233,31 +1213,31 @@
         {
           "rowId": "SC-21",
           "verdict": "HOLDS",
-          "reason": "a truncating write corrupts ledger.json so Load fatals, and the held-reader assertions bind the rename semantics directly"
+          "reason": "with a truncating write, the interrupted g2 save leaves ledger.json as half a JSON document, so fresh.Load() at line 48 returns malformed-JSON and the Fatalf fires (or, if the mutant bypasses the checkpointWrite seam entirely, Start g2 returns nil and the !errors.Is(err, interrupted) Fatalf at line 41 fires); independently, the held-reader block flips — the pre-opened fd would read the rewritten 3-record file, failing len(opened.Records) != 2 and Current(&opened, ..., \"g3\") != nil at lines 132-137"
         }
       ]
     },
     {
       "batchId": "rb-26",
-      "dispatchId": "dispatch-rb-26",
-      "runId": "run-2026-09-11-0002",
+      "dispatchId": "dispatch-19",
+      "runId": "run-2026-09-11-0003",
       "rows": [
         "SC-26"
       ],
-      "inheritsFrom": "batch-12",
+      "inheritsFrom": "batch-7",
       "voided": false,
       "verdicts": [
         {
           "rowId": "SC-26",
           "verdict": "HOLDS",
-          "reason": "proofEveryRecordRefused asserts all six prior records refused with the widening reason and Refused:6 counts in the shared, production and unknown subtests"
+          "reason": "the \"shared between groups\" subtest asserts changed.Class == changeShared and proofEveryRecordRefused(\"module-changed:payments/payments_test.go\"), which requires all 6 records refused with Counts{Refused: 6}; restricting invalidation to the file's owners (G-orders/G-pay) leaves G-ship, SC-10, SC-12, SC-07 reused, flipping that helper's per-record and counts assertions — the \"unknown\" subtest's changeUnknown class check and proofEveryRecordRefused(\"unknown-ownership:...\") flip the same way for the unowned case"
         }
       ]
     },
     {
       "batchId": "rb-29",
-      "dispatchId": "dispatch-rb-29",
-      "runId": "run-2026-09-11-0002",
+      "dispatchId": "dispatch-20",
+      "runId": "run-2026-09-11-0003",
       "rows": [
         "SC-29"
       ],
@@ -1267,14 +1247,14 @@
         {
           "rowId": "SC-29",
           "verdict": "HOLDS",
-          "reason": "out.Trace.Reused/out.Live.Reused with reasonFreshRequired, plus the resumed live pending entry, flip as soon as generic reuse may answer for them"
+          "reason": "the \"isolated\" subtest asserts out.Trace.Reused/out.Live.Reused are false with reason \"fresh-required\" (reuse.go), and then reads the ledger back via readyResume, requiring Live.Status == \"none\" and a KindLiveAttempt pending entry with \"never-started\" (resume.go only emits that when no current live-attempt record exists); a mutation that returns or adopts run A's trace/live across revisions flips the decision checks, and one that writes the prior live attempt into runB1's ledger flips the resume status/pending checks — the \"production\" subtest additionally pins the report to headB2 with reason \"3\"/LIVE-FAIL, so an adopted LIVE-PASS from run A would fail there too"
         }
       ]
     },
     {
       "batchId": "rb-32",
-      "dispatchId": "dispatch-rb-32",
-      "runId": "run-2026-09-11-0002",
+      "dispatchId": "dispatch-21",
+      "runId": "run-2026-09-11-0003",
       "rows": [
         "SC-32"
       ],
@@ -1284,14 +1264,14 @@
         {
           "rowId": "SC-32",
           "verdict": "HOLDS",
-          "reason": "after the publication commit, out.MeasuredCommit and the report headCommit must stay the traced commit, not afterPublish"
+          "reason": "the mutation lands in measuredCommit (cmd/test-design-verifier/publication.go:167, return ledgerCommit -> return head); after the publication commit head == afterPublish != measured, so the second finalize's out.MeasuredCommit != measured check, the acknowledged.HeadCommit != measured report check, and state.Publication.MeasuredCommit != measured (fed from publishInputs.MeasuredCommit via resume.go:357) all flip to t.Errorf; the first finalize (head == opened) is unaffected, which is what isolates the mutation"
         }
       ]
     },
     {
       "batchId": "rb-33",
-      "dispatchId": "dispatch-rb-33",
-      "runId": "run-2026-09-11-0002",
+      "dispatchId": "dispatch-22",
+      "runId": "run-2026-09-11-0003",
       "rows": [
         "SC-33"
       ],
@@ -1301,14 +1281,14 @@
         {
           "rowId": "SC-33",
           "verdict": "HOLDS",
-          "reason": "proofRefused pins legacy-no-manifest and manifest-version-unsupported, and Counts.Refused==1/Reused==0"
+          "reason": "the \"no-manifest\" subtest's proofRefused(..., \"legacy-no-manifest\") flips: with a manifest reconstructed from current inputs, readPriorGroup (reuse.go:502/520) no longer sets group.reason, the constructed manifest passes version/incomplete/probe checks at the same commit (as the sibling \"unchanged\" case proves adoption does), so G-ship comes back Reused=true, Reason=\"\", Counts.Refused drops to 0, and the ship rows vanish from resumed.Review.Uncovered — three assertions fail"
         }
       ]
     },
     {
       "batchId": "rb-35",
-      "dispatchId": "dispatch-rb-35",
-      "runId": "run-2026-09-11-0002",
+      "dispatchId": "dispatch-23",
+      "runId": "run-2026-09-11-0003",
       "rows": [
         "SC-35"
       ],
@@ -1318,128 +1298,111 @@
         {
           "rowId": "SC-35",
           "verdict": "HOLDS",
-          "reason": "layer4Applicable(active,nil) must be exactly [SC-02], and the missing subtest requires CodeMissingVerdict naming SC-02"
-        }
-      ]
-    },
-    {
-      "batchId": "rb-28",
-      "dispatchId": "dispatch-rb-28",
-      "runId": "run-2026-09-11-0002",
-      "rows": [
-        "SC-28"
-      ],
-      "inheritsFrom": "batch-12",
-      "voided": false,
-      "verdicts": [
-        {
-          "rowId": "SC-28",
-          "verdict": "HOLDS",
-          "reason": "the published review and mutation copies must carry art.RunID/RepoCommit/SourceSHA256 and ev.RunID equal to the prior run, and batch.RunID, ref.PriorRunID, ref.PriorRepoCommit and ref.Basis.PriorCommit equal the prior identity; restamping with the consuming run and HEAD flips them"
+          "reason": "the top-level layer4Applicable(active, nil) check flips: with r.Risk == \"high\" removed and no supplied mutations, the result is empty, so len(got) != 1 triggers t.Fatalf. The \"missing\" subtest also flips independently — with in.Mutations = nil the mutated function yields no applicable rows, validateLayer4 never raises CodeMissingVerdict for SC-02, and the errors.As(err, &re) assertion fails"
         }
       ]
     }
   ],
   "transcripts": [
     {
-      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0002/live-evidence.json",
-      "sha256": "e7b4982499dec0dea7d50a143f95cdfc2e2325f81e753f0bf401e1ed16e992a8"
+      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0003/live-evidence.json",
+      "sha256": "3913a0fa8fea016c1592b6addedcb777f90a82871f75c2bec9eb77f9c1a6d07c"
     },
     {
-      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0002/mutation-SC-03.json",
-      "sha256": "5c2717092678f170c3ceaad9f1342ef7da8d0844361c9c2ae74ca45176f97f2f"
+      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0003/mutation-SC-03.json",
+      "sha256": "161bbe8bc38b0df1a65fe1205710a7350ec5021747173e3cce688afb2489ee58"
     },
     {
-      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0002/mutation-SC-11.json",
-      "sha256": "757c95bc7efa4cd58584826e970f292a714a086472f30675fcbecd2f4e508618"
+      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0003/mutation-SC-11.json",
+      "sha256": "b251324e91b4d767490a69a152346a718e9a89cbb2326ae9cca089cbf6d0ac40"
     },
     {
-      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0002/mutation-SC-12.json",
-      "sha256": "c6e6b1378d977caf1e654ac8b22420898f02783457064972cfa80fcfabd8457d"
+      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0003/mutation-SC-12.json",
+      "sha256": "69e9e10bcce1216c5eff1144162f900923c1763aeef151e6199b551bdd3f91bd"
     },
     {
-      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0002/mutation-SC-13.json",
-      "sha256": "07b25f27757c85a34df4b9e472179ea06147d1979110cd0da4692923c065ddcf"
+      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0003/mutation-SC-13.json",
+      "sha256": "dfd5a4e790ae915af332655e7d2ac93819a0fcd46895ef0f180046bb5268ff4f"
     },
     {
-      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0002/mutation-SC-14.json",
-      "sha256": "6cc63119fcdde3be3240a9047360d861f48dd41a42fd92ce4b2076bc5c763042"
+      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0003/mutation-SC-14.json",
+      "sha256": "af77cc782652ae51bf77a9092571cfd4dcb7fb9a2d05d8dcaced387658353def"
     },
     {
-      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0002/mutation-SC-15.json",
-      "sha256": "14227677b0138aebd46674603b381864412a16c3f8a5a94135db401eac92f974"
+      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0003/mutation-SC-15.json",
+      "sha256": "6b9b1622ef41bf11debee414dcde3c34a22f004d81091c3dc612c236d502893a"
     },
     {
-      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0002/mutation-SC-16.json",
-      "sha256": "83ab34b9cc3584e2cbaaae42f4624f12ae67b1347f26ddf5522529197b0154f2"
+      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0003/mutation-SC-16.json",
+      "sha256": "c2040e110e6c27be296bb4734ce0ac62533bf1fe186699cded03a249dd87ace7"
     },
     {
-      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0002/mutation-SC-17.json",
-      "sha256": "013db1fe44cf250ca5a0f1b847e1ec4e03d378a3331bd4f8a6ced00b9e62cb54"
+      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0003/mutation-SC-17.json",
+      "sha256": "16817aae22ea824aa33254406b5eae11ee37136a426e3f5fa6e04efc2ab45127"
     },
     {
-      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0002/mutation-SC-18.json",
-      "sha256": "7abda9364b3fc230957335226735b4c1eb15cdafb1be854f0e9c530218f7a079"
+      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0003/mutation-SC-18.json",
+      "sha256": "f0a3c30324a88d5b6a0053056f6a389142349795da398116d14db9c4323e1cf5"
     },
     {
-      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0002/mutation-SC-20.json",
-      "sha256": "976125dfbedb42aa1a0ead281053a7713a77aa9197837d6b807bde2ed8904d7d"
+      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0003/mutation-SC-20.json",
+      "sha256": "b09a892e757c842c3aa78f4cca14a6c091ce6e26a261ae1443693cedb84140ea"
     },
     {
-      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0002/mutation-SC-21.json",
-      "sha256": "4a94f050fa2371d706ba53d6b3a84e12dc1f0c026bb4c8971c02336c3779ad78"
+      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0003/mutation-SC-21.json",
+      "sha256": "db5bdb6a9c45218431436b20ac4563c4762dbb3c2782ffb00639f81bfc61176b"
     },
     {
-      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0002/mutation-SC-22.json",
-      "sha256": "e3b05851f4b96117e4a399e4a2bd36a263c7ef992cff60e3e484161dc8c3eb48"
+      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0003/mutation-SC-22.json",
+      "sha256": "498a4a678cf54784484119c80e011db5dbb640013529ae87d197a04882874709"
     },
     {
-      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0002/mutation-SC-23.json",
-      "sha256": "856fa655ee3dae97a1453097f0746aebfdb28f032e67f39f9cf92c20dfe36ce8"
+      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0003/mutation-SC-23.json",
+      "sha256": "237bf13fbea0f38e60468edccaa06635b20774a0522b031233f38801e841023c"
     },
     {
-      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0002/mutation-SC-24.json",
-      "sha256": "892de8424aa0256c40fd911eec799d5e8f79f9b785acd45907b4136b8d025381"
+      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0003/mutation-SC-24.json",
+      "sha256": "0be3c65e6e5a4298226fd257bfc0948528f386c52b38c177369dec9dc20e4367"
     },
     {
-      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0002/mutation-SC-26.json",
-      "sha256": "e74dae892494327ec25ad39ee289d9dda100a1a5bc45805a9ffef59306383e8b"
+      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0003/mutation-SC-26.json",
+      "sha256": "94a6fd8a106068b08bd326143678a02993418dc17664221c5f699c132d8a9ba2"
     },
     {
-      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0002/mutation-SC-27.json",
-      "sha256": "6accd14bcb4c5d321695486deaf92098b76e9a4839a9fe5698671d20f9a05964"
+      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0003/mutation-SC-27.json",
+      "sha256": "378230703e5c796f0b1a3a5a3bba34c62b2dd36b10b63e2f1e60158136d76bdf"
     },
     {
-      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0002/mutation-SC-28.json",
-      "sha256": "0a0cf5c0a846fdae68e89825d48e4d2963d8dae128dc529db1c6c27275964b00"
+      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0003/mutation-SC-28.json",
+      "sha256": "3d8e089587c8e625df3083cc61e03426bd46175e16beb71f40db4c520cdd62f1"
     },
     {
-      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0002/mutation-SC-29.json",
-      "sha256": "bfb65ee80984aa4c31bd62f1ec4c558504db8fb31a18f58e8af9a39f87aa1c15"
+      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0003/mutation-SC-29.json",
+      "sha256": "43db315a246c5f211bf3a0f3abd0faf2e0e3bc7c321143bea677f0ab484af2e6"
     },
     {
-      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0002/mutation-SC-30.json",
-      "sha256": "68114c91cf394546b721bff991f543ce78d1549932d5ef52f0f4e3b28a0621f0"
+      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0003/mutation-SC-30.json",
+      "sha256": "87c9cc77b1fc5573e2827df392183543bc782143871f0dec1b0f8af2bc8d2dbb"
     },
     {
-      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0002/mutation-SC-31.json",
-      "sha256": "420252a6aaa2b066840456fd25507d5ccf592b9878c55dfb9a1aa8b2082c257c"
+      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0003/mutation-SC-31.json",
+      "sha256": "f8aec1e9ce469cb4c08667b06c0b3c3be286297fc631a1d69dc63402f6006a58"
     },
     {
-      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0002/mutation-SC-32.json",
-      "sha256": "a14a14f3b778fdcc4edd824865f44d6c7d4fb3dc3dc8bbfa8f7a8121a8b3b7a9"
+      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0003/mutation-SC-32.json",
+      "sha256": "c84616f94e2e171b473ce36e396bfb176f1837bb971cf2186bd7a0ad45dd0fe6"
     },
     {
-      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0002/mutation-SC-35.json",
-      "sha256": "43a6b490f67baf173786abb020d1faa7774001ad8cc79fdc270dca500f2af433"
+      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0003/mutation-SC-35.json",
+      "sha256": "12e05299db91f4371e7b4128d1cc630873b09a644d3182d59be9121444b1a998"
     },
     {
-      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0002/trace-evidence.json",
-      "sha256": "fb2544058fbcbcbc82fa1dc3e996fb73c9c6eb4f093166a7f473938d6fd22cf4"
+      "path": "docs/superpowers/coverage/transcripts/run-2026-09-11-0003/trace-evidence.json",
+      "sha256": "789b956168b7e81c126babaaa2fbd80cd1d33e09573eab9a372ff954f09bf29c"
     }
   ],
   "toolVersions": {
     "go": "go1.26.3"
   },
-  "finishedAt": "2026-09-11T09:26:03Z"
+  "finishedAt": "2026-09-11T11:06:38Z"
 }

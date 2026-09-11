@@ -1,0 +1,40 @@
+{
+  "schemaVersion": "1",
+  "verifierVersion": "0.6.0",
+  "runId": "run-2026-09-11-0003",
+  "rowID": "SC-21",
+  "identity": {
+    "scope": "test-design/internal/runstate",
+    "name": "TestCheckpoint_InterruptedReplacementKeepsPriorCompletion"
+  },
+  "runnerKind": "go",
+  "suiteCommand": [
+    "go",
+    "test",
+    "-count=1",
+    "-json",
+    "./..."
+  ],
+  "targetCommand": [
+    "go",
+    "test",
+    "-count=1",
+    "-json",
+    "test-design/internal/runstate",
+    "-run",
+    "^TestCheckpoint_InterruptedReplacementKeepsPriorCompletion$"
+  ],
+  "sites": [
+    {
+      "site": "site-1",
+      "outcome": "caught",
+      "diffPath": "/private/var/folders/mj/95h4sfv90kdfh4l4qb32gjth0000gn/T/test-design-verifier-3939608299/runs/run-2026-09-11-0003/site-1.diff",
+      "diffSha256": "5603c799dce5f037ed36078afc54fc6c9b578b3d1cac23ed741acd07c6d4c44c",
+      "mutatedRunDir": "/private/var/folders/mj/95h4sfv90kdfh4l4qb32gjth0000gn/T/test-design-verifier-3939608299/runs/run-2026-09-11-0003/site-1-mutated",
+      "mutatedExitStatus": 1,
+      "cleanRunDir": "/private/var/folders/mj/95h4sfv90kdfh4l4qb32gjth0000gn/T/test-design-verifier-3939608299/runs/run-2026-09-11-0003/site-1-clean",
+      "cleanExitStatus": 0
+    }
+  ],
+  "snapshotEqual": true
+}
