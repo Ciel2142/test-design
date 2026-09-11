@@ -1,0 +1,80 @@
+{
+  "schemaVersion": "1",
+  "verifierVersion": "0.6.0",
+  "runId": "run-2026-09-11-0002",
+  "rowID": "SC-18",
+  "identity": {
+    "scope": "test-design/cmd/test-design-verifier",
+    "name": "TestLiveTruth_IncompleteOutputIsNotProof"
+  },
+  "runnerKind": "go",
+  "suiteCommand": [
+    "go",
+    "test",
+    "-count=1",
+    "-json",
+    "./..."
+  ],
+  "targetCommand": [
+    "go",
+    "test",
+    "-count=1",
+    "-json",
+    "test-design/cmd/test-design-verifier",
+    "-run",
+    "^TestLiveTruth_IncompleteOutputIsNotProof$"
+  ],
+  "sites": [
+    {
+      "site": "site-1",
+      "outcome": "caught",
+      "diffPath": "/private/var/folders/mj/95h4sfv90kdfh4l4qb32gjth0000gn/T/test-design-verifier-2330167543/runs/run-2026-09-11-0002/site-1.diff",
+      "diffSha256": "33537bd4959508ec32612e8a421bac2dd8bc7efc8f97b4848fbaecf978a1edfa",
+      "mutatedRunDir": "/private/var/folders/mj/95h4sfv90kdfh4l4qb32gjth0000gn/T/test-design-verifier-2330167543/runs/run-2026-09-11-0002/site-1-mutated",
+      "mutatedExitStatus": 1,
+      "cleanRunDir": "/private/var/folders/mj/95h4sfv90kdfh4l4qb32gjth0000gn/T/test-design-verifier-2330167543/runs/run-2026-09-11-0002/site-1-clean",
+      "cleanExitStatus": 0
+    },
+    {
+      "site": "site-2",
+      "outcome": "caught",
+      "diffPath": "/private/var/folders/mj/95h4sfv90kdfh4l4qb32gjth0000gn/T/test-design-verifier-2330167543/runs/run-2026-09-11-0002/site-2.diff",
+      "diffSha256": "eaf840eec980a19f70215f410d7d34b4a7ad44ca2b5b9b77bcda45caeca44289",
+      "mutatedRunDir": "/private/var/folders/mj/95h4sfv90kdfh4l4qb32gjth0000gn/T/test-design-verifier-2330167543/runs/run-2026-09-11-0002/site-2-mutated",
+      "mutatedExitStatus": 1,
+      "cleanRunDir": "/private/var/folders/mj/95h4sfv90kdfh4l4qb32gjth0000gn/T/test-design-verifier-2330167543/runs/run-2026-09-11-0002/site-2-clean",
+      "cleanExitStatus": 0
+    },
+    {
+      "site": "site-3",
+      "outcome": "caught",
+      "diffPath": "/private/var/folders/mj/95h4sfv90kdfh4l4qb32gjth0000gn/T/test-design-verifier-2330167543/runs/run-2026-09-11-0002/site-3.diff",
+      "diffSha256": "403703f3e5128405c783d41c9f6d5da11cc9efc7f52ae4a48f158afc733f7a08",
+      "mutatedRunDir": "/private/var/folders/mj/95h4sfv90kdfh4l4qb32gjth0000gn/T/test-design-verifier-2330167543/runs/run-2026-09-11-0002/site-3-mutated",
+      "mutatedExitStatus": 1,
+      "cleanRunDir": "/private/var/folders/mj/95h4sfv90kdfh4l4qb32gjth0000gn/T/test-design-verifier-2330167543/runs/run-2026-09-11-0002/site-3-clean",
+      "cleanExitStatus": 0
+    },
+    {
+      "site": "site-4",
+      "outcome": "caught",
+      "diffPath": "/private/var/folders/mj/95h4sfv90kdfh4l4qb32gjth0000gn/T/test-design-verifier-2330167543/runs/run-2026-09-11-0002/site-4.diff",
+      "diffSha256": "4949d54fc62474aa46ef8c8fdf59a73fc19566f0c4c3b561d4e7d6f693610d89",
+      "mutatedRunDir": "/private/var/folders/mj/95h4sfv90kdfh4l4qb32gjth0000gn/T/test-design-verifier-2330167543/runs/run-2026-09-11-0002/site-4-mutated",
+      "mutatedExitStatus": 1,
+      "cleanRunDir": "/private/var/folders/mj/95h4sfv90kdfh4l4qb32gjth0000gn/T/test-design-verifier-2330167543/runs/run-2026-09-11-0002/site-4-clean",
+      "cleanExitStatus": 0
+    },
+    {
+      "site": "site-5",
+      "outcome": "caught",
+      "diffPath": "/private/var/folders/mj/95h4sfv90kdfh4l4qb32gjth0000gn/T/test-design-verifier-2330167543/runs/run-2026-09-11-0002/site-5.diff",
+      "diffSha256": "a02adadbe0f26bd932dfa60015f4d19d0db86e9fd623e9bd0c9aec6faf5639d6",
+      "mutatedRunDir": "/private/var/folders/mj/95h4sfv90kdfh4l4qb32gjth0000gn/T/test-design-verifier-2330167543/runs/run-2026-09-11-0002/site-5-mutated",
+      "mutatedExitStatus": 1,
+      "cleanRunDir": "/private/var/folders/mj/95h4sfv90kdfh4l4qb32gjth0000gn/T/test-design-verifier-2330167543/runs/run-2026-09-11-0002/site-5-clean",
+      "cleanExitStatus": 0
+    }
+  ],
+  "snapshotEqual": true
+}
