@@ -430,6 +430,28 @@ func TestValidate_LegacyMutationEvidenceWithoutEnumeratedSitesAccepted(t *testin
 	}
 }
 
+func TestValidate_MutationEvidenceEnumeratedSitesMatchAccepted(t *testing.T) {
+	in := baseInputs()
+	in.Mutations[0].Evidence.EnumeratedSites = []string{"x"}
+	if err := Validate(in); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+}
+
+func TestValidate_MutationEvidenceEnumeratedSitesSameCountDifferentLabelRefused(t *testing.T) {
+	in := baseInputs()
+	in.Mutations[0].Evidence.EnumeratedSites = []string{"y"}
+	wantRefusal(t, Validate(in), CodeMutationSitesIncomplete)
+}
+
+func TestValidate_ReusedMutationEvidenceWithMismatchedEnumeratedSitesAccepted(t *testing.T) {
+	in := reusedMutationInputs()
+	in.Mutations[0].Evidence.EnumeratedSites = []string{"y"}
+	if err := Validate(in); err != nil {
+		t.Fatalf("Validate over a reused mutation entry: %v", err)
+	}
+}
+
 func TestValidateMissingAttemptEvidence(t *testing.T) {
 	in := baseInputs()
 	in.Mutations[0].Evidence = nil

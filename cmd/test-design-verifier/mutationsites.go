@@ -32,7 +32,7 @@ func siteRegistryRefusal(op string, err error) *cliError {
 // sets st.Enumerated, which only reaches disk the next time the caller
 // writes st.
 func resolveRowSites(op string, st *mutation.State, requestSites []string, site string) *cliError {
-	registered, err := mutation.ResolveEnumerated(st.Enumerated, requestSites, site)
+	registered, err := mutation.ResolveEnumerated(st.Enumerated, evaluatedSiteLabels(st.Sites), requestSites, site)
 	if err != nil {
 		return siteRegistryRefusal(op, err)
 	}

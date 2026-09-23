@@ -6,19 +6,40 @@ import (
 )
 
 func TestResolveEnumeratedFirstCallMissingSites(t *testing.T) {
-	_, err := ResolveEnumerated(nil, nil, "site-a")
+	_, err := ResolveEnumerated(nil, nil, nil, "site-a")
 	if !errors.Is(err, ErrMissingSites) {
 		t.Errorf("err = %v, want ErrMissingSites", err)
 	}
 }
 
 func TestResolveEnumeratedFirstCallEstablishesTheList(t *testing.T) {
-	got, err := ResolveEnumerated(nil, []string{"site-a", "site-b"}, "site-a")
+	got, err := ResolveEnumerated(nil, nil, []string{"site-a", "site-b"}, "site-a")
 	if err != nil {
 		t.Fatalf("ResolveEnumerated: %v", err)
 	}
 	if len(got) != 2 || got[0] != "site-a" || got[1] != "site-b" {
 		t.Errorf("got = %v, want [site-a site-b]", got)
+	}
+}
+
+// TestResolveEnumeratedFirstRegistrationMissingEvaluatedSiteRefused covers
+// R10: a row a pre-1.3.0 verifier left mid-way already has evaluated sites
+// with no registered list; the first registration under 1.3.0 must not omit
+// one.
+func TestResolveEnumeratedFirstRegistrationMissingEvaluatedSiteRefused(t *testing.T) {
+	_, err := ResolveEnumerated(nil, []string{"site-a"}, []string{"site-b"}, "site-b")
+	if !errors.Is(err, ErrEnumerationChanged) {
+		t.Errorf("err = %v, want ErrEnumerationChanged", err)
+	}
+}
+
+func TestResolveEnumeratedFirstRegistrationCoveringEvaluatedSiteAccepted(t *testing.T) {
+	got, err := ResolveEnumerated(nil, []string{"site-a"}, []string{"site-a", "site-b"}, "site-b")
+	if err != nil {
+		t.Fatalf("ResolveEnumerated: %v", err)
+	}
+	if len(got) != 2 {
+		t.Errorf("got = %v, want both sites registered", got)
 	}
 }
 
@@ -36,7 +57,7 @@ func TestResolveEnumeratedInvalidSites(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			_, err := ResolveEnumerated(nil, c.sites, c.site)
+			_, err := ResolveEnumerated(nil, nil, c.sites, c.site)
 			if !errors.Is(err, ErrInvalidSites) {
 				t.Errorf("err = %v, want ErrInvalidSites", err)
 			}
@@ -46,7 +67,7 @@ func TestResolveEnumeratedInvalidSites(t *testing.T) {
 
 func TestResolveEnumeratedLaterCallOmittingSitesKeepsExisting(t *testing.T) {
 	existing := []string{"site-a", "site-b"}
-	got, err := ResolveEnumerated(existing, nil, "site-b")
+	got, err := ResolveEnumerated(existing, nil, nil, "site-b")
 	if err != nil {
 		t.Fatalf("ResolveEnumerated: %v", err)
 	}
@@ -57,7 +78,7 @@ func TestResolveEnumeratedLaterCallOmittingSitesKeepsExisting(t *testing.T) {
 
 func TestResolveEnumeratedLaterCallSameSetDifferentOrderAccepted(t *testing.T) {
 	existing := []string{"site-a", "site-b"}
-	got, err := ResolveEnumerated(existing, []string{"site-b", "site-a"}, "site-a")
+	got, err := ResolveEnumerated(existing, nil, []string{"site-b", "site-a"}, "site-a")
 	if err != nil {
 		t.Fatalf("ResolveEnumerated: %v", err)
 	}
@@ -68,7 +89,7 @@ func TestResolveEnumeratedLaterCallSameSetDifferentOrderAccepted(t *testing.T) {
 
 func TestResolveEnumeratedLaterCallDifferentSetRefused(t *testing.T) {
 	existing := []string{"site-a", "site-b"}
-	_, err := ResolveEnumerated(existing, []string{"site-b", "site-c"}, "site-b")
+	_, err := ResolveEnumerated(existing, nil, []string{"site-b", "site-c"}, "site-b")
 	if !errors.Is(err, ErrEnumerationChanged) {
 		t.Errorf("err = %v, want ErrEnumerationChanged", err)
 	}
@@ -107,5 +128,8 @@ func TestRowComplete(t *testing.T) {
 	}
 	if !RowComplete(registered, []string{"site-b", "site-a"}) {
 		t.Error("RowComplete = false, want the evaluated order irrelevant")
+	}
+	if RowComplete(registered, []string{"site-a", "site-b", "site-c"}) {
+		t.Error("RowComplete = true, want false when evaluated carries a site outside the registered set")
 	}
 }

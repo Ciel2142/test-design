@@ -26,8 +26,9 @@ type State struct {
 	WorktreePath  string          `json:"worktreePath"`
 	Snapshot      json.RawMessage `json:"snapshot"`
 	Sites         []SiteOutcome   `json:"sites"`
-	// Enumerated is the row's registered site list, set once from the first
-	// evaluate-mutation call's sites and never rewritten by recover-mutation.
+	// Enumerated is the row's registered site list. It reaches disk on the
+	// first evaluate-mutation call whose diff clears policing, and is never
+	// rewritten by recover-mutation.
 	Enumerated []string `json:"enumerated,omitempty"`
 	// Started marks the site an evaluation is inside. It is written before
 	// the first run that touches the worktree and cleared only by that

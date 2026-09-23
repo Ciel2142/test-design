@@ -19,7 +19,10 @@ var (
 // when the row has none yet, or existing again when requestSites repeats it
 // as a set. A requestSites that disagrees with an existing list, in either
 // content or membership of site, is refused before existing is ever touched.
-func ResolveEnumerated(existing, requestSites []string, site string) ([]string, error) {
+// First registration is also refused if it omits a site alreadyEvaluated
+// carries: a row a pre-1.3.0 verifier left mid-way already has evaluated
+// sites with no registered list of their own.
+func ResolveEnumerated(existing, alreadyEvaluated, requestSites []string, site string) ([]string, error) {
 	if len(requestSites) == 0 {
 		if len(existing) == 0 {
 			return nil, ErrMissingSites
@@ -29,11 +32,14 @@ func ResolveEnumerated(existing, requestSites []string, site string) ([]string, 
 	if err := validateSiteLabels(requestSites, site); err != nil {
 		return nil, err
 	}
-	if len(existing) > 0 && !sitesEqual(existing, requestSites) {
-		return nil, fmt.Errorf("%w: got %v, want %v", ErrEnumerationChanged, requestSites, existing)
-	}
 	if len(existing) > 0 {
+		if !sitesEqual(existing, requestSites) {
+			return nil, fmt.Errorf("%w: got %v, want %v", ErrEnumerationChanged, requestSites, existing)
+		}
 		return existing, nil
+	}
+	if missing := remaining(alreadyEvaluated, requestSites); len(missing) > 0 {
+		return nil, fmt.Errorf("%w: sites %v omits already-evaluated site(s) %v", ErrEnumerationChanged, requestSites, missing)
 	}
 	return requestSites, nil
 }
@@ -77,43 +83,39 @@ func CheckSitesRemaining(registered, evaluated []string, site string, lastSite b
 	if !lastSite {
 		return nil
 	}
-	done := make(map[string]bool, len(evaluated)+1)
-	for _, s := range evaluated {
-		done[s] = true
-	}
-	done[site] = true
-	var remaining []string
-	for _, s := range registered {
-		if !done[s] {
-			remaining = append(remaining, s)
-		}
-	}
-	if len(remaining) > 0 {
-		return fmt.Errorf("%w: %s", ErrSitesRemaining, strings.Join(remaining, ", "))
+	left := remaining(registered, append(append([]string{}, evaluated...), site))
+	if len(left) > 0 {
+		return fmt.Errorf("%w: %s", ErrSitesRemaining, strings.Join(left, ", "))
 	}
 	return nil
 }
 
-// RowComplete reports whether every registered site has an evaluated
-// outcome, independent of the order either list carries.
+// RowComplete reports whether evaluated is exactly the registered set, not
+// merely a superset of it.
 func RowComplete(registered, evaluated []string) bool {
-	if len(evaluated) < len(registered) {
-		return false
-	}
-	done := make(map[string]bool, len(evaluated))
-	for _, s := range evaluated {
-		done[s] = true
-	}
-	for _, s := range registered {
-		if !done[s] {
-			return false
-		}
-	}
-	return true
+	return sitesEqual(registered, evaluated)
 }
 
-// sitesEqual compares a and b as sets: same labels, order and repetition
-// irrelevant.
+// remaining returns the elements of want that have does not contain,
+// preserving want's order.
+func remaining(want, have []string) []string {
+	present := make(map[string]bool, len(have))
+	for _, s := range have {
+		present[s] = true
+	}
+	var left []string
+	for _, s := range want {
+		if !present[s] {
+			left = append(left, s)
+		}
+	}
+	return left
+}
+
+// sitesEqual compares a and b as multisets: same labels with the same
+// counts, order irrelevant. Registered and evaluated lists never carry a
+// duplicate label in practice (validateSiteLabels and the duplicate-site
+// check both refuse one), so this behaves as a plain set compare.
 func sitesEqual(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
