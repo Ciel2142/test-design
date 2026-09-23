@@ -4,7 +4,7 @@
 - Head commit: `4c1d90ab7e2f5638c0a1b2d3e4f5061728394a5b`
 - Baseline: `a1b2c3d4e5f60718293a4b5c6d7e8f9012345678` (ok)
 - Run: `run-2026-07-30-0001`
-- Verifier: `1.2.0` · Schema: `1`
+- Verifier: `1.3.0` · Schema: `1`
 - Approved by: alex — "go ahead, run it here" (2026-07-30T14:01Z)
 - **Verdict: BLOCKED**
 

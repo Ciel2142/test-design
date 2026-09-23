@@ -293,7 +293,7 @@ For the rendered shape, see
 
 ## Evidence compatibility
 
-Current generated evidence uses verifierVersion `"1.2.0"` and schemaVersion `"1"`.
+Current generated evidence uses verifierVersion `"1.3.0"` and schemaVersion `"1"`.
 Live/mutation evidence and attempts require `repoCommit`, `source`, and `sourceSha256`
 as well as their existing run/row identity spellings. Old unbound evidence is refused;
 regenerate it in a newly approved full run. Never infer missing fields or hand-stamp old

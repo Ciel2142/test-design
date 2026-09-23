@@ -200,6 +200,62 @@ now stands. See the
 [finalize/recovery reference](../skills/coverage-verification/references/finalize-recovery.md)
 for the complete refusal table and the acknowledgement procedure.
 
+## 1.3 mutation site enumeration and freshness classification
+
+Version 1.3.0 retains schemaVersion `"1"`; the evidence schema is otherwise unchanged, and
+older evidence and reports still load. Two request shapes break.
+
+**`evaluate-mutation` now requires `sites` on a row's first call for a run.** Previously the
+caller's `lastSite: true` alone closed the row, so a row could complete after fewer sites
+than the mutator actually enumerated. The first call registers the row's full site list from
+`sites`; the row then completes only once every registered site has an evaluated outcome,
+regardless of `lastSite`. `lastSite: true` is now an assertion rather than a command: it
+refuses `sites-remaining` if a registered site other than the one just evaluated still has no
+outcome, leaving the row started and the worktree untouched. New refusals: `missing-sites`
+(a row's first call with no `sites`), `invalid-sites` (an empty or path-separator label, a
+duplicate, or a `site` not among the labels `sites` names), `enumeration-changed` (`sites` on
+a later call disagrees with the row's already-registered list), and `unknown-site` (`site` is
+not a member of the registered list — also raised by `discard-mutation-edit`). `finalize`
+refuses fresh mutation evidence whose evaluated sites disagree with its registered
+`enumeratedSites` as `mutation-sites-incomplete`; legacy or reused evidence carrying no
+`enumeratedSites` is accepted as before.
+
+**`finalize` now requires `freshness.paths`, one entry per changed production path.** Each
+entry is `{path, basis}`, classifying one path finalize computed as changed between the
+coverage source's `Baseline:` commit and the measured commit. A path left unclassified
+refuses `freshness-unclassified`; a `paths` entry (or a stale finding's hunk file) naming a
+path outside that diff refuses `freshness-unknown-path`; a `Baseline:` commit that does not
+resolve in the repository refuses `baseline-commit-unknown` instead of measuring anything.
+`invalid-freshness` now also covers an empty `basis` and a path classified more than once.
+`trace` reports the same changed-path set up front as `productionPaths`, so the parent knows
+what `finalize` will require before `finalize` ever runs. The published report gains a
+self-describing `freshness` record (`base`, `measured`, `paths`, `result`, `stale`), rendered
+in a new Markdown section; reports published before 1.3.0 carry none. See
+[finalize/recovery](../skills/coverage-verification/references/finalize-recovery.md) and
+[run state](../skills/coverage-verification/references/run-state.md) for the complete
+refusal tables and recovery procedures for both changes.
+
+**A new op, `discard-mutation-edit`,** discards a mutator edit that failed confirmation,
+restoring the attached worktree so the same site can be re-dispatched instead of abandoning
+the row. It refuses `missing-reason` (a discard without a reason is not evidence) and
+`discard-limit` (a third rejection of the same site: record the row `unappliable` through
+`record-mutation` instead).
+
+**Mutation evidence gains `enumeratedSites` and `discarded[]`**, and the published report
+gains a `calibration` block comparing layer-2 critic verdicts against layer-4 mutation
+outcomes on high-risk rows — informational only, it never adds a reason and never changes a
+verdict.
+
+**Restart rule for a run already in flight.** A run started under 1.2.0 or earlier cannot be
+finished on 1.3.0: its first `evaluate-mutation` call for a row predates the `sites`
+requirement, and its `finalize` request predates `freshness.paths`. Restart it under a new
+run ID rather than resuming it across the version boundary.
+
+**Installed plugin caches update only after the version bump plus a manual refresh.** Pulling
+the marketplace checkout is not enough by itself; run
+`claude plugin update test-design@test-design` and restart Claude Code, the same as any other
+plugin update.
+
 ## What did not change
 
 - The two entry points: `/test-design:test-coverage-design` after spec approval,

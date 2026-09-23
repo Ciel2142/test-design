@@ -131,7 +131,7 @@ hunk's file, naming a path outside that diff; `baseline-commit-unknown` when the
 ## Run-wide invariants
 
 - One approved source, commit, source hash, and run ID across every layer; never re-stamp
-  or combine evidence from different runs. Version 1.2.0 retains schemaVersion `"1"`;
+  or combine evidence from different runs. Version 1.3.0 retains schemaVersion `"1"`;
   old live/mutation evidence or attempts missing identity must be regenerated, not inferred.
 - All four layers remain required subject only to runtime-derived applicability. Gaps stay
   visible; a missing environment is an evidenced attempt, never a fabricated success.
