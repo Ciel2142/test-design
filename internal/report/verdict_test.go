@@ -1145,3 +1145,165 @@ func TestComputeCopiesReuseIntoBatchReportAndMutationRef(t *testing.T) {
 		t.Errorf("SC-03 Layer4 Reuse = %+v, want nil", got.Reuse)
 	}
 }
+
+// TestCalibration_PassAgrees uses the all-green fixture, where SC-02 is the
+// only high-risk row: HOLDS (layer 2) paired with MUTATION-CAUGHT (layer 4) is
+// agreement, so every comparable row agrees.
+func TestCalibration_PassAgrees(t *testing.T) {
+	r := mustCompute(t, greenInputs())
+
+	if r.Calibration.Comparable != 1 {
+		t.Fatalf("Calibration.Comparable = %d, want 1 (SC-02 HOLDS+CAUGHT)", r.Calibration.Comparable)
+	}
+	if r.Calibration.Agree != r.Calibration.Comparable {
+		t.Errorf("Calibration = %+v, want Agree == Comparable", r.Calibration)
+	}
+}
+
+// TestCalibration_HoldsSurvived makes SC-02's mutation survive instead of
+// being caught: the critic held HOLDS on a row whose mutant then survived, so
+// calibration must flag it without adding a reason of its own — the layer-4
+// MUTATION-SURVIVED reason deriveLayer4 already adds is the only one present.
+func TestCalibration_HoldsSurvived(t *testing.T) {
+	in := greenInputs()
+	in.Mutations[0].Evidence.Sites[1].Outcome = "survived"
+
+	r := mustCompute(t, in)
+
+	if !reflect.DeepEqual(r.Calibration.HoldsSurvived, []string{"SC-02"}) {
+		t.Errorf("Calibration.HoldsSurvived = %v, want [SC-02]", r.Calibration.HoldsSurvived)
+	}
+	if len(r.Reasons) != 1 {
+		t.Errorf("Reasons = %+v, want only the layer-4 MUTATION-SURVIVED reason; calibration must never add one", r.Reasons)
+	}
+	wantReason(t, r, "4", "SC-02", "MUTATION-SURVIVED")
+}
+
+// TestCalibration_SuspectSharesGroup reuses the same survived-SC-02 scenario:
+// SC-02's batch (batch-2) also judged SC-03 HOLDS. SC-03 is not high-risk, so
+// it never earns its own layer-4 comparison, but sharing a batch with an
+// overclaiming HOLDS+SURVIVED row makes its HOLDS suspect too. SC-01, in the
+// unrelated batch-1, must not be swept in.
+func TestCalibration_SuspectSharesGroup(t *testing.T) {
+	in := greenInputs()
+	in.Mutations[0].Evidence.Sites[0].Outcome = "survived"
+
+	r := mustCompute(t, in)
+
+	if !reflect.DeepEqual(r.Calibration.SuspectRows, []string{"SC-03"}) {
+		t.Errorf("Calibration.SuspectRows = %v, want [SC-03] (batch-2, shares the group with HOLDS+SURVIVED SC-02)", r.Calibration.SuspectRows)
+	}
+}
+
+// calibrationExclusionSource carries four high-risk unit-level rows so layer 3
+// never applies: one clean CAUGHT comparison, and one row apiece for the three
+// layer-4 outcomes calibration must not count as comparable.
+func calibrationExclusionSource() *coverage.Source {
+	return &coverage.Source{
+		Path:           "docs/superpowers/coverage/calibration-coverage.md",
+		SHA256:         "sha-calibration-1",
+		BaselineCommit: "base-cal-1",
+		Rows: []coverage.Row{
+			{ID: "X-01", Level: "unit", Risk: "high"},
+			{ID: "X-02", Level: "unit", Risk: "high"},
+			{ID: "X-03", Level: "unit", Risk: "high"},
+			{ID: "X-04", Level: "unit", Risk: "high"},
+		},
+	}
+}
+
+func calibrationExclusionTrace() *TraceEvidence {
+	return &TraceEvidence{
+		RunID:          "run-cal-1",
+		Source:         "docs/superpowers/coverage/calibration-coverage.md",
+		SourceSHA256:   "sha-calibration-1",
+		RepoCommit:     "head-cal-1",
+		BaselineCommit: "base-cal-1",
+		BaselineStatus: "ok",
+		ExitStatus:     0,
+		Counts:         SuiteCounts{Passed: 3},
+		RowAccounting:  RowAccounting{ActiveRows: 4, WithResult: 3},
+		FindingCounts:  map[string]int{"gap": 1},
+		RowResults: []TraceRowResult{
+			{RowID: "X-01", Scope: "pkg/x", Name: "TestX01", Status: "passed"},
+			{RowID: "X-03", Scope: "pkg/x", Name: "TestX03", Status: "passed"},
+			{RowID: "X-04", Scope: "pkg/x", Name: "TestX04", Status: "passed"},
+		},
+		Findings: []TraceFinding{{Kind: "gap", RowID: "X-02", Detail: "no test cites X-02"}},
+	}
+}
+
+func calibrationExclusionBatches() []Batch {
+	return []Batch{{
+		BatchID: "batch-cal",
+		RunID:   "run-cal-1",
+		Rows:    []string{"X-01", "X-02", "X-03", "X-04"},
+		Verdicts: []CriticVerdict{
+			{RowID: "X-01", Verdict: "HOLDS"},
+			{RowID: "X-02", Verdict: "MISSING"},
+			{RowID: "X-03", Verdict: "HOLDS"},
+			{RowID: "X-04", Verdict: "HOLDS"},
+		},
+	}}
+}
+
+func calibrationExclusionMutations() []MutationInput {
+	return []MutationInput{
+		{
+			RowID:        "X-01",
+			EvidencePath: "run/mutation-X-01.json",
+			Evidence: &MutationEvidence{
+				RunID:         "run-cal-1",
+				RepoCommit:    "head-cal-1",
+				Source:        "docs/superpowers/coverage/calibration-coverage.md",
+				SourceSHA256:  "sha-calibration-1",
+				RowID:         "X-01",
+				Sites:         []MutationSiteOutcome{{Site: "pkg/x.go:1", Outcome: "caught"}},
+				SnapshotEqual: true,
+			},
+		},
+		{RowID: "X-03", Outcome: "unappliable", Reason: "no site matched"},
+		{
+			RowID:               "X-04",
+			Outcome:             "environmental",
+			Reason:              "docker unavailable",
+			AttemptEvidencePath: "run/mutation-attempt-X-04.json",
+			Attempt: &Attempt{
+				RunID:        "run-cal-1",
+				RowID:        "X-04",
+				RepoCommit:   "head-cal-1",
+				Source:       "docs/superpowers/coverage/calibration-coverage.md",
+				SourceSHA256: "sha-calibration-1",
+				Refusal:      "docker unavailable",
+			},
+		},
+	}
+}
+
+func calibrationExclusionInputs() *Inputs {
+	return &Inputs{
+		Source:          calibrationExclusionSource(),
+		RunID:           "run-cal-1",
+		HeadCommit:      "head-cal-1",
+		Trace:           calibrationExclusionTrace(),
+		Freshness:       Freshness{Result: "fresh"},
+		ProductionPaths: []string{},
+		Batches:         calibrationExclusionBatches(),
+		Mutations:       calibrationExclusionMutations(),
+	}
+}
+
+// TestCalibration_ExcludesGapEnvUnappliable checks that only the row with a
+// real CAUGHT/SURVIVED outcome counts: the layer-1 gap, the environmental
+// mutation run, and the unappliable mutation must not inflate Comparable, and
+// none of them can appear in either disagreement list.
+func TestCalibration_ExcludesGapEnvUnappliable(t *testing.T) {
+	r := mustCompute(t, calibrationExclusionInputs())
+
+	if r.Calibration.Comparable != 1 || r.Calibration.Agree != 1 {
+		t.Errorf("Calibration = %+v, want only X-01 (HOLDS+CAUGHT) comparable; the gap, environmental and unappliable rows must not count", r.Calibration)
+	}
+	if len(r.Calibration.HoldsSurvived) != 0 || len(r.Calibration.FlaggedCaught) != 0 {
+		t.Errorf("Calibration = %+v, want no disagreements", r.Calibration)
+	}
+}

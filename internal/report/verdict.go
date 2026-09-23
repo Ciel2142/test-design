@@ -155,9 +155,65 @@ func Compute(in *Inputs) (*Report, error) {
 			Layer3: l3sum,
 			Layer4: l4sum,
 		},
-		Rows:    rows,
-		Batches: deriveBatches(in.Batches),
+		Rows:        rows,
+		Batches:     deriveBatches(in.Batches),
+		Calibration: deriveCalibration(rows),
 	}, nil
+}
+
+// deriveCalibration compares each high-risk row's layer-2 verdict against its
+// layer-4 outcome. Only a CAUGHT or SURVIVED outcome makes a row comparable —
+// a layer-1 gap, an environmental run and an unappliable mutation all leave
+// the row at some other status and so never enter the count. HOLDS+CAUGHT and
+// WEAK/VACUOUS+SURVIVED agree; the other two pairings are named individually.
+// MISSING counts toward Comparable (the row's layer-2 verdict exists) but
+// belongs to neither disagreement list, since it is not a confidence claim.
+func deriveCalibration(rows []RowReport) Calibration {
+	cal := Calibration{HoldsSurvived: []string{}, FlaggedCaught: []string{}, SuspectRows: []string{}}
+	survivedGroups := make(map[string]bool)
+
+	for _, row := range rows {
+		if row.Risk != "high" {
+			continue
+		}
+		status := row.Layer4.Status
+		if status != valueMutationCaught && status != valueMutationSurvived {
+			continue
+		}
+		verdict := row.Layer2.Verdict
+		weakOrVacuous := verdict == "WEAK" || verdict == "VACUOUS"
+		switch {
+		case verdict == "HOLDS" && status == valueMutationCaught:
+			cal.Comparable++
+			cal.Agree++
+		case weakOrVacuous && status == valueMutationSurvived:
+			cal.Comparable++
+			cal.Agree++
+		case verdict == "HOLDS" && status == valueMutationSurvived:
+			cal.Comparable++
+			cal.HoldsSurvived = append(cal.HoldsSurvived, row.RowID)
+			survivedGroups[row.Layer2.BatchID] = true
+		case weakOrVacuous && status == valueMutationCaught:
+			cal.Comparable++
+			cal.FlaggedCaught = append(cal.FlaggedCaught, row.RowID)
+		case verdict == "MISSING":
+			cal.Comparable++
+		}
+	}
+
+	for _, row := range rows {
+		if row.Risk == "high" || row.Layer2.Verdict != "HOLDS" {
+			continue
+		}
+		if survivedGroups[row.Layer2.BatchID] {
+			cal.SuspectRows = append(cal.SuspectRows, row.RowID)
+		}
+	}
+
+	sort.Strings(cal.HoldsSurvived)
+	sort.Strings(cal.FlaggedCaught)
+	sort.Strings(cal.SuspectRows)
+	return cal
 }
 
 func addFreshnessReason(rs *reasonSet, f Freshness) {

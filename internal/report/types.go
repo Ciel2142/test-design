@@ -398,6 +398,20 @@ type Layer4Summary struct {
 	NA          int    `json:"na"`
 }
 
+// Calibration compares layer-2 critic verdicts against layer-4 mutation
+// outcomes on high-risk rows: informational only, it never adds a reason and
+// never changes a verdict. HoldsSurvived and FlaggedCaught name the
+// disagreements; SuspectRows names non-high rows a HoldsSurvived row's batch
+// also verdicted HOLDS, whose own HOLDS the same batch's miss now calls into
+// question. Every row list is sorted for a deterministic report.
+type Calibration struct {
+	Comparable    int      `json:"comparable"`
+	Agree         int      `json:"agree"`
+	HoldsSurvived []string `json:"holdsSurvived"`
+	FlaggedCaught []string `json:"flaggedCaught"`
+	SuspectRows   []string `json:"suspectRows"`
+}
+
 type LayerSummary struct {
 	Layer1 Layer1Summary `json:"layer1"`
 	Layer2 Layer2Summary `json:"layer2"`
@@ -422,6 +436,7 @@ type Report struct {
 	Layers          LayerSummary      `json:"layers"`
 	Rows            []RowReport       `json:"rows"`
 	Batches         []BatchReport     `json:"batches"`
+	Calibration     Calibration       `json:"calibration"`
 	Work            WorkSummary       `json:"work"`
 	Transcripts     []TranscriptRef   `json:"transcripts"`
 	ToolVersions    map[string]string `json:"toolVersions"`

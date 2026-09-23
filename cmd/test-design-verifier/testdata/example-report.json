@@ -234,6 +234,17 @@
       ]
     }
   ],
+  "calibration": {
+    "comparable": 2,
+    "agree": 1,
+    "holdsSurvived": [
+      "SC-03"
+    ],
+    "flaggedCaught": [],
+    "suspectRows": [
+      "SC-04"
+    ]
+  },
   "work": {
     "items": [
       {

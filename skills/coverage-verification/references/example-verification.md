@@ -71,6 +71,8 @@ Status: blocked · Applicable 3 · Caught 1 · Survived 1 · Unappliable 0 · N/
 | SC-04 | N/A | - |
 | SC-05 | MUTATION-N/A (layer 1 gap) | - |
 
+Calibration: Comparable 2 · Agree 1 · Holds→Survived SC-03 · Flagged→Caught - · Suspect SC-04
+
 ## Work
 
 Fresh 6 · Reused 0 · Failed 3 · Incomplete 0

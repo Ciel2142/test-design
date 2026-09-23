@@ -176,3 +176,16 @@ reported as bound, they contradict each other: consult that row's `testSource` a
 the immutable dispatch payload. A nonempty bound source means a dispatch defect —
 re-paste that exact payload and re-dispatch that row rather than recording the `MISSING`.
 
+### Suspect rows from calibration
+
+`finalize`'s report carries a `calibration` block comparing each high-risk row's layer-2
+verdict against its layer-4 outcome. When a batch held `HOLDS` on a row whose mutation then
+survived, calibration names that row under `holdsSurvived` and names every other row the same
+batch also verdicted `HOLDS` under `suspectRows` — the batch's read of this behavior group is
+now in doubt, and those rows never got their own mutation to confirm it independently.
+
+Do not let a suspect row's prior `HOLDS` stand on `reuse`'s say-so alone. Dispatch a fresh
+critic for it through `record-review` (`status: started`), carrying `repeat` with a `reason`
+naming the calibration finding — for example, "batch batch-2 held SC-02 HOLDS and its mutation
+survived; re-confirming SC-03 independently". The new verdict replaces the suspect one.
+

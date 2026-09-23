@@ -330,6 +330,35 @@ func TestRenderMarkdownLayer4SurvivingSites(t *testing.T) {
 	}
 }
 
+// TestRenderMarkdownLayer4Calibration checks the one calibration line under
+// layer 4: SC-02's mutation survives, so it names SC-02 under Holds→Survived,
+// and SC-03 (same batch, HOLDS, not high-risk) under Suspect.
+func TestRenderMarkdownLayer4Calibration(t *testing.T) {
+	in := greenInputs()
+	in.Mutations[0].Evidence.Sites[0].Outcome = "survived"
+	r := mustCompute(t, in)
+
+	md := mustRender(t, r)
+	line := "Calibration: Comparable 1 · Agree 0 · Holds→Survived SC-02 · Flagged→Caught - · Suspect SC-03\n"
+	if !strings.Contains(md, line) {
+		t.Errorf("markdown missing calibration line %q; got:\n%s", line, md)
+	}
+}
+
+// TestRenderMarkdownLayer4CalibrationZeroValue checks that a report with no
+// calibration data (the zero value a pre-1.3.0 report decodes to) still
+// renders the line, with dashes standing in for the empty row lists.
+func TestRenderMarkdownLayer4CalibrationZeroValue(t *testing.T) {
+	r := mustCompute(t, greenInputs())
+	r.Calibration = Calibration{}
+
+	md := mustRender(t, r)
+	line := "Calibration: Comparable 0 · Agree 0 · Holds→Survived - · Flagged→Caught - · Suspect -\n"
+	if !strings.Contains(md, line) {
+		t.Errorf("markdown missing zero-value calibration line %q; got:\n%s", line, md)
+	}
+}
+
 func TestWorkCountsOf(t *testing.T) {
 	items := []WorkItem{
 		{Source: WorkFresh, Standing: StandingOK},

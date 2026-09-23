@@ -170,6 +170,24 @@ func writeMarkdownLayer4(b *strings.Builder, r *Report) {
 		fmt.Fprintf(b, "| %s | %s | %s |\n", escapeCell(row.RowID), escapeCell(row.Layer4.Status), escapeCell(sites))
 	}
 	b.WriteString("\n")
+
+	writeMarkdownCalibration(b, r.Calibration)
+}
+
+// writeMarkdownCalibration renders the one calibration line: r.Calibration is
+// the JSON-decoded value, so a report published before 1.3.0 (or any run with
+// no comparable high-risk rows yet) carries the zero value and renders the
+// same line with a dash standing in for each empty row list, never a missing
+// line.
+func writeMarkdownCalibration(b *strings.Builder, c Calibration) {
+	dashJoin := func(rows []string) string {
+		if len(rows) == 0 {
+			return "-"
+		}
+		return strings.Join(rows, ", ")
+	}
+	fmt.Fprintf(b, "Calibration: Comparable %d · Agree %d · Holds→Survived %s · Flagged→Caught %s · Suspect %s\n\n",
+		c.Comparable, c.Agree, dashJoin(c.HoldsSurvived), dashJoin(c.FlaggedCaught), dashJoin(c.SuspectRows))
 }
 
 func writeMarkdownWork(b *strings.Builder, r *Report) {
