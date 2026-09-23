@@ -123,10 +123,8 @@ func remaining(want, have []string) []string {
 	return left
 }
 
-// sitesEqual compares a and b as multisets: same labels with the same
-// counts, order irrelevant. Registered and evaluated lists never carry a
-// duplicate label in practice (validateSiteLabels and the duplicate-site
-// check both refuse one), so this behaves as a plain set compare.
+// sitesEqual compares a and b as multisets, order irrelevant; a duplicate
+// label never reaches it in practice, so this behaves as a plain set compare.
 func sitesEqual(a, b []string) bool {
 	if len(a) != len(b) {
 		return false

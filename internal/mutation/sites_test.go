@@ -22,9 +22,9 @@ func TestResolveEnumeratedFirstCallEstablishesTheList(t *testing.T) {
 	}
 }
 
-// TestResolveEnumeratedFirstRegistrationMissingEvaluatedSiteRefused covers
-// R10: a row a pre-1.3.0 verifier left mid-way already has evaluated sites
-// with no registered list; the first registration under 1.3.0 must not omit
+// TestResolveEnumeratedFirstRegistrationMissingEvaluatedSiteRefused covers a
+// row a pre-1.3.0 verifier left mid-way: it already has evaluated sites with
+// no registered list, and the first registration under 1.3.0 must not omit
 // one.
 func TestResolveEnumeratedFirstRegistrationMissingEvaluatedSiteRefused(t *testing.T) {
 	_, err := ResolveEnumerated(nil, []string{"site-a"}, []string{"site-b"}, "site-b")

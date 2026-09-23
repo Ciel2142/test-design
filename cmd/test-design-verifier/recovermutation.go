@@ -95,9 +95,6 @@ func mutationRowPrelude(op string, req *verifyRequest, runDir string) (*mutation
 		}
 	}
 
-	// A workspace is only worth restoring for an obligation that still stands:
-	// a row nothing opened has no workspace to owe, and one already answered
-	// would be measured again over its own verdict.
 	store, cliErr := openLedger(op, req)
 	if cliErr != nil {
 		return nil, cliErr

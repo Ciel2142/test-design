@@ -1328,7 +1328,7 @@ func TestCalibration_SuspectIncludesUncomparableHighRiskRow(t *testing.T) {
 }
 
 // TestCalibration_MissingVerdictNotComparable: MISSING means the row carries
-// no layer-2 verdict at all (R21), so a high-risk row layer 2 marked MISSING
+// no layer-2 verdict at all, so a high-risk row layer 2 marked MISSING
 // is never comparable even though its layer 4 caught the mutation — SC-02 is
 // not a layer-1 gap (validateLayer2 only requires MISSING on a gap row, it
 // never forbids MISSING on a bound one), so this state is reachable.

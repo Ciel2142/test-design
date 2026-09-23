@@ -314,6 +314,8 @@ the spelling each example shows is the one the op documents and the one its outp
 | `record-review` | `invalid-verdict` | A verdict value is not one of `HOLDS`, `WEAK`, `VACUOUS`, `MISSING` |
 | `record-review` | `dispatch-inputs-changed` | The group was judged against dispatch inputs the run no longer hands out; regroup against the current trace |
 | `prepare-mutation`, `evaluate-mutation`, `record-mutation`, `recover-mutation`, `discard-mutation-edit` | `mutation-row-completed` | The row is already completed for this run (and, for `prepare-mutation`, the request carried no `repeat.reason`) |
+| `evaluate-mutation` | `missing-site` | `site` is required |
+| `evaluate-mutation` | `invalid-site` | `site` contains `/` or `\` — checked at request decode, before the row's state or registered list (if any) even loads |
 | `evaluate-mutation` | `missing-sites` | This is the row's first call, the row has no registered site list yet, and the request carries no `sites` |
 | `evaluate-mutation` | `invalid-sites` | A label in `sites` is empty, contains `/` or `\`, repeats another label in the same list, or `site` is not among the labels `sites` names |
 | `discard-mutation-edit` | `invalid-sites` | `site` is empty or contains `/` or `\` — checked at request decode, before the row's state or registered list (if any) even loads, so it fires whether or not a list is registered |
@@ -329,11 +331,11 @@ the spelling each example shows is the one the op documents and the one its outp
 | `record-mutation` | `unknown-row` | The row is not active in the coverage source |
 | `record-mutation` | `invalid-outcome` | The only outcome this op may record is `unappliable`; a caught or survived verdict comes from `evaluate-mutation` |
 | `record-mutation` | `missing-reason` | An `unappliable` row needs a reason; a blank one is not evidence |
-| `recover-mutation`, `discard-mutation-edit` | `missing-run-dir` | `runDir` is required |
-| `recover-mutation`, `discard-mutation-edit` | `run-dir-not-absolute` | `runDir` must be an absolute path |
-| `recover-mutation`, `discard-mutation-edit` | `run-dir-not-found` | `runDir` does not exist |
-| `recover-mutation`, `discard-mutation-edit` | `state-load-failed` | `mutation-state.json` in `runDir` could not be read |
-| `recover-mutation`, `discard-mutation-edit` | `stale-evidence` | The prepared state's run, source or HEAD no longer matches the request; prepare again |
+| `evaluate-mutation`, `recover-mutation`, `discard-mutation-edit` | `missing-run-dir` | `runDir` is required |
+| `evaluate-mutation`, `recover-mutation`, `discard-mutation-edit` | `run-dir-not-absolute` | `runDir` must be an absolute path |
+| `evaluate-mutation`, `recover-mutation`, `discard-mutation-edit` | `run-dir-not-found` | `runDir` does not exist |
+| `evaluate-mutation`, `recover-mutation`, `discard-mutation-edit` | `state-load-failed` | `mutation-state.json` in `runDir` could not be read |
+| `evaluate-mutation`, `recover-mutation`, `discard-mutation-edit` | `stale-evidence` | The prepared state's run, source or HEAD no longer matches the request; prepare again |
 | `recover-mutation` | `restore-failed` | The attached worktree could not be reset to the prepared commit, or the worktree path exists as something other than a directory, or could not be checked at all |
 | `discard-mutation-edit` | `restore-failed` | The attached worktree could not be restored to the prepared commit after the rejected edit's diff was captured |
 | `recover-mutation` | `recreate-failed` | A vanished worktree's own registry entry could not be forgotten, or a replacement could not be created |
