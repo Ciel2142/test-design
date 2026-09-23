@@ -141,8 +141,32 @@ func TestRepoChanges_ProductionPathsSinceExcludesTestsTestdataAndPublication(t *
 	}
 }
 
-// TestRepoChanges_ProductionPathsSinceUnresolvedBaselineReturnsNil is R3: no
-// diff can be measured against a baseline commit this repository never had.
+// TestRepoChanges_ProductionPathsSinceIncludesDeletedAndRenamedFiles holds
+// productionPathsSince to changedPaths' own no-renames-followed contract: a
+// deleted production file, and both the old and the new name of a renamed
+// one, are all changed production paths a freshness answer must classify.
+func TestRepoChanges_ProductionPathsSinceIncludesDeletedAndRenamedFiles(t *testing.T) {
+	repo := fixtureRepo(t)
+	base := strings.TrimSpace(mustGit(t, repo, "rev-parse", "HEAD"))
+
+	if err := os.Remove(filepath.Join(repo, "payments", "payments.go")); err != nil {
+		t.Fatalf("remove payments.go: %v", err)
+	}
+	mustGit(t, repo, "mv", "orders/orders.go", "orders/renamed.go")
+	edited := commitAll(t, repo, "delete payments.go and rename orders.go")
+
+	got, err := productionPathsSince(repo, fixtureCoverageSource, "go", base, edited)
+	if err != nil {
+		t.Fatalf("productionPathsSince: %v", err)
+	}
+	want := []string{"orders/orders.go", "orders/renamed.go", "payments/payments.go"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("productionPathsSince = %v, want %v", got, want)
+	}
+}
+
+// TestRepoChanges_ProductionPathsSinceUnresolvedBaselineReturnsNil: no diff
+// can be measured against a baseline commit this repository never had.
 func TestRepoChanges_ProductionPathsSinceUnresolvedBaselineReturnsNil(t *testing.T) {
 	repo := fixtureRepo(t)
 	head := strings.TrimSpace(mustGit(t, repo, "rev-parse", "HEAD"))

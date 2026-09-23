@@ -741,7 +741,7 @@ func TestPublication_CommitKeepsMeasuredRevision(t *testing.T) {
 	readyGroups(t, s, runE, readDispatchInputs(t, tracedE.DispatchPath), policy)
 	readyCaughtVersionRow(t, s, runE)
 
-	fresh := pubProofFinalize(t, s, runE, freshFinalizeBody())
+	fresh := pubProofFinalize(t, s, runE, freshFinalizeBodyWithPaths("ready/version.go"))
 	if fresh.Verdict != report.VerdictPass {
 		t.Errorf("verdict = %q, want %s; reasons=%+v", fresh.Verdict, report.VerdictPass, fresh.Reasons)
 	}

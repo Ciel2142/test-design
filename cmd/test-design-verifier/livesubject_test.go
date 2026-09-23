@@ -235,6 +235,18 @@ func freshFinalizeBody() finalizeRequestBody {
 	return finalizeRequestBody{Approval: finalizeApproval, Freshness: report.Freshness{Result: "fresh"}}
 }
 
+// freshFinalizeBodyWithPaths is freshFinalizeBody, classifying each named
+// path as unchanged in behavior. Use it wherever a proof finalizes after a
+// production file changed past the baseline: freshFinalizeBody's empty
+// paths would be refused freshness-unclassified for any such path.
+func freshFinalizeBodyWithPaths(paths ...string) finalizeRequestBody {
+	body := freshFinalizeBody()
+	for _, p := range paths {
+		body.Freshness.Paths = append(body.Freshness.Paths, report.FreshnessPath{Path: p, Basis: "test fixture: no behavior change asserted"})
+	}
+	return body
+}
+
 // finalizeRequestJSONFor is the finalize request document for one run: the
 // verify fields plus exactly the body the caller built.
 func finalizeRequestJSONFor(t *testing.T, repo, coverageSource, runID string, body finalizeRequestBody) string {

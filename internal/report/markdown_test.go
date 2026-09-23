@@ -259,6 +259,24 @@ func TestRenderMarkdownLayer3NAAllGapsIsOneLine(t *testing.T) {
 	}
 }
 
+// freshnessSection isolates the text between the ## Freshness heading and the
+// next one: base/measured commits and stale hunk/behavior text both also
+// appear in the header and the reasons section respectively, so an assertion
+// against the whole document would still pass with the Freshness renderer
+// deleted.
+func freshnessSection(t *testing.T, md string) string {
+	t.Helper()
+	start := strings.Index(md, "## Freshness")
+	if start == -1 {
+		t.Fatalf("markdown has no ## Freshness heading; got:\n%s", md)
+	}
+	end := strings.Index(md, "## Layer 1")
+	if end == -1 || end < start {
+		t.Fatalf("markdown has no ## Layer 1 heading after ## Freshness; got:\n%s", md)
+	}
+	return md[start:end]
+}
+
 func TestRenderMarkdownFreshnessSection(t *testing.T) {
 	in := greenInputs()
 	in.ProductionPaths = []string{"pkg/a.go"}
@@ -268,20 +286,18 @@ func TestRenderMarkdownFreshnessSection(t *testing.T) {
 	}
 	r := mustCompute(t, in)
 
-	md := mustRender(t, r)
-	for _, want := range []string{"## Freshness", "base-1", "head-1", "pkg/a.go", "adds a comment; no behavior change"} {
-		if !strings.Contains(md, want) {
-			t.Errorf("markdown missing %q; got:\n%s", want, md)
+	section := freshnessSection(t, mustRender(t, r))
+	for _, want := range []string{"fresh", "base-1", "head-1", "pkg/a.go", "adds a comment; no behavior change"} {
+		if !strings.Contains(section, want) {
+			t.Errorf("Freshness section missing %q; got:\n%s", want, section)
 		}
 	}
 }
 
 func TestRenderMarkdownFreshnessStaleTable(t *testing.T) {
-	r := mustCompute(t, multiCauseInputs())
-
-	md := mustRender(t, r)
-	if !strings.Contains(md, "spec.md:12") || !strings.Contains(md, "retry on 429") {
-		t.Errorf("markdown missing the stale finding table; got:\n%s", md)
+	section := freshnessSection(t, mustRender(t, mustCompute(t, multiCauseInputs())))
+	if !strings.Contains(section, "spec.md:12") || !strings.Contains(section, "retry on 429") {
+		t.Errorf("Freshness section missing the stale finding table; got:\n%s", section)
 	}
 }
 

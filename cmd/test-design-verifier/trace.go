@@ -153,12 +153,13 @@ func traceOp(req *verifyRequest, stdout io.Writer, between func()) *cliError {
 		return cliErr
 	}
 
-	productionPaths, err := productionPathsSince(req.RepoRoot, req.CoverageSource, src.Runner.Kind, src.BaselineCommit, repoCommit)
-	if err != nil {
-		return &cliError{Code: "production-paths-failed", Message: fmt.Sprintf("trace: %v", err)}
-	}
+	// A failure to compute the diff here is never fatal: trace must not start
+	// refusing a run it accepted before this field existed. The field is
+	// simply omitted, the same as an unresolved baseline; finalize recomputes
+	// it independently and is where a genuine problem surfaces.
+	productionPaths, prodErr := productionPathsSince(req.RepoRoot, req.CoverageSource, src.Runner.Kind, src.BaselineCommit, repoCommit)
 	var productionPathsOut *[]string
-	if productionPaths != nil {
+	if prodErr == nil && productionPaths != nil {
 		productionPathsOut = &productionPaths
 	}
 

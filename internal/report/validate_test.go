@@ -198,6 +198,23 @@ func TestValidateInvalidFreshnessDuplicatePath(t *testing.T) {
 	wantRefusal(t, Validate(in), CodeInvalidFreshness)
 }
 
+func TestValidateInvalidFreshnessStaleFindingEmptyHunkOrBehavior(t *testing.T) {
+	cases := []struct {
+		name    string
+		finding StaleFinding
+	}{
+		{"empty hunk", StaleFinding{Hunk: "", Behavior: "retry on 429"}},
+		{"empty behavior", StaleFinding{Hunk: "spec.md:12", Behavior: ""}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			in := baseInputs()
+			in.Freshness = Freshness{Result: "stale", Stale: []StaleFinding{tc.finding}}
+			wantRefusal(t, Validate(in), CodeInvalidFreshness)
+		})
+	}
+}
+
 func TestValidateFreshnessUnclassifiedProductionPath(t *testing.T) {
 	in := baseInputs()
 	in.ProductionPaths = []string{"spec.md"}

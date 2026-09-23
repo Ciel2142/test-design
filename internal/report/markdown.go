@@ -51,7 +51,7 @@ func writeMarkdownFreshness(b *strings.Builder, r *Report) {
 		b.WriteString("Not recorded — this report predates freshness paths.\n\n")
 		return
 	}
-	fmt.Fprintf(b, "Result: %s · Baseline: `%s` → HEAD: `%s`\n\n", f.Result, f.Base, f.Measured)
+	fmt.Fprintf(b, "Result: %s · Baseline: `%s` → Head commit: `%s`\n\n", f.Result, f.Base, f.Measured)
 
 	if len(f.Paths) == 0 {
 		b.WriteString("No changed production paths.\n\n")

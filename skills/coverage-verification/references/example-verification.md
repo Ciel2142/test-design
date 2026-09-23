@@ -10,7 +10,7 @@
 
 ## Freshness
 
-Result: fresh · Baseline: `a1b2c3d4e5f60718293a4b5c6d7e8f9012345678` → HEAD: `4c1d90ab7e2f5638c0a1b2d3e4f5061728394a5b`
+Result: fresh · Baseline: `a1b2c3d4e5f60718293a4b5c6d7e8f9012345678` → Head commit: `4c1d90ab7e2f5638c0a1b2d3e4f5061728394a5b`
 
 | Path | Basis |
 | --- | --- |

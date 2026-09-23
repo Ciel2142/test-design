@@ -19,14 +19,15 @@ const traceCreditCoverageSource = "docs/superpowers/coverage/2026-09-07-structur
 const traceCreditModuleFile = "credit_test.go"
 
 // traceCreditDoc renders a coverage source around the caller's runner command
-// and scenario rows. Every other field is the minimum trace reads; the
-// baseline is deliberately absent so trace records baselineStatus "missing"
-// and skips baseline comparison.
-func traceCreditDoc(runnerCommand, rows string) string {
+// and scenario rows, pinned to the given (resolvable) baseline commit. The
+// baseline evidence is deliberately absent so trace records baselineStatus
+// "missing" and skips baseline comparison; only the commit itself must
+// resolve, so a freshness answer over this fixture can still be measured.
+func traceCreditDoc(baseline, runnerCommand, rows string) string {
 	return `# Coverage: structural credit
 
 Spec: docs/superpowers/specs/2026-09-07-structural-credit-design.md
-Baseline: 0000000 · 0 passed, 0 failed, 0 skipped
+Baseline: ` + baseline + ` · 0 passed, 0 failed, 0 skipped
 
 ## Verification
 
@@ -48,8 +49,9 @@ Baseline: 0000000 · 0 passed, 0 failed, 0 skipped
 }
 
 // buildTraceCreditRepo builds a temporary Git repository holding one Go
-// module, one test file and one coverage source, and returns the repository
-// root with the repo-relative coverage source path.
+// module and one test file, commits them as the coverage source's Baseline
+// commit, then adds the coverage source itself in a second commit, and
+// returns the repository root with the repo-relative coverage source path.
 func buildTraceCreditRepo(t *testing.T, module, testSource, runnerCommand, rows string) (repo, coverageSource string) {
 	t.Helper()
 	isolateEnv(t)
@@ -57,14 +59,31 @@ func buildTraceCreditRepo(t *testing.T, module, testSource, runnerCommand, rows 
 
 	mustWriteFileAt(t, filepath.Join(repo, "go.mod"), "module "+module+"\n\ngo 1.26\n")
 	mustWriteFileAt(t, filepath.Join(repo, traceCreditModuleFile), testSource)
-	mustWriteFileAt(t, filepath.Join(repo, filepath.FromSlash(traceCreditCoverageSource)),
-		traceCreditDoc(runnerCommand, rows))
 
 	mustGit(t, repo, "init", "-q")
 	mustGit(t, repo, "add", "-A")
-	mustGit(t, repo, "commit", "-q", "-m", "structural credit fixture")
+	mustGit(t, repo, "commit", "-q", "-m", "structural credit fixture: subject")
+	baseline := strings.TrimSpace(mustGit(t, repo, "rev-parse", "HEAD"))
+
+	mustWriteFileAt(t, filepath.Join(repo, filepath.FromSlash(traceCreditCoverageSource)),
+		traceCreditDoc(baseline, runnerCommand, rows))
+	mustGit(t, repo, "add", "-A")
+	mustGit(t, repo, "commit", "-q", "-m", "structural credit fixture: coverage source")
 
 	return repo, traceCreditCoverageSource
+}
+
+// mustProductionPaths is the changed production paths a fixture's proof needs
+// to hand report.Compute directly, bypassing finalizeOp: the same computation
+// finalize itself would do, over the fixture's own (resolvable) baseline and
+// the commit it traced.
+func mustProductionPaths(t *testing.T, repo, coverageSource, runnerKind, baseline, measured string) []string {
+	t.Helper()
+	paths, err := productionPathsSince(repo, coverageSource, runnerKind, baseline, measured)
+	if err != nil {
+		t.Fatalf("productionPathsSince: %v", err)
+	}
+	return paths
 }
 
 // runTraceCredit runs the real trace op over repo and returns its stdout
@@ -468,11 +487,12 @@ func TestTraceWithholdsCreditForSkippedContributor(t *testing.T) {
 		t.Fatalf("load trace evidence: %v", err)
 	}
 	computed, err := report.Compute(&report.Inputs{
-		Source:     src,
-		RunID:      ev.RunID,
-		HeadCommit: head,
-		Trace:      tr,
-		Freshness:  report.Freshness{Result: "fresh"},
+		Source:          src,
+		RunID:           ev.RunID,
+		HeadCommit:      head,
+		Trace:           tr,
+		Freshness:       report.Freshness{Result: "fresh"},
+		ProductionPaths: mustProductionPaths(t, repo, coverageSource, src.Runner.Kind, src.BaselineCommit, head),
 		Batches: []report.Batch{{
 			BatchID: "batch-1", RunID: ev.RunID,
 			Rows: []string{"SC-01", "SC-02"},
@@ -550,11 +570,12 @@ func TestTraceDispatchKeepsFailedRowsRedBesideAGap(t *testing.T) {
 		t.Fatalf("load trace evidence: %v", err)
 	}
 	computed, err := report.Compute(&report.Inputs{
-		Source:     src,
-		RunID:      ev.RunID,
-		HeadCommit: head,
-		Trace:      tr,
-		Freshness:  report.Freshness{Result: "fresh"},
+		Source:          src,
+		RunID:           ev.RunID,
+		HeadCommit:      head,
+		Trace:           tr,
+		Freshness:       report.Freshness{Result: "fresh"},
+		ProductionPaths: mustProductionPaths(t, repo, coverageSource, src.Runner.Kind, src.BaselineCommit, head),
 		Batches: []report.Batch{{
 			BatchID: "batch-1", RunID: ev.RunID,
 			Rows: []string{"SC-01"},

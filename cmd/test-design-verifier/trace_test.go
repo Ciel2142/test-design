@@ -173,9 +173,10 @@ func fixtureRepoWithUnresolvableBaseline(t *testing.T) string {
 	return repo
 }
 
-// TestTrace_ReportsProductionPaths locks R3's positive case: a change to
-// production source since the (resolvable) Baseline commit is named in the
-// op's own output, ahead of the run that will require it classified.
+// TestTrace_ReportsProductionPaths locks trace's positive case for reporting
+// changed production paths ahead of finalize: a change to production source
+// since the (resolvable) Baseline commit is named in the op's own output,
+// ahead of the run that will require it classified.
 func TestTrace_ReportsProductionPaths(t *testing.T) {
 	repo := fixtureRepo(t)
 	orders := filepath.Join(repo, "orders", "orders.go")
@@ -203,9 +204,10 @@ func TestTrace_ReportsProductionPaths(t *testing.T) {
 	}
 }
 
-// TestTrace_UnresolvedBaselineCommitOmitsProductionPaths is R3's negative
-// case: trace must not start refusing a run it accepted before, so an
-// unresolvable Baseline commit leaves the field out rather than failing trace.
+// TestTrace_UnresolvedBaselineCommitOmitsProductionPaths locks trace's
+// negative case: trace must not start refusing a run it accepted before, so
+// an unresolvable Baseline commit leaves the field out rather than failing
+// trace.
 func TestTrace_UnresolvedBaselineCommitOmitsProductionPaths(t *testing.T) {
 	repo := fixtureRepoWithUnresolvableBaseline(t)
 

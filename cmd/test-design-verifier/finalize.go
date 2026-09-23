@@ -306,11 +306,7 @@ func finalizeOp(req *finalizeRequest, stdout io.Writer, between func()) *cliErro
 
 	rep, err := report.Compute(in)
 	if err != nil {
-		var refusal *report.RefusalError
-		if errors.As(err, &refusal) {
-			return &cliError{Code: refusal.Code, Message: fmt.Sprintf("%s: %s", op, refusal.Detail)}
-		}
-		return &cliError{Code: "compute-failed", Message: fmt.Sprintf("%s: %v", op, err)}
+		return refusalError(op, err)
 	}
 
 	// The report names every transcript by the digest of the bytes that will
@@ -457,13 +453,21 @@ func finalizeOp(req *finalizeRequest, stdout io.Writer, between func()) *cliErro
 // from reaching recovery.
 func requestFieldRefusal(op string, body *finalizeRequestBody, productionPaths []string) *cliError {
 	if err := report.ValidateFreshness(body.Freshness, productionPaths); err != nil {
-		var refusal *report.RefusalError
-		if errors.As(err, &refusal) {
-			return &cliError{Code: refusal.Code, Message: fmt.Sprintf("%s: %s", op, refusal.Detail)}
-		}
-		return &cliError{Code: "compute-failed", Message: fmt.Sprintf("%s: %v", op, err)}
+		return refusalError(op, err)
 	}
 	return nil
+}
+
+// refusalError translates an error report.Compute or report.ValidateFreshness
+// returns into finalize's own cliError, keeping the refusal's own code and
+// detail; a non-refusal error (neither function currently returns one) falls
+// back to compute-failed rather than being reported as a refusal it never was.
+func refusalError(op string, err error) *cliError {
+	var refusal *report.RefusalError
+	if errors.As(err, &refusal) {
+		return &cliError{Code: refusal.Code, Message: fmt.Sprintf("%s: %s", op, refusal.Detail)}
+	}
+	return &cliError{Code: "compute-failed", Message: fmt.Sprintf("%s: %v", op, err)}
 }
 
 // pendingRefusal turns resume's pending list into finalize's refusal. The two

@@ -83,9 +83,9 @@ func revisionEnvironmentalRow(t *testing.T, s *liveSubject, runID string) {
 	}
 }
 
-func revisionFinalize(t *testing.T, s *liveSubject, runID string) finalizeOutput {
+func revisionFinalize(t *testing.T, s *liveSubject, runID string, body finalizeRequestBody) finalizeOutput {
 	t.Helper()
-	code, stdout, stderr := runVerifyOp(t, "finalize", readyFinalizeRequestJSON(t, s, runID, freshFinalizeBody()))
+	code, stdout, stderr := runVerifyOp(t, "finalize", readyFinalizeRequestJSON(t, s, runID, body))
 	if code != exitOK {
 		t.Fatalf("finalize exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
 	}
@@ -124,7 +124,7 @@ func TestReuse_NewRevisionGetsFreshSuiteAndLive(t *testing.T) {
 	readyGroups(t, s, runA, readDispatchInputs(t, traceA.DispatchPath), policy)
 	revisionEnvironmentalRow(t, s, runA)
 
-	outA := revisionFinalize(t, s, runA)
+	outA := revisionFinalize(t, s, runA, freshFinalizeBody())
 	if outA.Verdict != report.VerdictPartial {
 		t.Fatalf("run A verdict = %q, want %s; reasons=%+v", outA.Verdict, report.VerdictPartial, outA.Reasons)
 	}
@@ -243,7 +243,7 @@ func TestReuse_NewRevisionGetsFreshSuiteAndLive(t *testing.T) {
 		// This revision adopted nothing, so it answers for every layer itself.
 		readyGroups(t, s, runB2, readDispatchInputs(t, tr.DispatchPath), policy)
 		revisionEnvironmentalRow(t, s, runB2)
-		final := revisionFinalize(t, s, runB2)
+		final := revisionFinalize(t, s, runB2, freshFinalizeBodyWithPaths("ready/ready.go"))
 		if final.Verdict != report.VerdictBlocked {
 			t.Fatalf("verdict = %q, want %s; reasons=%+v", final.Verdict, report.VerdictBlocked, final.Reasons)
 		}
