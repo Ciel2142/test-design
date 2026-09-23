@@ -13,6 +13,7 @@ import (
 
 	"test-design/internal/coverage"
 	"test-design/internal/evidence"
+	"test-design/internal/gotestjson"
 	"test-design/internal/jvmrun"
 	"test-design/internal/mutation"
 	"test-design/internal/runrecord"
@@ -398,6 +399,11 @@ func runTargetedAndVerify(op string, src *coverage.Source, suiteDir, wtPath, dir
 		if sr.normalizationError != "" {
 			return "", sr.exitStatus, &cliError{Code: "normalization-failed", Message: fmt.Sprintf("%s: %v", op, sr.normalizationError)}
 		}
+		// Before selection: a non-compiling mutant yields zero records too, but
+		// that's not zero-selection.
+		if len(sr.report.BuildFailed) > 0 {
+			return "", sr.exitStatus, buildFailedError(op, sr.report)
+		}
 		if err := mutation.VerifyGoSelection(sr.report, id); err != nil {
 			return "", sr.exitStatus, &cliError{Code: mapSelectionErr(err), Message: fmt.Sprintf("%s: %v", op, err)}
 		}
@@ -435,6 +441,35 @@ func zeroSelectionError(op string, id mutation.Identity) *cliError {
 		Message: fmt.Sprintf("%s: %v: %s.%s ran but every record was skipped; skips prove nothing executed the guard",
 			op, mutation.ErrZeroSelection, id.Scope, id.Name),
 	}
+}
+
+// buildFailedDetailLimit caps the quoted compiler output, runes, so one bad
+// build dump cannot flood the refusal message.
+const buildFailedDetailLimit = 2000
+
+func buildFailedError(op string, rep *gotestjson.Report) *cliError {
+	return &cliError{
+		Code:    "mutant-build-failed",
+		Message: fmt.Sprintf("%s: mutant did not compile: %s", op, buildFailedDetail(rep)),
+	}
+}
+
+func buildFailedDetail(rep *gotestjson.Report) string {
+	failed := make(map[string]bool, len(rep.BuildFailed))
+	for _, pkg := range rep.BuildFailed {
+		failed[pkg] = true
+	}
+	var parts []string
+	for _, f := range rep.Failures {
+		if failed[f.Package] {
+			parts = append(parts, strings.TrimSpace(f.Detail))
+		}
+	}
+	detail := strings.Join(parts, "\n")
+	if runes := []rune(detail); len(runes) > buildFailedDetailLimit {
+		detail = string(runes[:buildFailedDetailLimit]) + "...(truncated)"
+	}
+	return detail
 }
 
 func goOutcome(sr *suiteRun) string {

@@ -102,8 +102,8 @@ why the row was abandoned.
 
 `evaluate-mutation` refusing `zero-selection`, `target-build-failed`, `clean-run-failed`,
 `cleanup-failed`, or `unexplained-runner-failure` means the environment failed, not the test.
-Record the actual code and message verbatim in `refusal`,
-using the shared request plus `layer: 4` and this `rowID`:
+`mutant-build-failed` is not in this list — see below. Record the actual code and message
+verbatim in `refusal`, using the shared request plus `layer: 4` and this `rowID`:
 
 ```text
 go run -C "$CLAUDE_PLUGIN_ROOT" ./cmd/test-design-verifier record-attempt -request -
@@ -117,6 +117,19 @@ A completed `environmental` record with no attempt artifact is refused
 `missing-attempt-evidence`, and the attempt document is loaded through `report.LoadAttempt`,
 which refuses anything without the envelope. The row becomes `MUTATION-N/A (environmental)`
 and the run yields `PARTIAL`.
+
+A mutated-phase run that never compiled is refused `mutant-build-failed` instead of
+`zero-selection`, quoting the compiler detail, and leaves the `Started` marker in place
+(`Phase: "mutated"`) exactly as any other refusal does. Run `recover-mutation` to restore the
+worktree, then dispatch `mutator` once more for the same site, giving it the compiler output.
+A second `mutant-build-failed` on that same site means the mutation cannot be applied: record
+the row `unappliable` through `record-mutation`, exactly once, with the compiler output as
+`reason` — the same one-entry-per-row rule the confirmation failure above follows. A
+clean-phase build failure is unrelated and still surfaces as `clean-run-failed`.
+
+On the JVM side there is no separate build-failure code: a mutated run is checked for a
+compiler error in the runner output before anything is recorded, and that surfaces as
+`normalization-failed`.
 
 ### Restart
 

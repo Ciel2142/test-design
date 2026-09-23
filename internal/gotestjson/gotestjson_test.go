@@ -1,6 +1,7 @@
 package gotestjson
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -132,6 +133,26 @@ func TestNormalizeBuildFailureBecomesRunnerFailures(t *testing.T) {
 
 	if report.Counts != (Counts{}) {
 		t.Errorf("Counts = %+v, want zero value", report.Counts)
+	}
+}
+
+func TestNormalizeBuildFailRecordsBuildFailed(t *testing.T) {
+	report, err := Normalize(openFixture(t, "build-fail.json"))
+	if err != nil {
+		t.Fatalf("Normalize: %v", err)
+	}
+
+	want := []string{"buildfailfixture [buildfailfixture.test]"}
+	if len(report.BuildFailed) != len(want) || report.BuildFailed[0] != want[0] {
+		t.Errorf("BuildFailed = %+v, want %+v", report.BuildFailed, want)
+	}
+
+	data, err := json.Marshal(report)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(data), "BuildFailed") {
+		t.Errorf("Marshal(report) = %s, want BuildFailed omitted (normalizedReport's hashed bytes must not depend on it)", data)
 	}
 }
 

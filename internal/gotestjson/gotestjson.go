@@ -30,6 +30,9 @@ type Report struct {
 	Records  []runrecord.Record
 	Counts   Counts
 	Failures []RunnerFailure
+	// BuildFailed lists the packages whose build failed.
+	// json:"-": must never change normalizedReport's hashed bytes.
+	BuildFailed []string `json:"-"`
 }
 
 type event struct {
@@ -97,6 +100,7 @@ func Normalize(r io.Reader) (*Report, error) {
 				Package: key,
 				Detail:  failureDetail(packageOutput, key),
 			})
+			report.BuildFailed = append(report.BuildFailed, key)
 		case "output", "build-output":
 			if ev.Test == "" {
 				packageOutput[key] += ev.Output

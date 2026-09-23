@@ -299,6 +299,50 @@ func TestEvaluateMutation_ZeroSelectionOnAlwaysSkippedIdentity(t *testing.T) {
 	}
 }
 
+func TestEvaluateMutation_NonCompilingMutantRefusedDistinctly(t *testing.T) {
+	repo := fixtureRepo(t)
+	prep := preparedMutation(t, repo, "eval-buildfail", "SC-09")
+
+	mutateOrdersGuard(t, prep.WorktreePath, "	return fmt.Errorf(\"unterminated")
+
+	code, stdout, stderr := runVerifyOp(t, "evaluate-mutation",
+		evaluateMutationRequestJSON(t, repo, "eval-buildfail", prep.RunDir, "site-a", true))
+	if code != exitError {
+		t.Fatalf("exit code = %d, want %d; stdout=%s", code, exitError, stdout)
+	}
+	got := decodeCLIError(t, stderr)
+	if got.Code != "mutant-build-failed" {
+		t.Errorf("error code = %q, want mutant-build-failed", got.Code)
+	}
+	if !strings.Contains(got.Message, "orders.go") {
+		t.Errorf("message = %q, want it to quote the compiler detail naming orders.go", got.Message)
+	}
+
+	st, err := mutation.LoadState(prep.RunDir)
+	if err != nil {
+		t.Fatalf("LoadState: %v", err)
+	}
+	if st.Started == nil || st.Started.Phase != "mutated" || st.Started.Site != "site-a" {
+		t.Errorf("started = %+v, want site-a still marked mutated", st.Started)
+	}
+
+	runRecoverMutation(t, repo, "eval-buildfail", prep.RunDir)
+
+	mutateOrdersGuard(t, prep.WorktreePath, `	return fmt.Errorf("always rejected")`)
+	code, stdout, stderr = runVerifyOp(t, "evaluate-mutation",
+		evaluateMutationRequestJSON(t, repo, "eval-buildfail", prep.RunDir, "site-a", true))
+	if code != exitOK {
+		t.Fatalf("re-apply exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+	var out evaluateMutationOutput
+	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
+		t.Fatalf("stdout did not decode: %v\nstdout=%s", err, stdout)
+	}
+	if out.Outcome != "caught" {
+		t.Errorf("outcome = %q, want caught", out.Outcome)
+	}
+}
+
 func TestEvaluateMutation_DuplicateSiteRefused(t *testing.T) {
 	repo := fixtureRepo(t)
 	prep := preparedMutation(t, repo, "eval-dup", "SC-09")
