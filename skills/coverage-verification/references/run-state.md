@@ -244,10 +244,11 @@ reported, or is not the row's named mutation at that site. It writes the rejecte
 `discard-<n>.diff` (`<n>` counts discards across the whole row, 1-based, alongside the row's
 `site-<n>.diff` files in the same `runDir`), restores the worktree to the prepared commit with
 the same `RestoreAll` `recover-mutation` uses, and appends the discard to
-`mutation-state.json` — it never opens or writes the ledger. A site already evaluated cannot be
-discarded (`duplicate-site`); one outside the row's registered list is refused `unknown-site`
-once a list is registered, or `invalid-sites` on its shape before one is. Two discards of the
-same site are allowed; a third is refused `discard-limit`, at which point the site cannot be
+`mutation-state.json` — it never opens or writes the ledger. `site`'s shape — non-empty, no `/`
+or `\` — is checked at request decode, before any state loads, and refused `invalid-sites`
+whether or not a list is registered; a site already evaluated cannot be discarded
+(`duplicate-site`), and one outside the row's registered list, once one exists, is refused
+`unknown-site`. Two discards of the same site are allowed; a third is refused `discard-limit`, at which point the site cannot be
 applied and the row is recorded `unappliable` through `record-mutation`. A refused restore
 (`restore-failed`, `residue-remains`) never appends a discard or rewrites the state file.
 
@@ -313,7 +314,7 @@ the spelling each example shows is the one the op documents and the one its outp
 | `prepare-mutation`, `evaluate-mutation`, `record-mutation`, `recover-mutation`, `discard-mutation-edit` | `mutation-row-completed` | The row is already completed for this run (and, for `prepare-mutation`, the request carried no `repeat.reason`) |
 | `evaluate-mutation` | `missing-sites` | This is the row's first call, the row has no registered site list yet, and the request carries no `sites` |
 | `evaluate-mutation` | `invalid-sites` | A label in `sites` is empty, contains `/` or `\`, repeats another label in the same list, or `site` is not among the labels `sites` names |
-| `discard-mutation-edit` | `invalid-sites` | The row has no registered site list yet and `site` is empty or contains `/` or `\` |
+| `discard-mutation-edit` | `invalid-sites` | `site` is empty or contains `/` or `\` — checked at request decode, before the row's state or registered list (if any) even loads, so it fires whether or not a list is registered |
 | `evaluate-mutation` | `enumeration-changed` | `sites` is present and, compared to the row's already-registered list as a set, disagrees with it |
 | `evaluate-mutation`, `discard-mutation-edit` | `unknown-site` | `site` is not a member of the row's registered list |
 | `evaluate-mutation` | `sites-remaining` | `lastSite: true` arrived while a registered site other than `site` itself still has no evaluated outcome; the row stays started and the worktree is untouched |

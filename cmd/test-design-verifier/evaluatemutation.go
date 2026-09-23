@@ -106,14 +106,8 @@ func decodeEvaluateMutationRequest(op string, requestBody []byte) (*evaluateMuta
 		return nil, &cliError{Code: "malformed-request", Message: fmt.Sprintf("%s: decode request: %v", op, err)}
 	}
 
-	if extra.RunDir == "" {
-		return nil, &cliError{Code: "missing-run-dir", Message: fmt.Sprintf("%s: runDir is required", op)}
-	}
-	if !filepath.IsAbs(extra.RunDir) {
-		return nil, &cliError{Code: "run-dir-not-absolute", Message: fmt.Sprintf("%s: runDir %q must be an absolute path", op, extra.RunDir)}
-	}
-	if info, err := os.Stat(extra.RunDir); err != nil || !info.IsDir() {
-		return nil, &cliError{Code: "run-dir-not-found", Message: fmt.Sprintf("%s: runDir %q does not exist", op, extra.RunDir)}
+	if cliErr := validateRunDir(op, extra.RunDir); cliErr != nil {
+		return nil, cliErr
 	}
 
 	if extra.Site == "" {

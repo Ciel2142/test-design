@@ -109,10 +109,11 @@ the row's named mutation) to the shared body. The op writes the rejected diff to
 the same restoration `recover-mutation` uses, untracked additions included — and records the
 discard against the site in the row's state; it never touches the ledger. Dispatch `mutator`
 again for exactly that site once the call succeeds: a fresh edit there, not a retry of the
-rejected one. Sites already evaluated stand untouched either way — discarding one is refused
-`duplicate-site`, the same code a repeat `evaluate-mutation` call for it gets — and a site
-outside the row's registered list is refused `unknown-site` once a list is registered, or
-`invalid-sites` on its shape before one is.
+rejected one. `site`'s shape — non-empty, no `/` or `\` — is checked at request decode, before
+any state loads, and refused `invalid-sites` whether or not a list is registered. Sites already
+evaluated stand untouched either way — discarding one is refused `duplicate-site`, the same code
+a repeat `evaluate-mutation` call for it gets — and a site outside the row's registered list,
+once one exists, is refused `unknown-site`.
 
 A site may be discarded twice; a third rejection of the same site is refused `discard-limit`.
 When it is, the site cannot be applied at all, and the row cannot complete without every

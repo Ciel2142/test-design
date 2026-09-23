@@ -252,6 +252,81 @@ func TestDiscardMutationEdit_RefusedRestoreWritesNoState(t *testing.T) {
 	}
 }
 
+func TestDiscardMutationEdit_MalformedLabelRefusedWithRegisteredList(t *testing.T) {
+	repo := fixtureRepo(t)
+	const runID = "discard-malformed-label"
+	prep := preparedMutation(t, repo, runID, "SC-09")
+
+	mutateOrdersGuard(t, prep.WorktreePath, "	if qty < 0 {\n\t\treturn fmt.Errorf(\"quantity must be positive\")\n\t}\n\treturn nil")
+	code, _, stderr := runVerifyOp(t, "evaluate-mutation",
+		evaluateMutationRequestJSON(t, repo, runID, prep.RunDir, "site-a", false, "site-a", "site-b"))
+	if code != exitOK {
+		t.Fatalf("site-a exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+
+	got := refuseDiscardMutationEdit(t, repo, runID, prep.RunDir, "a/b", "malformed label")
+
+	if got.Code != "invalid-sites" {
+		t.Errorf("error code = %q, want invalid-sites", got.Code)
+	}
+	if lines := gitStatusLines(t, prep.WorktreePath); len(lines) != 0 {
+		t.Errorf("worktree git status = %v, want it untouched by the refusal", lines)
+	}
+}
+
+func TestDiscardMutationEdit_RowWideDiffCounterIndependentOfPerSiteLimit(t *testing.T) {
+	repo := fixtureRepo(t)
+	const runID = "discard-row-wide-counter"
+	prep := preparedMutation(t, repo, runID, "SC-09")
+
+	mutateOrdersGuard(t, prep.WorktreePath, `	return fmt.Errorf("site-a first rejection")`)
+	first := runDiscardMutationEdit(t, repo, runID, prep.RunDir, "site-a", "site-a first rejection")
+	if got := filepath.Base(first.DiffPath); got != "discard-1.diff" {
+		t.Errorf("diffPath = %q, want discard-1.diff", got)
+	}
+
+	mutateOrdersGuard(t, prep.WorktreePath, `	return fmt.Errorf("site-b first rejection")`)
+	second := runDiscardMutationEdit(t, repo, runID, prep.RunDir, "site-b", "site-b first rejection")
+	if got := filepath.Base(second.DiffPath); got != "discard-2.diff" {
+		t.Errorf("diffPath = %q, want discard-2.diff", got)
+	}
+
+	mutateOrdersGuard(t, prep.WorktreePath, `	return fmt.Errorf("site-a second rejection")`)
+	third := runDiscardMutationEdit(t, repo, runID, prep.RunDir, "site-a", "site-a second rejection")
+	if got := filepath.Base(third.DiffPath); got != "discard-3.diff" {
+		t.Errorf("diffPath = %q, want discard-3.diff", got)
+	}
+
+	mutateOrdersGuard(t, prep.WorktreePath, `	return fmt.Errorf("site-a third rejection")`)
+	got := refuseDiscardMutationEdit(t, repo, runID, prep.RunDir, "site-a", "site-a third rejection")
+	if got.Code != "discard-limit" {
+		t.Errorf("error code = %q, want discard-limit", got.Code)
+	}
+
+	st, err := mutation.LoadState(prep.RunDir)
+	if err != nil {
+		t.Fatalf("LoadState: %v", err)
+	}
+	if len(st.Discarded) != 3 {
+		t.Fatalf("discarded = %+v, want 3 entries: the refused third site-a discard adds none", st.Discarded)
+	}
+	siteACount, siteBCount := 0, 0
+	for _, d := range st.Discarded {
+		switch d.Site {
+		case "site-a":
+			siteACount++
+		case "site-b":
+			siteBCount++
+		}
+	}
+	if siteACount != 2 {
+		t.Errorf("site-a discards = %d, want 2 (the per-site limit)", siteACount)
+	}
+	if siteBCount != 1 {
+		t.Errorf("site-b discards = %d, want 1", siteBCount)
+	}
+}
+
 func TestDiscardMutationEdit_LimitRefused(t *testing.T) {
 	repo := fixtureRepo(t)
 	const runID = "discard-limit"

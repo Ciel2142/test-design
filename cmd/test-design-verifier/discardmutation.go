@@ -12,13 +12,10 @@ import (
 
 	"test-design/internal/evidence"
 	"test-design/internal/mutation"
-	"test-design/internal/runstate"
 	"test-design/internal/worktree"
 )
 
-// discardLimitPerSite is how many rejected edits one site may go through
-// before the row is unappliable: a third rejection means the site cannot be
-// applied at all.
+// discardLimitPerSite: a third discard of one site cannot be applied.
 const discardLimitPerSite = 2
 
 type discardMutationEditRequest struct {
@@ -57,14 +54,8 @@ func decodeDiscardMutationEditRequest(op string, requestBody []byte) (*discardMu
 	if err := json.Unmarshal(requestBody, &extra); err != nil {
 		return nil, &cliError{Code: "malformed-request", Message: fmt.Sprintf("%s: decode request: %v", op, err)}
 	}
-	if extra.RunDir == "" {
-		return nil, &cliError{Code: "missing-run-dir", Message: fmt.Sprintf("%s: runDir is required", op)}
-	}
-	if !filepath.IsAbs(extra.RunDir) {
-		return nil, &cliError{Code: "run-dir-not-absolute", Message: fmt.Sprintf("%s: runDir %q must be an absolute path", op, extra.RunDir)}
-	}
-	if info, err := os.Stat(extra.RunDir); err != nil || !info.IsDir() {
-		return nil, &cliError{Code: "run-dir-not-found", Message: fmt.Sprintf("%s: runDir %q does not exist", op, extra.RunDir)}
+	if cliErr := validateRunDir(op, extra.RunDir); cliErr != nil {
+		return nil, cliErr
 	}
 	if strings.TrimSpace(extra.Reason) == "" {
 		return nil, &cliError{Code: "missing-reason", Message: fmt.Sprintf("%s: reason is required", op)}
@@ -93,38 +84,9 @@ func discardMutationEditHandler(fs *flag.FlagSet, requestBody []byte, stdout io.
 func discardMutationEditOp(req *discardMutationEditRequest, stdout io.Writer) *cliError {
 	const op = "discard-mutation-edit"
 
-	src, cliErr := loadVerifiedSource(op, req.RepoRoot, req.CoverageSource)
+	st, cliErr := mutationRowPrelude(op, &req.verifyRequest, req.RunDir)
 	if cliErr != nil {
 		return cliErr
-	}
-	st, err := mutation.LoadState(req.RunDir)
-	if err != nil {
-		return &cliError{Code: "state-load-failed", Message: fmt.Sprintf("%s: %v", op, err)}
-	}
-	head, cliErr := headCommit(op, req.RepoRoot)
-	if cliErr != nil {
-		return cliErr
-	}
-	if st.RunID != req.RunID || st.RepoCommit != head || st.Source != src.Path || st.SourceSHA256 != src.SHA256 {
-		return &cliError{Code: "stale-evidence", Message: fmt.Sprintf("%s: prepared state does not match request run/source/HEAD; prepare again", op)}
-	}
-
-	store, cliErr := openLedger(op, &req.verifyRequest)
-	if cliErr != nil {
-		return cliErr
-	}
-	ledger, cliErr := loadLedgerFor(op, runstate.KindMutationRow, store)
-	if cliErr != nil {
-		return cliErr
-	}
-	switch current := runstate.Current(ledger, runstate.KindMutationRow, st.RowID); {
-	case current == nil:
-		return &cliError{
-			Code:    "mutation-row-not-started",
-			Message: fmt.Sprintf("%s: %s was never prepared for this run", op, st.RowID),
-		}
-	case current.Status == runstate.StatusCompleted:
-		return completedRecordRefusal(op, runstate.KindMutationRow, st.RowID)
 	}
 
 	if st.Started != nil {
