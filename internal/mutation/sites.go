@@ -44,12 +44,23 @@ func ResolveEnumerated(existing, alreadyEvaluated, requestSites []string, site s
 	return requestSites, nil
 }
 
+// ValidateSiteLabel checks a single site label's shape: non-empty and free of
+// path separators. It is the check a caller with no registered list to check
+// membership against still owes a label — discard-mutation-edit's first call
+// for a row, before any evaluate-mutation has registered one.
+func ValidateSiteLabel(site string) error {
+	if site == "" || strings.ContainsAny(site, `/\`) {
+		return fmt.Errorf("%w: site label %q must be non-empty and free of path separators", ErrInvalidSites, site)
+	}
+	return nil
+}
+
 func validateSiteLabels(sites []string, site string) error {
 	seen := make(map[string]bool, len(sites))
 	member := false
 	for _, s := range sites {
-		if s == "" || strings.ContainsAny(s, `/\`) {
-			return fmt.Errorf("%w: site label %q must be non-empty and free of path separators", ErrInvalidSites, s)
+		if err := ValidateSiteLabel(s); err != nil {
+			return err
 		}
 		if seen[s] {
 			return fmt.Errorf("%w: site label %q is duplicated", ErrInvalidSites, s)

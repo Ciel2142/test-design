@@ -35,6 +35,20 @@ type State struct {
 	// site's own completion or by recover-mutation, so a state document
 	// found carrying it says the workspace is of unknown cleanliness.
 	Started *SiteAttempt `json:"started,omitempty"`
+	// Discarded is every rejected mutator edit this row's confirmation step
+	// has discarded, in the order discard-mutation-edit recorded them.
+	// recover-mutation writes it back unchanged along with the rest of st.
+	Discarded []DiscardRecord `json:"discarded,omitempty"`
+}
+
+// DiscardRecord is one edit discard-mutation-edit rejected: the site it was
+// applied at, the caller's reason, and the diff it captured before restoring
+// the worktree.
+type DiscardRecord struct {
+	Site       string `json:"site"`
+	Reason     string `json:"reason"`
+	DiffPath   string `json:"diffPath"`
+	DiffSHA256 string `json:"diffSha256"`
 }
 
 // SiteAttempt is the site an evaluation had in flight when the state was last

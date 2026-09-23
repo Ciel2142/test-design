@@ -55,9 +55,9 @@ Per site, in the order the agent listed them:
    mutation that reproduces the row's fault from an unrelated one-line edit that happens to
    pass the same checks. This confirmation is the only place that judgment happens.
 
-   If it is not the named mutation, the **row** is over. Do not call `evaluate-mutation` for
-   this site or for any later site of this row; record the one row entry described under
-   [When confirmation fails](#when-confirmation-fails) and move to the next row.
+   If it is not the named mutation, discard it — see
+   [When confirmation fails](#when-confirmation-fails) — and do not call `evaluate-mutation`
+   for this site while the rejected edit is still in the worktree.
 3. Evaluate:
 
    ```text
@@ -95,25 +95,39 @@ or evidence a run reused from an earlier one, is accepted as before.
 
 ### When confirmation fails
 
-A confirmation failure aborts the **row**, not just the site — at any position in the site
-list, including the middle of it. Nothing in that worktree can be salvaged afterwards:
-`mutator` never reverts its own edit and only `evaluate-mutation` restores the source, so the
-unconfirmed edit stays on disk and the diff police refuses every later call against that
-worktree; and a site already evaluated cannot be re-run, because `evaluate-mutation` refuses
-a repeat as `duplicate-site`. There is no "last good site" to fall back to.
+A confirmation failure discards the **edit**, not the row. `mutator` never reverts its own
+edit and only `evaluate-mutation` restores the source, so the rejected edit would otherwise
+sit on disk forever; discard it instead:
 
-So, exactly once for the row:
-
-```json
-{"rowId": "SC-07", "outcome": "unappliable", "reason": "<what the diff actually did, at which site>"}
+```text
+go run -C "$CLAUDE_PLUGIN_ROOT" ./cmd/test-design-verifier discard-mutation-edit -request -
 ```
 
-One entry per row — a second entry for the same row is refused `duplicate-verdict`. Evaluate
-no further site of that row, and make no further `evaluate-mutation` call against that
-worktree. No op will dispose it, so leave it in place and name both its `worktreePath` and its
-`runDir` in the report and to the user, so it can be removed: disposing an abandoned worktree
-is the controller's job, not this thread's, and deleting it by hand destroys the evidence of
-why the row was abandoned.
+The request adds `runDir`, `site`, and `reason` (what the diff actually did, or why it is not
+the row's named mutation) to the shared body. The op writes the rejected diff to
+`discard-<n>.diff`, restores the worktree to the commit `prepare-mutation` checked it out at —
+the same restoration `recover-mutation` uses, untracked additions included — and records the
+discard against the site in the row's state; it never touches the ledger. Dispatch `mutator`
+again for exactly that site once the call succeeds: a fresh edit there, not a retry of the
+rejected one. Sites already evaluated stand untouched either way — discarding one is refused
+`duplicate-site`, the same code a repeat `evaluate-mutation` call for it gets — and a site
+outside the row's registered list is refused `unknown-site` once a list is registered, or
+`invalid-sites` on its shape before one is.
+
+A site may be discarded twice; a third rejection of the same site is refused `discard-limit`.
+When it is, the site cannot be applied at all, and the row cannot complete without every
+registered site answered — so record the row unappliable, exactly once:
+
+```json
+{"rowId": "SC-07", "outcome": "unappliable", "reason": "<the discard reasons, verbatim>"}
+```
+
+One entry per row — a second entry for the same row is refused `duplicate-verdict`. Evaluate no
+further site of that row, and make no further `evaluate-mutation` or `discard-mutation-edit`
+call against that worktree. No op will dispose it, so leave it in place and name both its
+`worktreePath` and its `runDir` in the report and to the user, so it can be removed: disposing
+an abandoned worktree is the controller's job, not this thread's, and deleting it by hand
+destroys the evidence of why the row was abandoned.
 
 ### Environmental refusals
 
@@ -152,9 +166,9 @@ compiler error in the runner output before anything is recorded, and that surfac
 
 If a run is picked back up, `resume` names every started mutation row with its
 `completedSites` and its `interruptedSite` — read [run state](run-state.md) in full before
-repeating any op here. `evaluate-mutation` refuses `site-interrupted` for that row until
-`recover-mutation` has restored or recreated its workspace: nothing is measured on a worktree
-of unknown cleanliness. Completed sites are kept either way — recovery never re-measures a
+repeating any op here. `evaluate-mutation` and `discard-mutation-edit` both refuse
+`site-interrupted` for that row until `recover-mutation` has restored or recreated its
+workspace: nothing is measured or discarded on a worktree of unknown cleanliness. Completed sites are kept either way — recovery never re-measures a
 site the row already answered. `recover-mutation` never touches the row's registered `sites`
 either: resending a different list afterward is still refused `enumeration-changed`, and the
 label `interruptedSite` names stays a member of it. A refused recovery leaves the row exactly

@@ -467,6 +467,9 @@ func TestRecoverMutation_PreservesRegisteredSites(t *testing.T) {
 		t.Fatalf("LoadState: %v", err)
 	}
 	st.Enumerated = []string{"site-a", "site-b"}
+	st.Discarded = []mutation.DiscardRecord{
+		{Site: "site-b", Reason: "not the named mutation", DiffPath: filepath.Join(prep.RunDir, "discard-1.diff"), DiffSHA256: "deadbeef"},
+	}
 	if err := mutation.WriteState(prep.RunDir, st); err != nil {
 		t.Fatalf("WriteState: %v", err)
 	}
@@ -479,5 +482,8 @@ func TestRecoverMutation_PreservesRegisteredSites(t *testing.T) {
 	}
 	if len(after.Enumerated) != 2 || after.Enumerated[0] != "site-a" || after.Enumerated[1] != "site-b" {
 		t.Errorf("Enumerated = %v, want [site-a site-b] preserved through recovery", after.Enumerated)
+	}
+	if len(after.Discarded) != 1 || after.Discarded[0].Site != "site-b" {
+		t.Errorf("Discarded = %+v, want the discard record preserved through recovery", after.Discarded)
 	}
 }

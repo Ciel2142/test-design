@@ -95,6 +95,30 @@ func TestResolveEnumeratedLaterCallDifferentSetRefused(t *testing.T) {
 	}
 }
 
+func TestValidateSiteLabel(t *testing.T) {
+	cases := []struct {
+		name    string
+		site    string
+		wantErr bool
+	}{
+		{"valid", "site-a", false},
+		{"empty", "", true},
+		{"forward slash", "a/b", true},
+		{"backslash", `a\b`, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := ValidateSiteLabel(c.site)
+			if c.wantErr && !errors.Is(err, ErrInvalidSites) {
+				t.Errorf("ValidateSiteLabel(%q) = %v, want ErrInvalidSites", c.site, err)
+			}
+			if !c.wantErr && err != nil {
+				t.Errorf("ValidateSiteLabel(%q) = %v, want nil", c.site, err)
+			}
+		})
+	}
+}
+
 func TestCheckSiteKnown(t *testing.T) {
 	registered := []string{"site-a", "site-b"}
 	if err := CheckSiteKnown(registered, "site-a"); err != nil {

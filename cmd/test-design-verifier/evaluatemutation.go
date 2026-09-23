@@ -63,20 +63,28 @@ type mutationSiteEvidence struct {
 	CleanExitStatus   int    `json:"cleanExitStatus"`
 }
 
+type mutationDiscardEvidence struct {
+	Site       string `json:"site"`
+	Reason     string `json:"reason"`
+	DiffPath   string `json:"diffPath"`
+	DiffSHA256 string `json:"diffSha256"`
+}
+
 type mutationEvidence struct {
 	evidence.Envelope
-	RunID           string                 `json:"runId"`
-	RowID           string                 `json:"rowID"`
-	RepoCommit      string                 `json:"repoCommit"`
-	Source          string                 `json:"source"`
-	SourceSHA256    string                 `json:"sourceSha256"`
-	Identity        identityOutput         `json:"identity"`
-	RunnerKind      string                 `json:"runnerKind"`
-	SuiteCommand    []string               `json:"suiteCommand"`
-	TargetCommand   []string               `json:"targetCommand"`
-	Sites           []mutationSiteEvidence `json:"sites"`
-	SnapshotEqual   bool                   `json:"snapshotEqual"`
-	EnumeratedSites []string               `json:"enumeratedSites,omitempty"`
+	RunID           string                    `json:"runId"`
+	RowID           string                    `json:"rowID"`
+	RepoCommit      string                    `json:"repoCommit"`
+	Source          string                    `json:"source"`
+	SourceSHA256    string                    `json:"sourceSha256"`
+	Identity        identityOutput            `json:"identity"`
+	RunnerKind      string                    `json:"runnerKind"`
+	SuiteCommand    []string                  `json:"suiteCommand"`
+	TargetCommand   []string                  `json:"targetCommand"`
+	Sites           []mutationSiteEvidence    `json:"sites"`
+	SnapshotEqual   bool                      `json:"snapshotEqual"`
+	EnumeratedSites []string                  `json:"enumeratedSites,omitempty"`
+	Discarded       []mutationDiscardEvidence `json:"discarded,omitempty"`
 }
 
 func decodeEvaluateMutationRequest(op string, requestBody []byte) (*evaluateMutationRequest, *cliError) {
@@ -360,6 +368,7 @@ func evaluateMutationOp(req *evaluateMutationRequest, stdout io.Writer, between 
 		Sites:           siteRecords,
 		SnapshotEqual:   true,
 		EnumeratedSites: st.Enumerated,
+		Discarded:       discardEvidenceRecords(st.Discarded),
 	}
 	if err := evidence.WriteJSON(evidencePath, &ev); err != nil {
 		return &cliError{Code: "evidence-write-failed", Message: fmt.Sprintf("evaluate-mutation: %v", err)}
@@ -534,6 +543,19 @@ func policeDiffCode(err error) string {
 	default:
 		return "diff-police-failed"
 	}
+}
+
+func discardEvidenceRecords(discards []mutation.DiscardRecord) []mutationDiscardEvidence {
+	out := make([]mutationDiscardEvidence, 0, len(discards))
+	for _, d := range discards {
+		out = append(out, mutationDiscardEvidence{
+			Site:       d.Site,
+			Reason:     d.Reason,
+			DiffPath:   d.DiffPath,
+			DiffSHA256: d.DiffSHA256,
+		})
+	}
+	return out
 }
 
 func siteEvidenceRecords(sites []mutation.SiteOutcome) ([]mutationSiteEvidence, error) {

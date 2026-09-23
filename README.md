@@ -42,7 +42,7 @@ runs as `go run -C "$CLAUDE_PLUGIN_ROOT" ./cmd/test-design-verifier <op> …`.
 
 Both skills drive every mechanical step — the repository snapshot, the disposable
 worktrees, the suite runs, the tag binding, the live plan execution, the mutation
-apply/evaluate cycle, and the verdict computation — through fifteen ops of one Go
+apply/evaluate cycle, and the verdict computation — through sixteen ops of one Go
 executable:
 
 | Op | What it does |
@@ -58,6 +58,7 @@ executable:
 | `evaluate-mutation` | runs a mutated site's targeted test, requires it to fail, restores the source, and reruns it to require a pass |
 | `record-mutation` | records a row's mutation as unappliable in the run's ledger when no site of its verification mutation applies as a code-level fault |
 | `recover-mutation` | restores or recreates an interrupted mutation row's worktree so evaluation can continue |
+| `discard-mutation-edit` | discards a mutator edit that failed confirmation, restoring the worktree so the same site can be re-dispatched |
 | `prepare-live` | opens a disposable worktree and the run's live-profile descriptor for layer 3 |
 | `execute-live` | validates and runs a live plan against the real system, capturing reduced transcripts |
 | `record-attempt` | records an observed live or mutation refusal with verifier-stamped run, source, and commit identity |

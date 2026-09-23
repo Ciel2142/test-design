@@ -237,6 +237,30 @@ Merged into the shared request body — `runDir` (the row's prepared run directo
 Output: `rowId`, `worktreePath` (the surviving or recreated path), `recreated`,
 `completedSites`, `interruptedSite` (now `""`).
 
+### Discarding a rejected mutator edit: discard-mutation-edit
+
+Call it once your own confirmation of the mutator's edit finds it does not match what was
+reported, or is not the row's named mutation at that site. It writes the rejected diff to
+`discard-<n>.diff` (`<n>` counts discards across the whole row, 1-based, alongside the row's
+`site-<n>.diff` files in the same `runDir`), restores the worktree to the prepared commit with
+the same `RestoreAll` `recover-mutation` uses, and appends the discard to
+`mutation-state.json` — it never opens or writes the ledger. A site already evaluated cannot be
+discarded (`duplicate-site`); one outside the row's registered list is refused `unknown-site`
+once a list is registered, or `invalid-sites` on its shape before one is. Two discards of the
+same site are allowed; a third is refused `discard-limit`, at which point the site cannot be
+applied and the row is recorded `unappliable` through `record-mutation`. A refused restore
+(`restore-failed`, `residue-remains`) never appends a discard or rewrites the state file.
+
+Merged into the shared request body — `runDir` (the row's prepared run directory, absolute),
+`site`, `reason` (what the diff actually did, or why it is not the named mutation; required,
+never blank):
+
+```json
+{"runDir": "<the row's run dir>", "site": "guard-always-errors", "reason": "touched payments.go, not the named guard"}
+```
+
+Output: `runId`, `rowId`, `site`, `reason`, `diffPath`, `worktreePath`.
+
 ### `repeat.reason`
 
 `trace`, `prepare-mutation`, `record-review started`, `execute-live` and `record-attempt` each
@@ -254,9 +278,9 @@ alongside the new one, so nothing about what actually happened is lost when it i
 ### Request field spelling
 
 The canonical spelling of the row identity differs by op: `record-review`
-(`verdicts[].rowId`), `record-mutation` (`rowId`) and the `resume`/`recover-mutation` outputs
-spell it `rowId`; the `prepare-mutation`, `evaluate-mutation` and `record-attempt` requests
-spell it `rowID`. Copy the field name from each op's own example. The decoder matches a JSON
+(`verdicts[].rowId`), `record-mutation` (`rowId`) and the `resume`/`recover-mutation`/
+`discard-mutation-edit` outputs spell it `rowId`; the `prepare-mutation`, `evaluate-mutation`
+and `record-attempt` requests spell it `rowID`. Copy the field name from each op's own example. The decoder matches a JSON
 key case-insensitively when no exact match exists, so a `rowID` pasted into `record-mutation`,
 or a `rowId` pasted into `prepare-mutation`, is accepted rather than ignored or refused — but
 the spelling each example shows is the one the op documents and the one its output uses.
@@ -267,9 +291,9 @@ the spelling each example shows is the one the op documents and the one its outp
 |---|---|---|
 | `trace` | `phase-completed` | The trace phase is already completed for this run and the request carried no `repeat.reason`; add one or use a new run ID |
 | `trace`, `record-review`, `prepare-mutation`, `evaluate-mutation`, `record-mutation`, `record-attempt`, `execute-live` | `ledger-identity-mismatch` | The ledger already belongs to a different repo root, commit, source path or source digest than this request presents — raised by the ledger transaction every `Start`/`Complete` runs in, before any check inside it; `resume` and `recover-mutation` never write, so they never return it |
-| every ledger-touching op — `trace`, `record-review`, `prepare-mutation`, `evaluate-mutation`, `record-mutation`, `recover-mutation`, `record-attempt`, `execute-live`, `resume` | `ledger-open-failed` | The state dir could not be resolved, or it resolves inside the repository under verification — raised by `openLedger` itself, before anything is read |
+| every ledger-touching op — `trace`, `record-review`, `prepare-mutation`, `evaluate-mutation`, `record-mutation`, `recover-mutation`, `discard-mutation-edit`, `record-attempt`, `execute-live`, `resume` | `ledger-open-failed` | The state dir could not be resolved, or it resolves inside the repository under verification — raised by `openLedger` itself, before anything is read |
 | every ledger-touching op — same list as above | `ledger-invalid` | The checkpoint could not be parsed, names a foreign schema version, or holds two current records for one obligation — raised wherever the checkpoint is loaded, whether for a read or at the start of a write transaction |
-| every ledger-touching op except `resume` and `recover-mutation`, which never write — `trace`, `record-review`, `prepare-mutation`, `evaluate-mutation`, `record-mutation`, `record-attempt`, `execute-live` | `ledger-write-failed` | The checkpoint could not be replaced after a `Start` or `Complete` transition; the prior checkpoint stands unchanged |
+| every ledger-touching op except `resume`, `recover-mutation` and `discard-mutation-edit`, which never write — `trace`, `record-review`, `prepare-mutation`, `evaluate-mutation`, `record-mutation`, `record-attempt`, `execute-live` | `ledger-write-failed` | The checkpoint could not be replaced after a `Start` or `Complete` transition; the prior checkpoint stands unchanged |
 | `record-review` | `missing-group-id` | `groupId` is required |
 | `record-review` | `invalid-group-id` | `groupId` must be a plain name of letters, digits, dot, dash or underscore |
 | `record-review` | `invalid-status` | `status` must be `started` or `completed` |
@@ -286,26 +310,31 @@ the spelling each example shows is the one the op documents and the one its outp
 | `record-review` | `verdict-outside-group` | A verdict names a row that is not one of the group's own |
 | `record-review` | `invalid-verdict` | A verdict value is not one of `HOLDS`, `WEAK`, `VACUOUS`, `MISSING` |
 | `record-review` | `dispatch-inputs-changed` | The group was judged against dispatch inputs the run no longer hands out; regroup against the current trace |
-| `prepare-mutation`, `evaluate-mutation`, `record-mutation`, `recover-mutation` | `mutation-row-completed` | The row is already completed for this run (and, for `prepare-mutation`, the request carried no `repeat.reason`) |
+| `prepare-mutation`, `evaluate-mutation`, `record-mutation`, `recover-mutation`, `discard-mutation-edit` | `mutation-row-completed` | The row is already completed for this run (and, for `prepare-mutation`, the request carried no `repeat.reason`) |
 | `evaluate-mutation` | `missing-sites` | This is the row's first call, the row has no registered site list yet, and the request carries no `sites` |
 | `evaluate-mutation` | `invalid-sites` | A label in `sites` is empty, contains `/` or `\`, repeats another label in the same list, or `site` is not among the labels `sites` names |
+| `discard-mutation-edit` | `invalid-sites` | The row has no registered site list yet and `site` is empty or contains `/` or `\` |
 | `evaluate-mutation` | `enumeration-changed` | `sites` is present and, compared to the row's already-registered list as a set, disagrees with it |
-| `evaluate-mutation` | `unknown-site` | `site` is not a member of the row's registered list |
+| `evaluate-mutation`, `discard-mutation-edit` | `unknown-site` | `site` is not a member of the row's registered list |
 | `evaluate-mutation` | `sites-remaining` | `lastSite: true` arrived while a registered site other than `site` itself still has no evaluated outcome; the row stays started and the worktree is untouched |
-| `evaluate-mutation` | `site-interrupted` | The workspace carries an uncleared interruption marker; run `recover-mutation` before measuring another site |
-| `evaluate-mutation`, `record-mutation`, `recover-mutation` | `mutation-row-not-started` | The row was never prepared for this run |
+| `evaluate-mutation`, `discard-mutation-edit` | `site-interrupted` | The workspace carries an uncleared interruption marker; run `recover-mutation` before measuring or discarding another site |
+| `evaluate-mutation`, `discard-mutation-edit` | `duplicate-site` | `site` already has an evaluated outcome recorded for this row; a repeat evaluation or a discard of it is refused alike |
+| `discard-mutation-edit` | `missing-reason` | `reason` is required; a discard without one is not evidence |
+| `discard-mutation-edit` | `discard-limit` | `site` has already been discarded twice for this row; a third rejection means the site cannot be applied — record the row `unappliable` through `record-mutation` |
+| `evaluate-mutation`, `record-mutation`, `recover-mutation`, `discard-mutation-edit` | `mutation-row-not-started` | The row was never prepared for this run |
 | `record-mutation` | `missing-row-id` | `rowId` is required |
 | `record-mutation` | `unknown-row` | The row is not active in the coverage source |
 | `record-mutation` | `invalid-outcome` | The only outcome this op may record is `unappliable`; a caught or survived verdict comes from `evaluate-mutation` |
 | `record-mutation` | `missing-reason` | An `unappliable` row needs a reason; a blank one is not evidence |
-| `recover-mutation` | `missing-run-dir` | `runDir` is required |
-| `recover-mutation` | `run-dir-not-absolute` | `runDir` must be an absolute path |
-| `recover-mutation` | `run-dir-not-found` | `runDir` does not exist |
-| `recover-mutation` | `state-load-failed` | `mutation-state.json` in `runDir` could not be read |
-| `recover-mutation` | `stale-evidence` | The prepared state's run, source or HEAD no longer matches the request; prepare again |
+| `recover-mutation`, `discard-mutation-edit` | `missing-run-dir` | `runDir` is required |
+| `recover-mutation`, `discard-mutation-edit` | `run-dir-not-absolute` | `runDir` must be an absolute path |
+| `recover-mutation`, `discard-mutation-edit` | `run-dir-not-found` | `runDir` does not exist |
+| `recover-mutation`, `discard-mutation-edit` | `state-load-failed` | `mutation-state.json` in `runDir` could not be read |
+| `recover-mutation`, `discard-mutation-edit` | `stale-evidence` | The prepared state's run, source or HEAD no longer matches the request; prepare again |
 | `recover-mutation` | `restore-failed` | The attached worktree could not be reset to the prepared commit, or the worktree path exists as something other than a directory, or could not be checked at all |
+| `discard-mutation-edit` | `restore-failed` | The attached worktree could not be restored to the prepared commit after the rejected edit's diff was captured |
 | `recover-mutation` | `recreate-failed` | A vanished worktree's own registry entry could not be forgotten, or a replacement could not be created |
-| `recover-mutation` | `residue-remains` | The restored worktree still carries ignored or untracked paths after reset |
+| `recover-mutation`, `discard-mutation-edit` | `residue-remains` | The restored worktree still carries ignored or untracked paths after reset |
 | `recover-mutation` | `wrong-revision` | The restored worktree's HEAD is not the prepared commit |
 | `record-attempt` | `mutation-row-completed` | Layer 4's row is already completed for this run |
 | `prepare-live`, `record-attempt`, `execute-live` | `live-attempt-completed` | The live attempt is already completed for this run and the request carried no `repeat.reason` |

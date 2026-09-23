@@ -126,6 +126,15 @@ type MutationSiteOutcome struct {
 	CleanExitStatus   int    `json:"cleanExitStatus"`
 }
 
+// MutationDiscard mirrors internal/mutation.DiscardRecord: one rejected
+// mutator edit a row's confirmation step discarded before evaluating it.
+type MutationDiscard struct {
+	Site       string `json:"site"`
+	Reason     string `json:"reason"`
+	DiffPath   string `json:"diffPath"`
+	DiffSHA256 string `json:"diffSha256"`
+}
+
 type MutationEvidence struct {
 	evidence.Envelope
 	RunID           string                `json:"runId"`
@@ -136,6 +145,7 @@ type MutationEvidence struct {
 	Sites           []MutationSiteOutcome `json:"sites"`
 	SnapshotEqual   bool                  `json:"snapshotEqual"`
 	EnumeratedSites []string              `json:"enumeratedSites,omitempty"`
+	Discarded       []MutationDiscard     `json:"discarded,omitempty"`
 }
 
 type Freshness struct {
