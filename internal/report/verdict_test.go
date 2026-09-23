@@ -1307,3 +1307,22 @@ func TestCalibration_ExcludesGapEnvUnappliable(t *testing.T) {
 		t.Errorf("Calibration = %+v, want no disagreements", r.Calibration)
 	}
 }
+
+// TestCalibration_MissingVerdictNotComparable: MISSING means the row carries
+// no layer-2 verdict at all (R21), so a high-risk row layer 2 marked MISSING
+// is never comparable even though its layer 4 caught the mutation — SC-02 is
+// not a layer-1 gap (validateLayer2 only requires MISSING on a gap row, it
+// never forbids MISSING on a bound one), so this state is reachable.
+func TestCalibration_MissingVerdictNotComparable(t *testing.T) {
+	in := greenInputs()
+	in.Batches[1].Verdicts[0].Verdict = "MISSING"
+
+	r := mustCompute(t, in)
+
+	if r.Calibration.Comparable != 0 || r.Calibration.Agree != 0 {
+		t.Errorf("Calibration = %+v, want Comparable == Agree == 0; MISSING is not a verdict to compare", r.Calibration)
+	}
+	if len(r.Calibration.HoldsSurvived) != 0 || len(r.Calibration.FlaggedCaught) != 0 || len(r.Calibration.SuspectRows) != 0 {
+		t.Errorf("Calibration = %+v, want no list to name SC-02", r.Calibration)
+	}
+}

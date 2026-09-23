@@ -166,8 +166,8 @@ func Compute(in *Inputs) (*Report, error) {
 // a layer-1 gap, an environmental run and an unappliable mutation all leave
 // the row at some other status and so never enter the count. HOLDS+CAUGHT and
 // WEAK/VACUOUS+SURVIVED agree; the other two pairings are named individually.
-// MISSING counts toward Comparable (the row's layer-2 verdict exists) but
-// belongs to neither disagreement list, since it is not a confidence claim.
+// MISSING means the row carries no layer-2 verdict at all (R21): it never
+// counts toward Comparable and never lands in a list.
 func deriveCalibration(rows []RowReport) Calibration {
 	cal := Calibration{HoldsSurvived: []string{}, FlaggedCaught: []string{}, SuspectRows: []string{}}
 	survivedGroups := make(map[string]bool)
@@ -196,8 +196,6 @@ func deriveCalibration(rows []RowReport) Calibration {
 		case weakOrVacuous && status == valueMutationCaught:
 			cal.Comparable++
 			cal.FlaggedCaught = append(cal.FlaggedCaught, row.RowID)
-		case verdict == "MISSING":
-			cal.Comparable++
 		}
 	}
 
