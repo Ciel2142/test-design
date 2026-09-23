@@ -376,3 +376,25 @@ func TestTakeSnapshot_ConcurrentCallsDoNotCollide(t *testing.T) {
 		}
 	}
 }
+
+func TestTakeSnapshot_MissingIndexFileMatchesBareWriteTree(t *testing.T) {
+	dir := newTestRepo(t)
+	ctrl, err := NewController(dir)
+	if err != nil {
+		t.Fatalf("NewController: %v", err)
+	}
+
+	if err := os.Remove(filepath.Join(dir, ".git", "index")); err != nil {
+		t.Fatalf("Remove index: %v", err)
+	}
+
+	snap, err := ctrl.TakeSnapshot()
+	if err != nil {
+		t.Fatalf("TakeSnapshot with a missing index file: %v", err)
+	}
+
+	want := strings.TrimSpace(mustGit(t, dir, "write-tree"))
+	if snap.indexTree != want {
+		t.Errorf("indexTree = %q, want %q (bare git write-tree with the index still missing)", snap.indexTree, want)
+	}
+}

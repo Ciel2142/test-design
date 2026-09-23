@@ -139,9 +139,16 @@ func filteredGitEnv() []string {
 }
 
 func runGit(dir string, args ...string) (string, error) {
+	return runGitEnv(dir, nil, args...)
+}
+
+// runGitEnv is runGit plus extraEnv appended after the filtered environment,
+// for one-off overrides (e.g. GIT_INDEX_FILE) that must reach only this
+// invocation, never the process-wide environment shared by other goroutines.
+func runGitEnv(dir string, extraEnv []string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
-	cmd.Env = filteredGitEnv()
+	cmd.Env = append(filteredGitEnv(), extraEnv...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -155,6 +162,11 @@ func runGit(dir string, args ...string) (string, error) {
 // verifier-owned hooks path, so repo-supplied hooks (e.g. post-checkout on
 // `worktree add`) never execute.
 func (c *Controller) runGit(args ...string) (string, error) {
+	return c.runGitEnv(nil, args...)
+}
+
+// runGitEnv is (*Controller).runGit plus extraEnv; see runGitEnv above.
+func (c *Controller) runGitEnv(extraEnv []string, args ...string) (string, error) {
 	full := append([]string{"-c", "core.hooksPath=" + c.hooksDir}, args...)
-	return runGit(c.repoRoot, full...)
+	return runGitEnv(c.repoRoot, extraEnv, full...)
 }

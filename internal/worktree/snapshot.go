@@ -1,17 +1,14 @@
 package worktree
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"test-design/internal/evidence"
-	"test-design/internal/subprocess"
 )
 
 var (
@@ -71,24 +68,24 @@ func (c *Controller) TakeSnapshot() (*Snapshot, error) {
 	}, nil
 }
 
-// writeTreeFromIndexCopy runs write-tree against a throwaway copy of the
-// index rather than the real one: write-tree persists the cache-tree it
-// computes back into whichever index it reads, taking that index's .lock to
-// do so, so concurrent TakeSnapshot calls on the real index collide on
-// .git/index.lock. Each call gets its own copy and lock; identical content
-// yields the same tree id.
+// write-tree locks and rewrites the index it reads (cache-tree write-back);
+// concurrent calls on the real index collide, so this uses a private copy.
 func (c *Controller) writeTreeFromIndexCopy() (string, error) {
-	indexPath, err := c.indexPath()
+	realIndex, err := c.indexPath()
 	if err != nil {
 		return "", err
 	}
-	indexCopy, err := copyIndex(indexPath, c.tempRoot)
+	indexCopy, err := reserveIndexPath(c.tempRoot)
 	if err != nil {
 		return "", err
 	}
 	defer os.Remove(indexCopy)
 
-	return c.runGitWithIndex(indexCopy, "write-tree")
+	if err := populateIndexCopy(indexCopy, realIndex); err != nil {
+		return "", err
+	}
+
+	return c.runGitEnv([]string{"GIT_INDEX_FILE=" + indexCopy}, "write-tree")
 }
 
 func (c *Controller) indexPath() (string, error) {
@@ -99,38 +96,41 @@ func (c *Controller) indexPath() (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
-func copyIndex(indexPath, tempRoot string) (string, error) {
-	data, err := os.ReadFile(indexPath)
-	if err != nil {
-		return "", fmt.Errorf("read index %s: %w", indexPath, err)
-	}
+// reserveIndexPath allocates a unique path under tempRoot and leaves it
+// absent: a 0-byte file there is an invalid index and write-tree errors on
+// it, but a missing path reads as an empty index, same as a missing real one.
+func reserveIndexPath(tempRoot string) (string, error) {
 	f, err := os.CreateTemp(tempRoot, "index-snapshot-*")
 	if err != nil {
-		return "", fmt.Errorf("create index copy: %w", err)
+		return "", fmt.Errorf("reserve index path: %w", err)
 	}
-	defer f.Close()
-	if _, err := f.Write(data); err != nil {
-		_ = os.Remove(f.Name())
-		return "", fmt.Errorf("write index copy: %w", err)
+	name := f.Name()
+	closeErr := f.Close()
+	if err := os.Remove(name); err != nil {
+		return "", fmt.Errorf("reserve index path: %w", err)
 	}
-	return f.Name(), nil
+	if closeErr != nil {
+		return "", fmt.Errorf("reserve index path: %w", closeErr)
+	}
+	return name, nil
 }
 
-// runGitWithIndex mirrors runGit but appends GIT_INDEX_FILE=indexPath;
-// filteredGitEnv already strips any inherited GIT_INDEX_FILE, so this is the
-// only value in play.
-func (c *Controller) runGitWithIndex(indexPath string, args ...string) (string, error) {
-	full := append([]string{"-c", "core.hooksPath=" + c.hooksDir}, args...)
-	cmd := exec.Command("git", full...)
-	cmd.Dir = c.repoRoot
-	cmd.Env = append(filteredGitEnv(), "GIT_INDEX_FILE="+indexPath)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := subprocess.Run(cmd, subprocess.UtilityTimeout); err != nil {
-		return "", fmt.Errorf("git %s (in %s): %w: %s", strings.Join(full, " "), c.repoRoot, err, strings.TrimSpace(stderr.String()))
+// populateIndexCopy mirrors realIndex into dest, or, when realIndex does not
+// exist, leaves dest absent so write-tree treats it as an empty index —
+// matching bare write-tree's behavior against a missing real index.
+func populateIndexCopy(dest, realIndex string) error {
+	data, err := os.ReadFile(realIndex)
+	switch {
+	case err == nil:
+		if err := os.WriteFile(dest, data, 0o600); err != nil {
+			return fmt.Errorf("write index copy: %w", err)
+		}
+		return nil
+	case errors.Is(err, os.ErrNotExist):
+		return nil
+	default:
+		return fmt.Errorf("read index %s: %w", realIndex, err)
 	}
-	return stdout.String(), nil
 }
 
 // Clean reports whether the working tree and index match HEAD with no
