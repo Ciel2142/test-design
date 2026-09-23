@@ -22,9 +22,14 @@ when the tree is not clean.
 
 Dispatch [mutator](../../../agents/mutator.md) with the `worktreePath`, the SC row facts from `dispatchPath`, including `verificationMutation`
 text, and the resolved `identity`. It returns the list of sites where that mutation applies
-and makes no edit on this call. Pass that whole list, unchanged, as `sites` on the row's first
-`evaluate-mutation` call in §3 below — the op registers it there, and the row cannot be
-answered by fewer sites than it names.
+and makes no edit on this call. Pass that whole list, unchanged, as `sites` on every
+`evaluate-mutation` call for this row in §3 below, not only its first: the op registers the
+list only once a call reaches its first accepted diff, so a call refused earlier than that —
+`empty-diff`, `foreign-diff`, `multi-site-diff`, `duplicate-site`, `site-interrupted`,
+`sites-remaining`, or `target-build-failed` — registers nothing, and a later call sent without
+`sites` is refused `missing-sites`. Resending the identical list once it is registered is
+always accepted — `evaluate-mutation` compares `sites` to the registered list as a set, not by
+call position — and the row cannot be answered by fewer sites than it names.
 
 Any site the row's `Verification mutation` text already names is a floor, not a ceiling:
 `mutator` must still search for and enumerate every other site of the same fault, labeling
@@ -81,8 +86,8 @@ Per site, in the order the agent listed them:
    go run -C "$CLAUDE_PLUGIN_ROOT" ./cmd/test-design-verifier evaluate-mutation -request -
    ```
 
-   The request adds `runDir`, `site`, `lastSite`, and — on the row's first call for this run —
-   `sites` (the mutator's full enumerated list, verbatim) to the shared body. The op runs the
+   The request adds `runDir`, `site`, `lastSite`, and `sites` (the mutator's full enumerated
+   list, verbatim, on every call for the row — see step 2 above) to the shared body. The op runs the
    row's targeted test, requires it to fail, restores the source inside the worktree, reruns
    the same target, requires it to pass, and records both outcomes under the site label.
    Output: `site`, `outcome`, and `diff {file, hunks}`; on the call that completes the row it

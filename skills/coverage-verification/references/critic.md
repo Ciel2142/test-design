@@ -184,8 +184,15 @@ survived, calibration names that row under `holdsSurvived` and names every other
 batch also verdicted `HOLDS` under `suspectRows` — the batch's read of this behavior group is
 now in doubt, and those rows never got their own mutation to confirm it independently.
 
-Do not let a suspect row's prior `HOLDS` stand on `reuse`'s say-so alone. Dispatch a fresh
-critic for it through `record-review` (`status: started`), carrying `repeat` with a `reason`
-naming the calibration finding — for example, "batch batch-2 held SC-02 HOLDS and its mutation
-survived; re-confirming SC-03 independently". The new verdict replaces the suspect one.
+Do not let a suspect row's prior `HOLDS` stand on `reuse`'s say-so alone. A new group ID
+naming the suspect row is refused `row-already-grouped`: the calibration block names only
+rows, never a group ID, so find the suspect row's batch in the report's rows table — its
+`Batch` column names the group that verdicted it — and reuse that same `groupId`. Start it
+again through `record-review` (`status: started`) with the suspect row alone in `rows` and
+`repeat` carrying a `reason` naming the calibration finding — for example, "batch batch-2 held
+SC-02 HOLDS and its mutation survived; re-confirming SC-03 independently" — then dispatch a
+fresh critic for it and complete the group as usual. That `Start` supersedes the whole prior
+group, not only the suspect row: the batch's other rows, no longer claimed by any current
+group, sit uncovered until a later `record-review started` regroups them, over this `groupId`
+or a new one.
 
