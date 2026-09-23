@@ -456,3 +456,28 @@ func TestRecoverMutation_AWorktreePathItCannotProveGoneIsRefused(t *testing.T) {
 		})
 	}
 }
+
+func TestRecoverMutation_PreservesRegisteredSites(t *testing.T) {
+	repo := fixtureRepo(t)
+	const runID = "recover-preserves-sites"
+	prep := interruptedRow(t, repo, runID)
+
+	st, err := mutation.LoadState(prep.RunDir)
+	if err != nil {
+		t.Fatalf("LoadState: %v", err)
+	}
+	st.Enumerated = []string{"site-a", "site-b"}
+	if err := mutation.WriteState(prep.RunDir, st); err != nil {
+		t.Fatalf("WriteState: %v", err)
+	}
+
+	runRecoverMutation(t, repo, runID, prep.RunDir)
+
+	after, err := mutation.LoadState(prep.RunDir)
+	if err != nil {
+		t.Fatalf("LoadState after recovery: %v", err)
+	}
+	if len(after.Enumerated) != 2 || after.Enumerated[0] != "site-a" || after.Enumerated[1] != "site-b" {
+		t.Errorf("Enumerated = %v, want [site-a site-b] preserved through recovery", after.Enumerated)
+	}
+}

@@ -9,20 +9,21 @@ import (
 )
 
 const (
-	CodeStaleEvidence          = "stale-evidence"
-	CodeMissingFreshness       = "missing-freshness"
-	CodeInvalidFreshness       = "invalid-freshness"
-	CodeDuplicateVerdict       = "duplicate-verdict"
-	CodeMissingVerdict         = "missing-verdict"
-	CodeUnknownRow             = "unknown-row"
-	CodeUnexpectedLiveEvidence = "unexpected-live-evidence"
-	CodeMutationOnGapRow       = "mutation-on-gap-row"
-	CodeMutationEvidenceEmpty  = "mutation-evidence-empty"
-	CodeMutationRowMismatch    = "mutation-row-mismatch"
-	CodeMissingAttemptEvidence = "missing-attempt-evidence"
-	CodeInvalidMutationOutcome = "invalid-mutation-outcome"
-	CodeInvalidVerdict         = "invalid-verdict"
-	CodeLiveDecisionIncomplete = "live-decision-incomplete"
+	CodeStaleEvidence           = "stale-evidence"
+	CodeMissingFreshness        = "missing-freshness"
+	CodeInvalidFreshness        = "invalid-freshness"
+	CodeDuplicateVerdict        = "duplicate-verdict"
+	CodeMissingVerdict          = "missing-verdict"
+	CodeUnknownRow              = "unknown-row"
+	CodeUnexpectedLiveEvidence  = "unexpected-live-evidence"
+	CodeMutationOnGapRow        = "mutation-on-gap-row"
+	CodeMutationEvidenceEmpty   = "mutation-evidence-empty"
+	CodeMutationRowMismatch     = "mutation-row-mismatch"
+	CodeMissingAttemptEvidence  = "missing-attempt-evidence"
+	CodeInvalidMutationOutcome  = "invalid-mutation-outcome"
+	CodeMutationSitesIncomplete = "mutation-sites-incomplete"
+	CodeInvalidVerdict          = "invalid-verdict"
+	CodeLiveDecisionIncomplete  = "live-decision-incomplete"
 	// CodeReuseIdentityMismatch refuses an adopted record whose own identity
 	// differs from the prior identity its reuse reference names.
 	CodeReuseIdentityMismatch = "reuse-identity-mismatch"
@@ -376,6 +377,9 @@ func validateLayer4(in *Inputs, active []coverage.Row, gaps map[string]bool) err
 			if m.Evidence.RowID != row.ID {
 				return refuse(CodeMutationRowMismatch, "row %s mutation evidence names row %s", row.ID, m.Evidence.RowID)
 			}
+			if m.Reuse == nil && len(m.Evidence.EnumeratedSites) > 0 && !mutationSitesComplete(m.Evidence.EnumeratedSites, m.Evidence.Sites) {
+				return refuse(CodeMutationSitesIncomplete, "row %s mutation evidence's evaluated sites do not match its registered sites %v", row.ID, m.Evidence.EnumeratedSites)
+			}
 		}
 
 		switch m.Outcome {
@@ -389,4 +393,22 @@ func validateLayer4(in *Inputs, active []coverage.Row, gaps map[string]bool) err
 		}
 	}
 	return nil
+}
+
+// mutationSitesComplete reports whether sites carries an outcome for every
+// label in enumerated, and no other, ignoring order.
+func mutationSitesComplete(enumerated []string, sites []MutationSiteOutcome) bool {
+	evaluated := make(map[string]bool, len(sites))
+	for _, s := range sites {
+		evaluated[s.Site] = true
+	}
+	if len(evaluated) != len(enumerated) {
+		return false
+	}
+	for _, s := range enumerated {
+		if !evaluated[s] {
+			return false
+		}
+	}
+	return true
 }

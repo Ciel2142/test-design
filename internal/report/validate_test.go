@@ -416,6 +416,20 @@ func TestValidateMutationRowMismatch(t *testing.T) {
 	wantRefusal(t, Validate(in), CodeMutationRowMismatch)
 }
 
+func TestValidate_MutationEvidenceMissingARegisteredSiteRefused(t *testing.T) {
+	in := baseInputs()
+	in.Mutations[0].Evidence.EnumeratedSites = []string{"x", "y"}
+	wantRefusal(t, Validate(in), CodeMutationSitesIncomplete)
+}
+
+func TestValidate_LegacyMutationEvidenceWithoutEnumeratedSitesAccepted(t *testing.T) {
+	in := baseInputs()
+	in.Mutations[0].Evidence.EnumeratedSites = nil
+	if err := Validate(in); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+}
+
 func TestValidateMissingAttemptEvidence(t *testing.T) {
 	in := baseInputs()
 	in.Mutations[0].Evidence = nil

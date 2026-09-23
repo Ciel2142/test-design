@@ -204,6 +204,40 @@ func TestWriteStateRoundTripsTheStartedSiteMarker(t *testing.T) {
 	}
 }
 
+func TestWriteStateRoundTripsEnumeratedSites(t *testing.T) {
+	runDir := t.TempDir()
+	want := sampleState()
+	want.Enumerated = []string{"site-a", "site-b"}
+
+	if err := WriteState(runDir, want); err != nil {
+		t.Fatalf("WriteState: %v", err)
+	}
+	got, err := LoadState(runDir)
+	if err != nil {
+		t.Fatalf("LoadState: %v", err)
+	}
+	if len(got.Enumerated) != 2 || got.Enumerated[0] != "site-a" || got.Enumerated[1] != "site-b" {
+		t.Errorf("Enumerated = %v, want [site-a site-b]", got.Enumerated)
+	}
+}
+
+func TestWriteStateOmitsEnumeratedWhenNotYetRegistered(t *testing.T) {
+	runDir := t.TempDir()
+	st := sampleState()
+	st.Enumerated = nil
+
+	if err := WriteState(runDir, st); err != nil {
+		t.Fatalf("WriteState: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(runDir, stateFileName))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if strings.Contains(string(data), "enumerated") {
+		t.Errorf("state document = %s, want no enumerated key before a row registers sites", data)
+	}
+}
+
 func TestWriteStateOmitsTheStartedMarkerWhenNoSiteIsInFlight(t *testing.T) {
 	runDir := t.TempDir()
 	st := sampleState()

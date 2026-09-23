@@ -128,13 +128,14 @@ type MutationSiteOutcome struct {
 
 type MutationEvidence struct {
 	evidence.Envelope
-	RunID         string                `json:"runId"`
-	RowID         string                `json:"rowID"`
-	RepoCommit    string                `json:"repoCommit"`
-	Source        string                `json:"source"`
-	SourceSHA256  string                `json:"sourceSha256"`
-	Sites         []MutationSiteOutcome `json:"sites"`
-	SnapshotEqual bool                  `json:"snapshotEqual"`
+	RunID           string                `json:"runId"`
+	RowID           string                `json:"rowID"`
+	RepoCommit      string                `json:"repoCommit"`
+	Source          string                `json:"source"`
+	SourceSHA256    string                `json:"sourceSha256"`
+	Sites           []MutationSiteOutcome `json:"sites"`
+	SnapshotEqual   bool                  `json:"snapshotEqual"`
+	EnumeratedSites []string              `json:"enumeratedSites,omitempty"`
 }
 
 type Freshness struct {

@@ -23,9 +23,10 @@ import (
 
 type evaluateMutationRequest struct {
 	verifyRequest
-	RunDir   string `json:"runDir"`
-	Site     string `json:"site"`
-	LastSite bool   `json:"lastSite"`
+	RunDir   string   `json:"runDir"`
+	Site     string   `json:"site"`
+	LastSite bool     `json:"lastSite"`
+	Sites    []string `json:"sites,omitempty"`
 }
 
 type diffSummaryOutput struct {
@@ -64,17 +65,18 @@ type mutationSiteEvidence struct {
 
 type mutationEvidence struct {
 	evidence.Envelope
-	RunID         string                 `json:"runId"`
-	RowID         string                 `json:"rowID"`
-	RepoCommit    string                 `json:"repoCommit"`
-	Source        string                 `json:"source"`
-	SourceSHA256  string                 `json:"sourceSha256"`
-	Identity      identityOutput         `json:"identity"`
-	RunnerKind    string                 `json:"runnerKind"`
-	SuiteCommand  []string               `json:"suiteCommand"`
-	TargetCommand []string               `json:"targetCommand"`
-	Sites         []mutationSiteEvidence `json:"sites"`
-	SnapshotEqual bool                   `json:"snapshotEqual"`
+	RunID           string                 `json:"runId"`
+	RowID           string                 `json:"rowID"`
+	RepoCommit      string                 `json:"repoCommit"`
+	Source          string                 `json:"source"`
+	SourceSHA256    string                 `json:"sourceSha256"`
+	Identity        identityOutput         `json:"identity"`
+	RunnerKind      string                 `json:"runnerKind"`
+	SuiteCommand    []string               `json:"suiteCommand"`
+	TargetCommand   []string               `json:"targetCommand"`
+	Sites           []mutationSiteEvidence `json:"sites"`
+	SnapshotEqual   bool                   `json:"snapshotEqual"`
+	EnumeratedSites []string               `json:"enumeratedSites,omitempty"`
 }
 
 func decodeEvaluateMutationRequest(op string, requestBody []byte) (*evaluateMutationRequest, *cliError) {
@@ -87,9 +89,10 @@ func decodeEvaluateMutationRequest(op string, requestBody []byte) (*evaluateMuta
 	}
 
 	var extra struct {
-		RunDir   string `json:"runDir"`
-		Site     string `json:"site"`
-		LastSite bool   `json:"lastSite"`
+		RunDir   string   `json:"runDir"`
+		Site     string   `json:"site"`
+		LastSite bool     `json:"lastSite"`
+		Sites    []string `json:"sites"`
 	}
 	if err := json.Unmarshal(requestBody, &extra); err != nil {
 		return nil, &cliError{Code: "malformed-request", Message: fmt.Sprintf("%s: decode request: %v", op, err)}
@@ -112,7 +115,7 @@ func decodeEvaluateMutationRequest(op string, requestBody []byte) (*evaluateMuta
 		return nil, &cliError{Code: "invalid-site", Message: fmt.Sprintf("%s: site %q must not contain a path separator", op, extra.Site)}
 	}
 
-	return &evaluateMutationRequest{verifyRequest: *base, RunDir: extra.RunDir, Site: extra.Site, LastSite: extra.LastSite}, nil
+	return &evaluateMutationRequest{verifyRequest: *base, RunDir: extra.RunDir, Site: extra.Site, LastSite: extra.LastSite, Sites: extra.Sites}, nil
 }
 
 func evaluateMutationHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer) *cliError {
@@ -143,6 +146,9 @@ func evaluateMutationOp(req *evaluateMutationRequest, stdout io.Writer, between 
 	}
 	if st.RunID != req.RunID || st.RepoCommit != head || st.Source != src.Path || st.SourceSHA256 != src.SHA256 {
 		return &cliError{Code: "stale-evidence", Message: "evaluate-mutation: prepared state does not match request run/source/HEAD; prepare again"}
+	}
+	if cliErr := resolveRowSites("evaluate-mutation", st, req.Sites, req.Site); cliErr != nil {
+		return cliErr
 	}
 	// Nothing is measured on a workspace of unknown cleanliness: the marker an
 	// interrupted evaluation left behind is cleared by recover-mutation, never
@@ -182,6 +188,9 @@ func evaluateMutationOp(req *evaluateMutationRequest, stdout io.Writer, between 
 		}
 	case current.Status == runstate.StatusCompleted:
 		return completedRecordRefusal("evaluate-mutation", runstate.KindMutationRow, st.RowID)
+	}
+	if cliErr := checkSitesRemaining("evaluate-mutation", st, req.Site, req.LastSite); cliErr != nil {
+		return cliErr
 	}
 
 	ctrl, err := worktree.NewController(req.RepoRoot)
@@ -304,7 +313,7 @@ func evaluateMutationOp(req *evaluateMutationRequest, stdout io.Writer, between 
 		CleanRunDir:       cleanDir,
 		CleanExitStatus:   cleanExit,
 	}
-	if !req.LastSite {
+	if !mutation.RowComplete(st.Enumerated, evaluatedSiteLabels(st.Sites)) {
 		return writeStdout(stdout, out)
 	}
 
@@ -338,18 +347,19 @@ func evaluateMutationOp(req *evaluateMutationRequest, stdout io.Writer, between 
 	}
 	evidencePath := filepath.Join(req.RunDir, "mutation-evidence.json")
 	ev := mutationEvidence{
-		Envelope:      out.Envelope,
-		RunID:         st.RunID,
-		RepoCommit:    st.RepoCommit,
-		Source:        st.Source,
-		SourceSHA256:  st.SourceSHA256,
-		RowID:         st.RowID,
-		Identity:      identityOutput{Scope: st.Identity.Scope, Name: st.Identity.Name},
-		RunnerKind:    src.Runner.Kind,
-		SuiteCommand:  redactCommand(src.Runner.Command),
-		TargetCommand: redactCommand(target.Command),
-		Sites:         siteRecords,
-		SnapshotEqual: true,
+		Envelope:        out.Envelope,
+		RunID:           st.RunID,
+		RepoCommit:      st.RepoCommit,
+		Source:          st.Source,
+		SourceSHA256:    st.SourceSHA256,
+		RowID:           st.RowID,
+		Identity:        identityOutput{Scope: st.Identity.Scope, Name: st.Identity.Name},
+		RunnerKind:      src.Runner.Kind,
+		SuiteCommand:    redactCommand(src.Runner.Command),
+		TargetCommand:   redactCommand(target.Command),
+		Sites:           siteRecords,
+		SnapshotEqual:   true,
+		EnumeratedSites: st.Enumerated,
 	}
 	if err := evidence.WriteJSON(evidencePath, &ev); err != nil {
 		return &cliError{Code: "evidence-write-failed", Message: fmt.Sprintf("evaluate-mutation: %v", err)}

@@ -475,7 +475,7 @@ func TestResume_SelectsOnlyValidatedCompletions(t *testing.T) {
 	prep := preparedMutation(t, repo, runID, "SC-10")
 	mutateOrdersGuard(t, prep.WorktreePath, survivedGuardMutant)
 	if code, _, stderr := runVerifyOp(t, "evaluate-mutation",
-		evaluateMutationRequestJSON(t, repo, runID, prep.RunDir, "site-a", false)); code != exitOK {
+		evaluateMutationRequestJSON(t, repo, runID, prep.RunDir, "site-a", false, "site-a", "site-b")); code != exitOK {
 		t.Fatalf("evaluate-mutation exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
 	}
 

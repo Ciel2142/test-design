@@ -519,7 +519,7 @@ func interruptMutationAtSiteB(t *testing.T, repo, runID string) prepareMutationO
 	// in process: nothing about a site that completes needs interrupting.
 	mutateOrdersGuard(t, prep.WorktreePath, "	if qty < 0 {\n\t\treturn fmt.Errorf(\"quantity must be positive\")\n\t}\n\treturn nil")
 	code, _, stderr = runVerifyOp(t, "evaluate-mutation",
-		evaluateMutationRequestJSON(t, repo, runID, prep.RunDir, "site-a", false))
+		evaluateMutationRequestJSON(t, repo, runID, prep.RunDir, "site-a", false, "site-a", "site-b"))
 	if code != exitOK {
 		t.Fatalf("site-a exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
 	}

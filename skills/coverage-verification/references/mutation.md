@@ -22,7 +22,9 @@ when the tree is not clean.
 
 Dispatch [mutator](../../../agents/mutator.md) with the `worktreePath`, the SC row facts from `dispatchPath`, including `verificationMutation`
 text, and the resolved `identity`. It returns the list of sites where that mutation applies
-and makes no edit on this call.
+and makes no edit on this call. Pass that whole list, unchanged, as `sites` on the row's first
+`evaluate-mutation` call in §3 below — the op registers it there, and the row cannot be
+answered by fewer sites than it names.
 
 If it returns `unappliable` with a reason instead of a list, record the row as
 
@@ -62,19 +64,34 @@ Per site, in the order the agent listed them:
    go run -C "$CLAUDE_PLUGIN_ROOT" ./cmd/test-design-verifier evaluate-mutation -request -
    ```
 
-   The request adds `runDir`, `site`, and `lastSite` to the shared body. The op runs the row's
-   targeted test, requires it to fail, restores the source inside the worktree, reruns the
-   same target, requires it to pass, and records both outcomes under the site label. Output:
-   `site`, `outcome`, and `diff {file, hunks}`; on the `lastSite: true` call it also returns
-   the aggregated `sites[]` and the `evidencePath` of the row's mutation evidence.
+   The request adds `runDir`, `site`, `lastSite`, and — on the row's first call for this run —
+   `sites` (the mutator's full enumerated list, verbatim) to the shared body. The op runs the
+   row's targeted test, requires it to fail, restores the source inside the worktree, reruns
+   the same target, requires it to pass, and records both outcomes under the site label.
+   Output: `site`, `outcome`, and `diff {file, hunks}`; on the call that completes the row it
+   also returns the aggregated `sites[]` and the `evidencePath` of the row's mutation evidence.
 
-Set `lastSite: true` on the final site of a row whose every site confirmed. That call writes
-the evidence, disposes the worktree, and completes the row in the ledger — the record is in
-the ledger, finalize reads it.
+The row completes — evidence written, worktree disposed, ledger record completed — exactly
+when every site named in `sites` has been evaluated, whether or not that call also set
+`lastSite: true`. `lastSite` is only an assertion: send `true` on what you believe is the row's
+final site, and a `true` sent while another registered site still has no outcome is refused
+`sites-remaining`, leaving the row started and the worktree untouched. Sending `false` or
+omitting it on what turns out to be the last remaining site still completes the row.
+
+The first call for a row with no registered list and no `sites` is refused `missing-sites`. A
+`sites` value is refused `invalid-sites` when a label is empty, contains `/` or `\`, repeats
+another label, or does not include `site` itself. `sites` sent on a later call is compared to
+the row's registered list as a set — order does not matter — and refused
+`enumeration-changed` if it disagrees; once registered, evaluating a `site` outside that list
+is refused `unknown-site`. Every one of these refusals happens before any run or state
+change, so a corrected retry costs nothing.
 
 Finalize derives `MUTATION-CAUGHT` when every enumerated site's targeted test failed with the
 mutation applied and passed again after restore, and `MUTATION-SURVIVED`, naming each
 surviving site, otherwise. One survivor blocks; no number of caught sites elsewhere offsets it.
+Fresh mutation evidence that carries `enumeratedSites` is refused `mutation-sites-incomplete`
+if its own evaluated sites do not match that list; evidence written before this field existed,
+or evidence a run reused from an earlier one, is accepted as before.
 
 ### When confirmation fails
 
@@ -138,5 +155,7 @@ If a run is picked back up, `resume` names every started mutation row with its
 repeating any op here. `evaluate-mutation` refuses `site-interrupted` for that row until
 `recover-mutation` has restored or recreated its workspace: nothing is measured on a worktree
 of unknown cleanliness. Completed sites are kept either way — recovery never re-measures a
-site the row already answered. A refused recovery leaves the row exactly where it was:
-pending, and the abandoned worktree in place, not removed on your account.
+site the row already answered. `recover-mutation` never touches the row's registered `sites`
+either: resending a different list afterward is still refused `enumeration-changed`, and the
+label `interruptedSite` names stays a member of it. A refused recovery leaves the row exactly
+where it was: pending, and the abandoned worktree in place, not removed on your account.

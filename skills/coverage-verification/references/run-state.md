@@ -287,6 +287,11 @@ the spelling each example shows is the one the op documents and the one its outp
 | `record-review` | `invalid-verdict` | A verdict value is not one of `HOLDS`, `WEAK`, `VACUOUS`, `MISSING` |
 | `record-review` | `dispatch-inputs-changed` | The group was judged against dispatch inputs the run no longer hands out; regroup against the current trace |
 | `prepare-mutation`, `evaluate-mutation`, `record-mutation`, `recover-mutation` | `mutation-row-completed` | The row is already completed for this run (and, for `prepare-mutation`, the request carried no `repeat.reason`) |
+| `evaluate-mutation` | `missing-sites` | This is the row's first call, the row has no registered site list yet, and the request carries no `sites` |
+| `evaluate-mutation` | `invalid-sites` | A label in `sites` is empty, contains `/` or `\`, repeats another label in the same list, or `site` is not among the labels `sites` names |
+| `evaluate-mutation` | `enumeration-changed` | `sites` is present and, compared to the row's already-registered list as a set, disagrees with it |
+| `evaluate-mutation` | `unknown-site` | `site` is not a member of the row's registered list |
+| `evaluate-mutation` | `sites-remaining` | `lastSite: true` arrived while a registered site other than `site` itself still has no evaluated outcome; the row stays started and the worktree is untouched |
 | `evaluate-mutation` | `site-interrupted` | The workspace carries an uncleared interruption marker; run `recover-mutation` before measuring another site |
 | `evaluate-mutation`, `record-mutation`, `recover-mutation` | `mutation-row-not-started` | The row was never prepared for this run |
 | `record-mutation` | `missing-row-id` | `rowId` is required |
@@ -306,8 +311,9 @@ the spelling each example shows is the one the op documents and the one its outp
 | `prepare-live`, `record-attempt`, `execute-live` | `live-attempt-completed` | The live attempt is already completed for this run and the request carried no `repeat.reason` |
 | `execute-live` | `stale-evidence` | HEAD is no longer the commit `prepare-live` prepared the workspace at; run `prepare-live` again — refused before the ledger is opened, the way `evaluate-mutation` and `recover-mutation` refuse it, so no record is created under a commit the evidence does not name |
 
-`evaluate-mutation`'s `lastSite` call both appends the site's evidence and completes the row
-in one call: if the ledger write fails after the evidence was already appended, the refusal is
-`ledger-write-failed` and names the evidence path in its message. The site's evaluation is
-real, but the row cannot be completed under this run ID; mint a new run ID rather than
-retrying the same one.
+`evaluate-mutation`'s call that evaluates the row's last unanswered registered site both
+appends that site's evidence and completes the row in one call, whether or not it also carries
+`lastSite: true`: if the ledger write fails after the evidence was already appended, the
+refusal is `ledger-write-failed` and names the evidence path in its message. The site's
+evaluation is real, but the row cannot be completed under this run ID; mint a new run ID
+rather than retrying the same one.

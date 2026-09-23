@@ -13,9 +13,13 @@ import (
 	"test-design/internal/runstate"
 )
 
-func evaluateMutationRequestJSON(t *testing.T, repo, runID, runDir, site string, lastSite bool) string {
+// evaluateMutationRequestJSON builds an evaluate-mutation request. sites is
+// the row's full enumerated list to register on this call; when the caller
+// leaves it empty, evaluateMutationSitesToSend derives it from the row's own
+// state, so a single-site test never has to state one.
+func evaluateMutationRequestJSON(t *testing.T, repo, runID, runDir, site string, lastSite bool, sites ...string) string {
 	t.Helper()
-	body, err := json.Marshal(map[string]any{
+	payload := map[string]any{
 		"schemaVersion":  "1",
 		"repoRoot":       repo,
 		"coverageSource": fixtureCoverageSource,
@@ -23,11 +27,35 @@ func evaluateMutationRequestJSON(t *testing.T, repo, runID, runDir, site string,
 		"runDir":         runDir,
 		"site":           site,
 		"lastSite":       lastSite,
-	})
+	}
+	if toSend := evaluateMutationSitesToSend(t, runDir, site, sites); toSend != nil {
+		payload["sites"] = toSend
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
 		t.Fatalf("marshal request: %v", err)
 	}
 	return string(body)
+}
+
+// evaluateMutationSitesToSend answers the "sites" value a request should
+// carry: sites verbatim when the caller named the row's full registration,
+// [site] when the row's state has not registered a list yet, or nil once a
+// list is already on disk and the caller left registration to the default —
+// resending it would only risk an enumeration-changed refusal.
+func evaluateMutationSitesToSend(t *testing.T, runDir, site string, sites []string) []string {
+	t.Helper()
+	if len(sites) > 0 {
+		return sites
+	}
+	st, err := mutation.LoadState(runDir)
+	if err != nil {
+		t.Fatalf("LoadState: %v", err)
+	}
+	if len(st.Enumerated) > 0 {
+		return nil
+	}
+	return []string{site}
 }
 
 func preparedMutation(t *testing.T, repo, runID, rowID string) prepareMutationOutput {
@@ -149,7 +177,7 @@ func TestEvaluateMutation_MultiSiteRowAccumulatesAndDisposesOnLast(t *testing.T)
 
 	mutateOrdersGuard(t, prep.WorktreePath, "	if qty < 0 {\n\t\treturn fmt.Errorf(\"quantity must be positive\")\n\t}\n\treturn nil")
 	code, stdout, stderr := runVerifyOp(t, "evaluate-mutation",
-		evaluateMutationRequestJSON(t, repo, "eval-multisite", prep.RunDir, "site-a", false))
+		evaluateMutationRequestJSON(t, repo, "eval-multisite", prep.RunDir, "site-a", false, "site-a", "site-b"))
 	if code != exitOK {
 		t.Fatalf("site-a exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
 	}
@@ -475,6 +503,7 @@ func TestEvaluateMutation_SnapshotMismatchDetected(t *testing.T) {
 		RunDir:   prep.RunDir,
 		Site:     "site-a",
 		LastSite: true,
+		Sites:    []string{"site-a"},
 	}
 	cliErr := evaluateMutationOp(req, discard{}, func() {
 		if err := os.WriteFile(filepath.Join(repo, "orders", "sneaked.txt"), []byte("x\n"), 0o644); err != nil {
@@ -791,7 +820,7 @@ func TestEvaluateMutation_LastSiteCompletesTheLedgerRow(t *testing.T) {
 
 		mutateOrdersGuard(t, prep.WorktreePath, "	if qty < 0 {\n\t\treturn fmt.Errorf(\"quantity must be positive\")\n\t}\n\treturn nil")
 		if code, _, stderr := runVerifyOp(t, "evaluate-mutation",
-			evaluateMutationRequestJSON(t, repo, "eval-ledger-survived", prep.RunDir, "site-a", false)); code != exitOK {
+			evaluateMutationRequestJSON(t, repo, "eval-ledger-survived", prep.RunDir, "site-a", false, "site-a", "site-b")); code != exitOK {
 			t.Fatalf("site-a exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
 		}
 		mutateOrdersGuard(t, prep.WorktreePath, `	return fmt.Errorf("always rejected")`)
@@ -808,4 +837,168 @@ func TestEvaluateMutation_LastSiteCompletesTheLedgerRow(t *testing.T) {
 			t.Errorf("outcome = %q, want survived when one site was not caught", rec.Outcome)
 		}
 	})
+}
+
+func TestEvaluateMutation_FirstCallWithoutSitesRefused(t *testing.T) {
+	repo := fixtureRepo(t)
+	const runID = "eval-missing-sites"
+	prep := preparedMutation(t, repo, runID, "SC-09")
+
+	code, stdout, stderr := runVerifyOp(t, "evaluate-mutation", requestWith(t, repo, runID, map[string]any{
+		"runDir": prep.RunDir, "site": "site-a", "lastSite": false,
+	}))
+	if code != exitError {
+		t.Fatalf("exit code = %d, want %d; stdout=%s", code, exitError, stdout)
+	}
+	got := decodeCLIError(t, stderr)
+	if got.Code != "missing-sites" {
+		t.Errorf("error code = %q, want missing-sites", got.Code)
+	}
+}
+
+func TestEvaluateMutation_InvalidSitesRefused(t *testing.T) {
+	cases := []struct {
+		name  string
+		sites []string
+		site  string
+	}{
+		{"empty-label", []string{"", "site-b"}, "site-b"},
+		{"separator", []string{"a/b", "site-b"}, "site-b"},
+		{"duplicate", []string{"site-a", "site-a"}, "site-a"},
+		{"site-not-in-list", []string{"site-a", "site-b"}, "site-c"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			repo := fixtureRepo(t)
+			runID := "eval-invalid-" + c.name
+			prep := preparedMutation(t, repo, runID, "SC-09")
+
+			code, stdout, stderr := runVerifyOp(t, "evaluate-mutation", requestWith(t, repo, runID, map[string]any{
+				"runDir": prep.RunDir, "site": c.site, "lastSite": false, "sites": c.sites,
+			}))
+			if code != exitError {
+				t.Fatalf("exit code = %d, want %d; stdout=%s", code, exitError, stdout)
+			}
+			got := decodeCLIError(t, stderr)
+			if got.Code != "invalid-sites" {
+				t.Errorf("error code = %q, want invalid-sites", got.Code)
+			}
+		})
+	}
+}
+
+func TestEvaluateMutation_EnumerationChangedRefused(t *testing.T) {
+	repo := fixtureRepo(t)
+	const runID = "eval-enum-changed"
+	prep := preparedMutation(t, repo, runID, "SC-09")
+
+	mutateOrdersGuard(t, prep.WorktreePath, "	if qty < 0 {\n\t\treturn fmt.Errorf(\"quantity must be positive\")\n\t}\n\treturn nil")
+	code, _, stderr := runVerifyOp(t, "evaluate-mutation", requestWith(t, repo, runID, map[string]any{
+		"runDir": prep.RunDir, "site": "site-a", "lastSite": false, "sites": []string{"site-a", "site-b"},
+	}))
+	if code != exitOK {
+		t.Fatalf("first call exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+
+	code, stdout, stderr := runVerifyOp(t, "evaluate-mutation", requestWith(t, repo, runID, map[string]any{
+		"runDir": prep.RunDir, "site": "site-b", "lastSite": true, "sites": []string{"site-b", "site-c"},
+	}))
+	if code != exitError {
+		t.Fatalf("exit code = %d, want %d; stdout=%s", code, exitError, stdout)
+	}
+	got := decodeCLIError(t, stderr)
+	if got.Code != "enumeration-changed" {
+		t.Errorf("error code = %q, want enumeration-changed", got.Code)
+	}
+}
+
+func TestEvaluateMutation_UnregisteredSiteIsRefused(t *testing.T) {
+	repo := fixtureRepo(t)
+	const runID = "eval-unknown-site"
+	prep := preparedMutation(t, repo, runID, "SC-09")
+
+	mutateOrdersGuard(t, prep.WorktreePath, `	return fmt.Errorf("always rejected")`)
+	code, _, stderr := runVerifyOp(t, "evaluate-mutation", requestWith(t, repo, runID, map[string]any{
+		"runDir": prep.RunDir, "site": "site-a", "lastSite": false, "sites": []string{"site-a", "site-b"},
+	}))
+	if code != exitOK {
+		t.Fatalf("first call exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+
+	code, stdout, stderr := runVerifyOp(t, "evaluate-mutation", requestWith(t, repo, runID, map[string]any{
+		"runDir": prep.RunDir, "site": "site-c", "lastSite": false,
+	}))
+	if code != exitError {
+		t.Fatalf("exit code = %d, want %d; stdout=%s", code, exitError, stdout)
+	}
+	got := decodeCLIError(t, stderr)
+	if got.Code != "unknown-site" {
+		t.Errorf("error code = %q, want unknown-site", got.Code)
+	}
+}
+
+func TestEvaluateMutation_LastSiteBeforeEveryRegisteredSiteIsRefused(t *testing.T) {
+	repo := fixtureRepo(t)
+	const runID = "eval-sites-remaining"
+	prep := preparedMutation(t, repo, runID, "SC-09")
+
+	mutateOrdersGuard(t, prep.WorktreePath, `	return fmt.Errorf("always rejected")`)
+	code, stdout, stderr := runVerifyOp(t, "evaluate-mutation", requestWith(t, repo, runID, map[string]any{
+		"runDir": prep.RunDir, "site": "site-a", "lastSite": true, "sites": []string{"site-a", "site-b"},
+	}))
+	if code != exitError {
+		t.Fatalf("exit code = %d, want %d; stdout=%s", code, exitError, stdout)
+	}
+	got := decodeCLIError(t, stderr)
+	if got.Code != "sites-remaining" {
+		t.Errorf("error code = %q, want sites-remaining", got.Code)
+	}
+
+	if left := verifierWorktrees(t); len(left) != 1 {
+		t.Errorf("worktrees registered = %v, want the worktree to survive a premature lastSite", left)
+	}
+	rec := ledgerRecord(t, runResume(t, repo, runID), runstate.KindMutationRow, "SC-09")
+	if rec.Status != runstate.StatusStarted {
+		t.Errorf("status = %q, want %q", rec.Status, runstate.StatusStarted)
+	}
+}
+
+func TestEvaluateMutation_CompletesRowOnlyAfterEveryRegisteredSite(t *testing.T) {
+	repo := fixtureRepo(t)
+	const runID = "eval-completes-without-lastsite"
+	prep := preparedMutation(t, repo, runID, "SC-09")
+
+	mutateOrdersGuard(t, prep.WorktreePath, "	if qty < 0 {\n\t\treturn fmt.Errorf(\"quantity must be positive\")\n\t}\n\treturn nil")
+	code, _, stderr := runVerifyOp(t, "evaluate-mutation", requestWith(t, repo, runID, map[string]any{
+		"runDir": prep.RunDir, "site": "site-a", "lastSite": false, "sites": []string{"site-a", "site-b"},
+	}))
+	if code != exitOK {
+		t.Fatalf("site-a exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+	if left := verifierWorktrees(t); len(left) != 1 {
+		t.Errorf("worktrees registered = %v, want the row still open after one of two sites", left)
+	}
+
+	mutateOrdersGuard(t, prep.WorktreePath, `	return fmt.Errorf("always rejected")`)
+	code, stdout, stderr := runVerifyOp(t, "evaluate-mutation", requestWith(t, repo, runID, map[string]any{
+		"runDir": prep.RunDir, "site": "site-b", "lastSite": false,
+	}))
+	if code != exitOK {
+		t.Fatalf("site-b exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+	var out evaluateMutationOutput
+	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
+		t.Fatalf("stdout did not decode: %v\nstdout=%s", err, stdout)
+	}
+	if out.EvidencePath == "" {
+		t.Fatal("evidencePath is empty, want the final registered site to complete the row without lastSite")
+	}
+	if left := verifierWorktrees(t); len(left) != 0 {
+		t.Errorf("worktrees registered = %v, want completion to dispose the worktree", left)
+	}
+
+	ev := readMutationEvidence(t, out.EvidencePath)
+	if len(ev.EnumeratedSites) != 2 || ev.EnumeratedSites[0] != "site-a" || ev.EnumeratedSites[1] != "site-b" {
+		t.Errorf("evidence.EnumeratedSites = %v, want [site-a site-b]", ev.EnumeratedSites)
+	}
 }

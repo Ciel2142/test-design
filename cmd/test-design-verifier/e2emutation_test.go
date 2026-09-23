@@ -62,7 +62,7 @@ func TestE2EMutation_GoTwoGuardMultiSite(t *testing.T) {
 	// Reserve directly, so this mutant is caught.
 	writeOrdersGoReserveGuards(t, prep.WorktreePath, reserveGuardMutated, reserveBatchGuardDefault)
 	code, stdout, stderr := runVerifyOp(t, "evaluate-mutation",
-		evaluateMutationRequestJSON(t, repo, "e2emutation-go", prep.RunDir, "reserve", false))
+		evaluateMutationRequestJSON(t, repo, "e2emutation-go", prep.RunDir, "reserve", false, "reserve", "reserve-batch"))
 	if code != exitOK {
 		t.Fatalf("site reserve exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
 	}
@@ -180,9 +180,9 @@ func preparedMutationFor(t *testing.T, repo, source, runID, rowID string) prepar
 	return out
 }
 
-func evaluateMutationRequestJSONFor(t *testing.T, repo, source, runID, runDir, site string, lastSite bool) string {
+func evaluateMutationRequestJSONFor(t *testing.T, repo, source, runID, runDir, site string, lastSite bool, sites ...string) string {
 	t.Helper()
-	body, err := json.Marshal(map[string]any{
+	payload := map[string]any{
 		"schemaVersion":  "1",
 		"repoRoot":       repo,
 		"coverageSource": source,
@@ -190,7 +190,11 @@ func evaluateMutationRequestJSONFor(t *testing.T, repo, source, runID, runDir, s
 		"runDir":         runDir,
 		"site":           site,
 		"lastSite":       lastSite,
-	})
+	}
+	if toSend := evaluateMutationSitesToSend(t, runDir, site, sites); toSend != nil {
+		payload["sites"] = toSend
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
 		t.Fatalf("marshal request: %v", err)
 	}
