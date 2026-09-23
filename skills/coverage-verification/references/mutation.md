@@ -188,8 +188,9 @@ compiler error in the runner output before anything is recorded, and that surfac
 ### Restart
 
 If a run is picked back up, `resume` names every started mutation row with its
-`completedSites` and its `interruptedSite` — read [run state](run-state.md) in full before
-repeating any op here. `evaluate-mutation` and `discard-mutation-edit` both refuse
+`completedSites`, its `interruptedSite`, and its `enumeratedSites` — the registered `sites`
+list, present once a call has registered one and omitted while none is — read
+[run state](run-state.md) in full before repeating any op here. `evaluate-mutation` and `discard-mutation-edit` both refuse
 `site-interrupted` for that row until `recover-mutation` has restored or recreated its
 workspace: nothing is measured or discarded on a worktree of unknown cleanliness. Completed sites are kept either way — recovery never re-measures a
 site the row already answered. `recover-mutation` never touches the row's registered `sites`

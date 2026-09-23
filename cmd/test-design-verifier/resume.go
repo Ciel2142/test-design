@@ -99,6 +99,7 @@ type resumeMutationRow struct {
 	WorktreePath    string   `json:"worktreePath"`
 	CompletedSites  []string `json:"completedSites"`
 	InterruptedSite string   `json:"interruptedSite"`
+	EnumeratedSites []string `json:"enumeratedSites,omitempty"`
 	Reason          string   `json:"reason"`
 }
 
@@ -525,6 +526,7 @@ func mutationRowReport(rowID string, rec *runstate.Record, invalidReason func(*r
 			row.Reason = reasonStateUnreadable
 		} else {
 			row.CompletedSites, row.InterruptedSite = progress.completed, progress.interrupted
+			row.EnumeratedSites = progress.enumeratedSites
 			// recover-mutation may have replaced the worktree the row was
 			// opened against and it records the replacement in the state, not
 			// in the ledger. A parent re-dispatching the mutator needs the
@@ -540,9 +542,10 @@ func mutationRowReport(rowID string, rec *runstate.Record, invalidReason func(*r
 // sites it already evaluated, the site it was inside when it stopped, and the
 // workspace it currently names.
 type rowProgress struct {
-	completed    []string
-	interrupted  string
-	worktreePath string
+	completed       []string
+	interrupted     string
+	worktreePath    string
+	enumeratedSites []string
 }
 
 // mutationProgress reads a prepared row's state document. LoadState fails
@@ -554,8 +557,9 @@ func mutationProgress(runDir string) (rowProgress, error) {
 		return rowProgress{}, err
 	}
 	progress := rowProgress{
-		completed:    make([]string, 0, len(st.Sites)),
-		worktreePath: st.WorktreePath,
+		completed:       make([]string, 0, len(st.Sites)),
+		worktreePath:    st.WorktreePath,
+		enumeratedSites: st.Enumerated,
 	}
 	for _, site := range st.Sites {
 		progress.completed = append(progress.completed, site.Site)

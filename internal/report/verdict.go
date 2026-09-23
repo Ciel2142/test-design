@@ -171,6 +171,7 @@ func Compute(in *Inputs) (*Report, error) {
 func deriveCalibration(rows []RowReport) Calibration {
 	cal := Calibration{HoldsSurvived: []string{}, FlaggedCaught: []string{}, SuspectRows: []string{}}
 	survivedGroups := make(map[string]bool)
+	comparable := make(map[string]bool)
 
 	for _, row := range rows {
 		if row.Risk != "high" {
@@ -186,21 +187,29 @@ func deriveCalibration(rows []RowReport) Calibration {
 		case verdict == "HOLDS" && status == valueMutationCaught:
 			cal.Comparable++
 			cal.Agree++
+			comparable[row.RowID] = true
 		case weakOrVacuous && status == valueMutationSurvived:
 			cal.Comparable++
 			cal.Agree++
+			comparable[row.RowID] = true
 		case verdict == "HOLDS" && status == valueMutationSurvived:
 			cal.Comparable++
 			cal.HoldsSurvived = append(cal.HoldsSurvived, row.RowID)
+			comparable[row.RowID] = true
 			survivedGroups[row.Layer2.BatchID] = true
 		case weakOrVacuous && status == valueMutationCaught:
 			cal.Comparable++
 			cal.FlaggedCaught = append(cal.FlaggedCaught, row.RowID)
+			comparable[row.RowID] = true
 		}
 	}
 
+	// A row with no Comparable pairing of its own — a non-high-risk row, or a
+	// high-risk one whose layer 4 never resolved to caught or survived — has
+	// no independent mutation confirming its HOLDS, so a tainted batch's miss
+	// calls it into question exactly like any non-high row.
 	for _, row := range rows {
-		if row.Risk == "high" || row.Layer2.Verdict != "HOLDS" {
+		if comparable[row.RowID] || row.Layer2.Verdict != "HOLDS" {
 			continue
 		}
 		if survivedGroups[row.Layer2.BatchID] {

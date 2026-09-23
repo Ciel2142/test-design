@@ -387,6 +387,37 @@ func TestResume_AStartedRowIsOwedWhateverItsRisk(t *testing.T) {
 	}
 }
 
+// TestResume_ReportsRegisteredSitesForStartedMutationRow locks I3: after a
+// restart the parent cannot learn a started row's registered site list from
+// completedSites and interruptedSite alone, so resume must also read
+// enumeratedSites back from the row's own state — present once a list is
+// registered, omitted while none is.
+func TestResume_ReportsRegisteredSitesForStartedMutationRow(t *testing.T) {
+	repo := fixtureRepo(t)
+	const runID = "resume-enumerated-sites"
+
+	if code, _, stderr := runVerifyOp(t, "trace", verifyRequestJSON(t, repo, runID)); code != exitOK {
+		t.Fatalf("trace exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+
+	prep := preparedMutation(t, repo, runID, "SC-10")
+	mutateOrdersGuard(t, prep.WorktreePath, survivedGuardMutant)
+	if code, _, stderr := runVerifyOp(t, "evaluate-mutation",
+		evaluateMutationRequestJSON(t, repo, runID, prep.RunDir, "site-a", false, "site-a", "site-b")); code != exitOK {
+		t.Fatalf("evaluate-mutation exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+	preparedMutation(t, repo, runID, "SC-09")
+
+	out := runResume(t, repo, runID)
+
+	if got := resumeRow(t, out, "SC-10").EnumeratedSites; !slices.Equal(got, []string{"site-a", "site-b"}) {
+		t.Errorf("SC-10 enumeratedSites = %v, want [site-a site-b]", got)
+	}
+	if got := resumeRow(t, out, "SC-09").EnumeratedSites; got != nil {
+		t.Errorf("SC-09 enumeratedSites = %v, want omitted (nil): no list is registered for it", got)
+	}
+}
+
 // survivedGuardMutant is the equivalent mutant of
 // TestEvaluateMutation_SurvivedSite: it rewrites ValidateQuantity's message on
 // a branch the bound tests never take, so every targeted test still passes and

@@ -1308,6 +1308,25 @@ func TestCalibration_ExcludesGapEnvUnappliable(t *testing.T) {
 	}
 }
 
+// TestCalibration_SuspectIncludesUncomparableHighRiskRow: SuspectRows widens
+// past non-high rows to any row with no Comparable pairing of its own. X-01
+// flips to HOLDS+SURVIVED, tainting batch-cal; X-03 (HOLDS, unappliable) and
+// X-04 (HOLDS, environmental) are both high-risk but never became Comparable,
+// so both must surface as suspect too. X-02 (MISSING) still must not.
+func TestCalibration_SuspectIncludesUncomparableHighRiskRow(t *testing.T) {
+	in := calibrationExclusionInputs()
+	in.Mutations[0].Evidence.Sites[0].Outcome = "survived"
+
+	r := mustCompute(t, in)
+
+	if !reflect.DeepEqual(r.Calibration.HoldsSurvived, []string{"X-01"}) {
+		t.Fatalf("Calibration.HoldsSurvived = %v, want [X-01]", r.Calibration.HoldsSurvived)
+	}
+	if !reflect.DeepEqual(r.Calibration.SuspectRows, []string{"X-03", "X-04"}) {
+		t.Errorf("Calibration.SuspectRows = %v, want [X-03 X-04]: both are high-risk, HOLDS, and never became Comparable themselves", r.Calibration.SuspectRows)
+	}
+}
+
 // TestCalibration_MissingVerdictNotComparable: MISSING means the row carries
 // no layer-2 verdict at all (R21), so a high-risk row layer 2 marked MISSING
 // is never comparable even though its layer 4 caught the mutation — SC-02 is

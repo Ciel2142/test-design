@@ -401,9 +401,11 @@ type Layer4Summary struct {
 // Calibration compares layer-2 critic verdicts against layer-4 mutation
 // outcomes on high-risk rows: informational only, it never adds a reason and
 // never changes a verdict. HoldsSurvived and FlaggedCaught name the
-// disagreements; SuspectRows names non-high rows a HoldsSurvived row's batch
-// also verdicted HOLDS, whose own HOLDS the same batch's miss now calls into
-// question. Every row list is sorted for a deterministic report.
+// disagreements; SuspectRows names every other row a HoldsSurvived row's
+// batch also verdicted HOLDS that never earned its own Comparable pairing —
+// a non-high row, or a high-risk one whose layer 4 is environmental,
+// unappliable, or a layer-1 gap — whose own HOLDS the same batch's miss now
+// calls into question. Every row list is sorted for a deterministic report.
 type Calibration struct {
 	Comparable    int      `json:"comparable"`
 	Agree         int      `json:"agree"`

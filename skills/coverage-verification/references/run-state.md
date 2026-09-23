@@ -90,7 +90,9 @@ dispatch inputs require it; only the rows never started are limited to the requi
 started row's `worktreePath` is read back from `mutation-state.json` in the row's run dir, not
 from the record's own captured inputs: `recover-mutation` rewrites that file when it restores
 or recreates the worktree, so a parent re-dispatching the mutator gets the workspace that
-exists now, not the one `prepare-mutation` opened.
+exists now, not the one `prepare-mutation` opened. `enumeratedSites` is read from the same
+file — the `sites` list an `evaluate-mutation` call registered — and is present only once one
+is; a started row nothing has registered a list for yet omits it.
 
 `counts` tallies the whole ledger: `started`, `completed`, `failed` (completed records with a
 failed outcome), `superseded`, `invalid` (completed records that no longer stand), `pending`
@@ -116,7 +118,7 @@ Output (fields relevant here; `records[]` carries the raw ledger too):
   "trace": {"status": "completed", "outcome": "ok", "evidencePath": "...", "dispatchPath": "...", "runDir": "...", "reason": ""},
   "review": {"complete": false, "groups": [{"id": "batch-1", "rows": ["SC-07"], "status": "completed", "outcome": "holds", "evidencePath": "...", "reason": ""}], "uncovered": ["SC-09"]},
   "live": {"required": true, "status": "started", "recoveryRequired": true},
-  "mutation": {"complete": false, "rows": [{"rowId": "SC-07", "status": "started", "worktreePath": "...", "completedSites": ["site-1"], "interruptedSite": "site-2"}]},
+  "mutation": {"complete": false, "rows": [{"rowId": "SC-07", "status": "started", "worktreePath": "...", "completedSites": ["site-1"], "interruptedSite": "site-2", "enumeratedSites": ["site-1", "site-2"]}]},
   "publication": {"status": "none", "outcome": "", "measuredCommit": "", "acknowledged": false, "files": [], "reason": ""},
   "pending": [
     {"kind": "review-group", "id": "", "reason": "uncovered: SC-09"},
