@@ -1,14 +1,17 @@
 package worktree
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"test-design/internal/evidence"
+	"test-design/internal/subprocess"
 )
 
 var (
@@ -50,7 +53,7 @@ func (c *Controller) TakeSnapshot() (*Snapshot, error) {
 	if unmerged := unmergedPaths(porcelain); len(unmerged) > 0 {
 		return nil, fmt.Errorf("take snapshot %s: %w: %s", c.repoRoot, ErrUnmergedIndex, strings.Join(unmerged, ", "))
 	}
-	indexTree, err := c.runGit("write-tree")
+	indexTree, err := c.writeTreeFromIndexCopy()
 	if err != nil {
 		return nil, fmt.Errorf("take snapshot %s: write-tree: %w", c.repoRoot, err)
 	}
@@ -66,6 +69,68 @@ func (c *Controller) TakeSnapshot() (*Snapshot, error) {
 		porcelainStatus: porcelain,
 		untrackedHashes: hashes,
 	}, nil
+}
+
+// writeTreeFromIndexCopy runs write-tree against a throwaway copy of the
+// index rather than the real one: write-tree persists the cache-tree it
+// computes back into whichever index it reads, taking that index's .lock to
+// do so, so concurrent TakeSnapshot calls on the real index collide on
+// .git/index.lock. Each call gets its own copy and lock; identical content
+// yields the same tree id.
+func (c *Controller) writeTreeFromIndexCopy() (string, error) {
+	indexPath, err := c.indexPath()
+	if err != nil {
+		return "", err
+	}
+	indexCopy, err := copyIndex(indexPath, c.tempRoot)
+	if err != nil {
+		return "", err
+	}
+	defer os.Remove(indexCopy)
+
+	return c.runGitWithIndex(indexCopy, "write-tree")
+}
+
+func (c *Controller) indexPath() (string, error) {
+	out, err := c.runGit("rev-parse", "--path-format=absolute", "--git-path", "index")
+	if err != nil {
+		return "", fmt.Errorf("resolve index path: %w", err)
+	}
+	return strings.TrimSpace(out), nil
+}
+
+func copyIndex(indexPath, tempRoot string) (string, error) {
+	data, err := os.ReadFile(indexPath)
+	if err != nil {
+		return "", fmt.Errorf("read index %s: %w", indexPath, err)
+	}
+	f, err := os.CreateTemp(tempRoot, "index-snapshot-*")
+	if err != nil {
+		return "", fmt.Errorf("create index copy: %w", err)
+	}
+	defer f.Close()
+	if _, err := f.Write(data); err != nil {
+		_ = os.Remove(f.Name())
+		return "", fmt.Errorf("write index copy: %w", err)
+	}
+	return f.Name(), nil
+}
+
+// runGitWithIndex mirrors runGit but appends GIT_INDEX_FILE=indexPath;
+// filteredGitEnv already strips any inherited GIT_INDEX_FILE, so this is the
+// only value in play.
+func (c *Controller) runGitWithIndex(indexPath string, args ...string) (string, error) {
+	full := append([]string{"-c", "core.hooksPath=" + c.hooksDir}, args...)
+	cmd := exec.Command("git", full...)
+	cmd.Dir = c.repoRoot
+	cmd.Env = append(filteredGitEnv(), "GIT_INDEX_FILE="+indexPath)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := subprocess.Run(cmd, subprocess.UtilityTimeout); err != nil {
+		return "", fmt.Errorf("git %s (in %s): %w: %s", strings.Join(full, " "), c.repoRoot, err, strings.TrimSpace(stderr.String()))
+	}
+	return stdout.String(), nil
 }
 
 // Clean reports whether the working tree and index match HEAD with no

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	"test-design/internal/evidence"
@@ -335,5 +336,43 @@ func TestSnapshotUnmarshalMissingFieldFailsClosed(t *testing.T) {
 				t.Errorf("Unmarshal error = %v, want it to wrap ErrSnapshotFieldMissing", err)
 			}
 		})
+	}
+}
+
+func TestTakeSnapshot_ConcurrentCallsDoNotCollide(t *testing.T) {
+	dir := newTestRepo(t)
+	ctrl, err := NewController(dir)
+	if err != nil {
+		t.Fatalf("NewController: %v", err)
+	}
+
+	const n = 8
+	snaps := make([]*Snapshot, n)
+	errs := make([]error, n)
+
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for i := range n {
+		go func(i int) {
+			defer wg.Done()
+			snaps[i], errs[i] = ctrl.TakeSnapshot()
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("TakeSnapshot[%d]: %v", i, err)
+		}
+	}
+	if t.Failed() {
+		return
+	}
+
+	want := snaps[0].indexTree
+	for i, snap := range snaps {
+		if snap.indexTree != want {
+			t.Errorf("TakeSnapshot[%d].indexTree = %q, want %q (snapshot 0)", i, snap.indexTree, want)
+		}
 	}
 }
