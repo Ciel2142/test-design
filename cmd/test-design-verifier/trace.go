@@ -105,6 +105,13 @@ type traceOutput struct {
 	EvidencePath   string         `json:"evidencePath"`
 	DispatchPath   string         `json:"dispatchPath"`
 	RunDir         string         `json:"runDir"`
+	// ProductionPaths names every changed production path of the source's
+	// Baseline commit through this trace's own repoCommit — the paths
+	// finalize will require classified — present only when that Baseline
+	// commit resolves in this repository. An absent field means finalize will
+	// refuse the run as baseline-commit-unknown; an empty one means finalize
+	// needs no classification at all.
+	ProductionPaths *[]string `json:"productionPaths,omitempty"`
 }
 
 func traceHandler(fs *flag.FlagSet, requestBody []byte, stdout io.Writer) *cliError {
@@ -145,6 +152,16 @@ func traceOp(req *verifyRequest, stdout io.Writer, between func()) *cliError {
 	if cliErr != nil {
 		return cliErr
 	}
+
+	productionPaths, err := productionPathsSince(req.RepoRoot, req.CoverageSource, src.Runner.Kind, src.BaselineCommit, repoCommit)
+	if err != nil {
+		return &cliError{Code: "production-paths-failed", Message: fmt.Sprintf("trace: %v", err)}
+	}
+	var productionPathsOut *[]string
+	if productionPaths != nil {
+		productionPathsOut = &productionPaths
+	}
+
 	runDir, err := ctrl.NewRunDir(req.RunID)
 	if err != nil {
 		return &cliError{Code: "run-dir-failed", Message: fmt.Sprintf("trace: %v", err)}
@@ -321,15 +338,16 @@ func traceOp(req *verifyRequest, stdout io.Writer, between func()) *cliError {
 	}
 
 	out := traceOutput{
-		Envelope:       ev.Envelope,
-		Source:         ev.Source,
-		RepoCommit:     ev.RepoCommit,
-		BaselineStatus: ev.BaselineStatus,
-		FindingCounts:  ev.FindingCounts,
-		RowAccounting:  ev.RowAccounting,
-		EvidencePath:   evidencePath,
-		DispatchPath:   dispatchPath,
-		RunDir:         runDir,
+		Envelope:        ev.Envelope,
+		Source:          ev.Source,
+		RepoCommit:      ev.RepoCommit,
+		BaselineStatus:  ev.BaselineStatus,
+		FindingCounts:   ev.FindingCounts,
+		RowAccounting:   ev.RowAccounting,
+		EvidencePath:    evidencePath,
+		DispatchPath:    dispatchPath,
+		RunDir:          runDir,
+		ProductionPaths: productionPathsOut,
 	}
 	return writeStdout(stdout, out)
 }

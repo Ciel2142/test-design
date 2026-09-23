@@ -121,14 +121,30 @@ func Compute(in *Inputs) (*Report, error) {
 		verdict = VerdictPartial
 	}
 
+	freshnessPaths := in.Freshness.Paths
+	if freshnessPaths == nil {
+		freshnessPaths = []FreshnessPath{}
+	}
+	staleFindings := in.Freshness.Stale
+	if staleFindings == nil {
+		staleFindings = []StaleFinding{}
+	}
+
 	return &Report{
-		Envelope:        evidence.Envelope{SchemaVersion: evidence.SchemaVersion, VerifierVersion: evidence.VerifierVersion},
-		RunID:           in.RunID,
-		Source:          in.Source.Path,
-		SourceSHA256:    in.Source.SHA256,
-		HeadCommit:      in.HeadCommit,
-		BaselineCommit:  in.Trace.BaselineCommit,
-		BaselineStatus:  in.Trace.BaselineStatus,
+		Envelope:       evidence.Envelope{SchemaVersion: evidence.SchemaVersion, VerifierVersion: evidence.VerifierVersion},
+		RunID:          in.RunID,
+		Source:         in.Source.Path,
+		SourceSHA256:   in.Source.SHA256,
+		HeadCommit:     in.HeadCommit,
+		BaselineCommit: in.Trace.BaselineCommit,
+		BaselineStatus: in.Trace.BaselineStatus,
+		Freshness: &FreshnessRecord{
+			Base:     in.Trace.BaselineCommit,
+			Measured: in.HeadCommit,
+			Paths:    freshnessPaths,
+			Result:   in.Freshness.Result,
+			Stale:    staleFindings,
+		},
 		Verdict:         verdict,
 		Acknowledged:    verdict == VerdictPartial && in.Acknowledgement != "",
 		Acknowledgement: in.Acknowledgement,

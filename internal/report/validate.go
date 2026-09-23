@@ -2,6 +2,7 @@ package report
 
 import (
 	"fmt"
+	"strings"
 
 	"test-design/internal/coverage"
 	"test-design/internal/evidence"
@@ -9,9 +10,19 @@ import (
 )
 
 const (
-	CodeStaleEvidence           = "stale-evidence"
-	CodeMissingFreshness        = "missing-freshness"
-	CodeInvalidFreshness        = "invalid-freshness"
+	CodeStaleEvidence    = "stale-evidence"
+	CodeMissingFreshness = "missing-freshness"
+	CodeInvalidFreshness = "invalid-freshness"
+	// CodeBaselineCommitUnknown refuses a run whose coverage source names a
+	// Baseline commit this repository does not have: there is no diff to
+	// measure a freshness answer against.
+	CodeBaselineCommitUnknown = "baseline-commit-unknown"
+	// CodeFreshnessUnclassified refuses a freshness answer that leaves a
+	// changed production path out of its paths classification.
+	CodeFreshnessUnclassified = "freshness-unclassified"
+	// CodeFreshnessUnknownPath refuses a paths entry, or a stale finding's
+	// hunk file, that names a path outside the changed production set.
+	CodeFreshnessUnknownPath    = "freshness-unknown-path"
 	CodeDuplicateVerdict        = "duplicate-verdict"
 	CodeMissingVerdict          = "missing-verdict"
 	CodeUnknownRow              = "unknown-row"
@@ -56,7 +67,7 @@ func Validate(in *Inputs) error {
 	if err := validateStaleness(in); err != nil {
 		return err
 	}
-	if err := validateFreshness(in.Freshness); err != nil {
+	if err := ValidateFreshness(in.Freshness, in.ProductionPaths); err != nil {
 		return err
 	}
 	if err := validateRowUniverse(in, activeSet); err != nil {
@@ -163,20 +174,90 @@ func matchesReuse(m MutationInput, ref *evidence.ReuseReference) error {
 	return nil
 }
 
-func validateFreshness(f Freshness) error {
+// ValidateFreshness checks a freshness answer against productionPaths, the
+// changed production paths of the diff it is measured over. It is exported so
+// finalize can refuse a request that could never produce a report before
+// recovery takes back the run's previous publication; Validate calls it with
+// the same two arguments once every other layer's evidence is loaded, so the
+// two entry points always raise the same code with the same wording.
+//
+// productionPaths is nil when the coverage source's Baseline commit does not
+// resolve in the repository — there is no diff to classify against — and
+// otherwise names every changed production path, even when that set is
+// empty.
+func ValidateFreshness(f Freshness, productionPaths []string) error {
+	if productionPaths == nil {
+		return refuse(CodeBaselineCommitUnknown, "the coverage source's Baseline commit does not resolve in this repository; freshness cannot be measured against it")
+	}
+
 	switch f.Result {
 	case "":
 		return refuse(CodeMissingFreshness, "freshness result is empty")
 	case "fresh":
-		return nil
+		if len(f.Stale) != 0 {
+			return refuse(CodeInvalidFreshness, "freshness result is fresh with %d stale finding(s)", len(f.Stale))
+		}
 	case "stale":
 		if len(f.Stale) == 0 {
 			return refuse(CodeInvalidFreshness, "freshness result is stale with no stale findings")
 		}
-		return nil
 	default:
 		return refuse(CodeInvalidFreshness, "freshness result %q outside fresh|stale", f.Result)
 	}
+
+	for _, s := range f.Stale {
+		if s.Hunk == "" || s.Behavior == "" {
+			return refuse(CodeInvalidFreshness, "a stale finding has an empty hunk or behavior")
+		}
+	}
+
+	seen := make(map[string]bool, len(f.Paths))
+	for _, p := range f.Paths {
+		if p.Basis == "" {
+			return refuse(CodeInvalidFreshness, "path %q has an empty basis", p.Path)
+		}
+		if seen[p.Path] {
+			return refuse(CodeInvalidFreshness, "path %q is classified more than once", p.Path)
+		}
+		seen[p.Path] = true
+	}
+
+	var unclassified []string
+	for _, path := range productionPaths {
+		if !seen[path] {
+			unclassified = append(unclassified, path)
+		}
+	}
+	if len(unclassified) > 0 {
+		return refuse(CodeFreshnessUnclassified, "the following changed production path(s) have no freshness classification: %s", strings.Join(unclassified, ", "))
+	}
+
+	production := make(map[string]bool, len(productionPaths))
+	for _, path := range productionPaths {
+		production[path] = true
+	}
+	for _, p := range f.Paths {
+		if !production[p.Path] {
+			return refuse(CodeFreshnessUnknownPath, "path %q is classified but is not a changed production path", p.Path)
+		}
+	}
+	for _, s := range f.Stale {
+		file := hunkFile(s.Hunk)
+		if !production[file] {
+			return refuse(CodeFreshnessUnknownPath, "stale finding hunk %q names file %q, which is not a changed production path", s.Hunk, file)
+		}
+	}
+	return nil
+}
+
+// hunkFile is the file half of a stale finding's hunk, <path>:<start>-<end>:
+// everything before the last colon, so a path segment that itself holds a
+// colon is not mistaken for the range suffix.
+func hunkFile(hunk string) string {
+	if i := strings.LastIndex(hunk, ":"); i >= 0 {
+		return hunk[:i]
+	}
+	return hunk
 }
 
 func validateRowUniverse(in *Inputs, activeSet map[string]bool) error {

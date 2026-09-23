@@ -34,6 +34,7 @@ func TestRenderMarkdownSectionOrder(t *testing.T) {
 
 	headings := []string{
 		"# Verification: " + r.Source,
+		"## Freshness",
 		"## Layer 1 — trace",
 		"## Layer 2 — adversarial read",
 		"## Layer 3 — live",
@@ -210,7 +211,8 @@ func TestRenderMarkdownLayer3NAAllGapsIsOneLine(t *testing.T) {
 			FindingCounts:  map[string]int{},
 			RowResults:     []TraceRowResult{{RowID: "SC-00", Scope: "pkg/a", Name: "TestA", Status: "passed"}},
 		},
-		Freshness: Freshness{Result: "fresh"},
+		Freshness:       Freshness{Result: "fresh"},
+		ProductionPaths: []string{},
 		Batches: []Batch{
 			{
 				BatchID:  "batch-1",
@@ -254,6 +256,49 @@ func TestRenderMarkdownLayer3NAAllGapsIsOneLine(t *testing.T) {
 	}
 	if !strings.Contains(l3, "n/a") || !strings.Contains(l3, "2") {
 		t.Errorf("Layer 3 section should state n/a status and the applicable count; got:\n%s", l3)
+	}
+}
+
+func TestRenderMarkdownFreshnessSection(t *testing.T) {
+	in := greenInputs()
+	in.ProductionPaths = []string{"pkg/a.go"}
+	in.Freshness = Freshness{
+		Result: "fresh",
+		Paths:  []FreshnessPath{{Path: "pkg/a.go", Basis: "adds a comment; no behavior change"}},
+	}
+	r := mustCompute(t, in)
+
+	md := mustRender(t, r)
+	for _, want := range []string{"## Freshness", "base-1", "head-1", "pkg/a.go", "adds a comment; no behavior change"} {
+		if !strings.Contains(md, want) {
+			t.Errorf("markdown missing %q; got:\n%s", want, md)
+		}
+	}
+}
+
+func TestRenderMarkdownFreshnessStaleTable(t *testing.T) {
+	r := mustCompute(t, multiCauseInputs())
+
+	md := mustRender(t, r)
+	if !strings.Contains(md, "spec.md:12") || !strings.Contains(md, "retry on 429") {
+		t.Errorf("markdown missing the stale finding table; got:\n%s", md)
+	}
+}
+
+func TestRenderMarkdownFreshnessNoChangedPaths(t *testing.T) {
+	r := mustCompute(t, greenInputs())
+	md := mustRender(t, r)
+	if !strings.Contains(md, "No changed production paths.") {
+		t.Errorf("markdown missing the no-changed-paths line; got:\n%s", md)
+	}
+}
+
+func TestRenderMarkdownFreshnessNilRecordSaysNotRecorded(t *testing.T) {
+	r := mustCompute(t, greenInputs())
+	r.Freshness = nil
+	md := mustRender(t, r)
+	if !strings.Contains(md, "Not recorded") {
+		t.Errorf("markdown missing the not-recorded line for a legacy report; got:\n%s", md)
 	}
 }
 

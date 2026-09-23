@@ -92,6 +92,70 @@ func TestRepoChanges_CommitExistsAndTrackedAtAskTheObjectStore(t *testing.T) {
 	}
 }
 
+// TestRepoChanges_IsGoTestdataPathMatchesAnySegment: a testdata directory
+// disqualifies a path regardless of where it sits or what the file is named.
+func TestRepoChanges_IsGoTestdataPathMatchesAnySegment(t *testing.T) {
+	cases := []struct {
+		path string
+		want bool
+	}{
+		{"orders/testdata/golden.json", true},
+		{"testdata/x.go", true},
+		{"orders/orders.go", false},
+		{"orders/testdatafoo/x.go", false},
+	}
+	for _, tc := range cases {
+		if got := isGoTestdataPath(tc.path); got != tc.want {
+			t.Errorf("isGoTestdataPath(%q) = %v, want %v", tc.path, got, tc.want)
+		}
+	}
+}
+
+// TestRepoChanges_ProductionPathsSinceExcludesTestsTestdataAndPublication
+// holds productionPathsSince to the set finalize must require classified: a
+// changed production file survives, a changed test file, a changed testdata
+// path and a change under the coverage source's own directory do not.
+func TestRepoChanges_ProductionPathsSinceExcludesTestsTestdataAndPublication(t *testing.T) {
+	repo := fixtureRepo(t)
+	base := strings.TrimSpace(mustGit(t, repo, "rev-parse", "HEAD"))
+
+	orders := filepath.Join(repo, "orders", "orders.go")
+	data, err := os.ReadFile(orders)
+	if err != nil {
+		t.Fatalf("read the fixture's orders source: %v", err)
+	}
+	if err := os.WriteFile(orders, append(data, []byte("\n// touched\n")...), 0o644); err != nil {
+		t.Fatalf("write the fixture's orders source: %v", err)
+	}
+	writeRepoFile(t, repo, "orders/orders_test.go", "package orders\n// touched test\n")
+	writeRepoFile(t, repo, "orders/testdata/golden.txt", "golden\n")
+	writeRepoFile(t, repo, "docs/superpowers/coverage/scratch.txt", "scratch\n")
+	edited := commitAll(t, repo, "touch production, test, testdata and the coverage directory")
+
+	got, err := productionPathsSince(repo, fixtureCoverageSource, "go", base, edited)
+	if err != nil {
+		t.Fatalf("productionPathsSince: %v", err)
+	}
+	if want := []string{"orders/orders.go"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("productionPathsSince = %v, want %v", got, want)
+	}
+}
+
+// TestRepoChanges_ProductionPathsSinceUnresolvedBaselineReturnsNil is R3: no
+// diff can be measured against a baseline commit this repository never had.
+func TestRepoChanges_ProductionPathsSinceUnresolvedBaselineReturnsNil(t *testing.T) {
+	repo := fixtureRepo(t)
+	head := strings.TrimSpace(mustGit(t, repo, "rev-parse", "HEAD"))
+
+	got, err := productionPathsSince(repo, fixtureCoverageSource, "go", "deadbeef", head)
+	if err != nil {
+		t.Fatalf("productionPathsSince: %v", err)
+	}
+	if got != nil {
+		t.Errorf("productionPathsSince with an unresolved baseline = %v, want nil", got)
+	}
+}
+
 // TestRepoChanges_IsTestFileClassifiesByRunnerKind: a change to a test file is
 // read differently from a change to production source, so the classification is
 // per runner kind and per path segment — a directory merely ending in "src" is

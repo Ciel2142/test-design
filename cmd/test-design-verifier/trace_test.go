@@ -4,6 +4,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -138,12 +139,84 @@ func TestTrace_MissingBaselineIsRecordedNotFatal(t *testing.T) {
 	if out.BaselineStatus != "missing" {
 		t.Errorf("baselineStatus = %q, want %q", out.BaselineStatus, "missing")
 	}
+	if out.ProductionPaths == nil {
+		t.Error("productionPaths = nil, want it present: the fixture's Baseline commit resolves; a missing baseline evidence file is a separate condition")
+	} else if want := []string{}; !reflect.DeepEqual(*out.ProductionPaths, want) {
+		t.Errorf("productionPaths = %v, want %v: only the coverage doc changed since baseline", *out.ProductionPaths, want)
+	}
 	ev := readTraceEvidence(t, out)
 	if ev.BaselineStatus != "missing" {
 		t.Errorf("evidence baselineStatus = %q, want %q", ev.BaselineStatus, "missing")
 	}
 	if len(ev.NewFailures) != 0 {
 		t.Errorf("newFailures = %v, want none without a baseline to compare against", ev.NewFailures)
+	}
+}
+
+// fixtureRepoWithUnresolvableBaseline is fixtureRepo but pins the coverage
+// doc's Baseline to a commit hash this repository never had: resolvable is a
+// property of the commit named, not of the baseline evidence file, which
+// TestTrace_MissingBaselineIsRecordedNotFatal exercises separately.
+func fixtureRepoWithUnresolvableBaseline(t *testing.T) string {
+	t.Helper()
+	isolateEnv(t)
+	repo := t.TempDir()
+	copyTree(t, filepath.Join("..", "..", "fixtures", "go-project"), repo)
+	mustGit(t, repo, "init", "-q")
+	mustGit(t, repo, "add", "-A")
+	mustGit(t, repo, "commit", "-q", "-m", "fixture")
+	rewriteFixtureDoc(t, repo, func(s string) string {
+		return strings.ReplaceAll(s, "BASELINE_COMMIT", strings.Repeat("f", 40))
+	})
+	mustGit(t, repo, "add", "-A")
+	mustGit(t, repo, "commit", "-q", "-m", "pin an unresolvable baseline commit")
+	return repo
+}
+
+// TestTrace_ReportsProductionPaths locks R3's positive case: a change to
+// production source since the (resolvable) Baseline commit is named in the
+// op's own output, ahead of the run that will require it classified.
+func TestTrace_ReportsProductionPaths(t *testing.T) {
+	repo := fixtureRepo(t)
+	orders := filepath.Join(repo, "orders", "orders.go")
+	data, err := os.ReadFile(orders)
+	if err != nil {
+		t.Fatalf("read the fixture's orders source: %v", err)
+	}
+	if err := os.WriteFile(orders, append(data, []byte("\n// behavior changed\n")...), 0o644); err != nil {
+		t.Fatalf("write the fixture's orders source: %v", err)
+	}
+	mustGit(t, repo, "add", "-A")
+	mustGit(t, repo, "commit", "-q", "-m", "change production behavior")
+
+	code, stdout, stderr := runVerifyOp(t, "trace", verifyRequestJSON(t, repo, "prodpaths"))
+
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+	out := decodeTraceOutput(t, stdout)
+	if out.ProductionPaths == nil {
+		t.Fatal("productionPaths = nil, want it populated: the Baseline commit resolves")
+	}
+	if want := []string{"orders/orders.go"}; !reflect.DeepEqual(*out.ProductionPaths, want) {
+		t.Errorf("productionPaths = %v, want %v", *out.ProductionPaths, want)
+	}
+}
+
+// TestTrace_UnresolvedBaselineCommitOmitsProductionPaths is R3's negative
+// case: trace must not start refusing a run it accepted before, so an
+// unresolvable Baseline commit leaves the field out rather than failing trace.
+func TestTrace_UnresolvedBaselineCommitOmitsProductionPaths(t *testing.T) {
+	repo := fixtureRepoWithUnresolvableBaseline(t)
+
+	code, stdout, stderr := runVerifyOp(t, "trace", verifyRequestJSON(t, repo, "unresolved-baseline"))
+
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d; stderr=%s", code, exitOK, stderr)
+	}
+	out := decodeTraceOutput(t, stdout)
+	if out.ProductionPaths != nil {
+		t.Errorf("productionPaths = %v, want it omitted: the Baseline commit does not resolve", *out.ProductionPaths)
 	}
 }
 

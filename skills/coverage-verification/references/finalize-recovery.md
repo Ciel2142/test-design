@@ -10,7 +10,7 @@ needs comes from the run's own ledger, written by the ops that already ran:
   "coverageSource": "<repo-relative path>",
   "runID": "<run id>",
   "approval": "<the user's go-ahead, verbatim>",
-  "freshness": {"result": "fresh", "stale": []},
+  "freshness": {"result": "fresh", "paths": [], "stale": []},
   "acknowledgement": "<the user's PARTIAL acknowledgement, verbatim>"
 }
 ```
@@ -20,6 +20,16 @@ that answers a published `PARTIAL`. A request still carrying `traceEvidence`, `l
 `layer3`, or `layer4` — the previous protocol's pasted-evidence fields — is refused
 `envelope-not-accepted`, naming the field: every layer's evidence now comes from the run's
 own ledger, recorded by the op that produced it, and this thread pastes none of it.
+
+`freshness.paths` names one `{path, basis}` entry per changed production path between the
+source's `Baseline:` commit and the commit finalize measures — `trace`'s own
+`productionPaths` output lists that set in advance — `basis` being free prose for why the
+path does or does not change the approved behavior. finalize refuses `freshness-unclassified`
+for a changed production path left out of `paths`, `freshness-unknown-path` for a `paths`
+entry or a stale finding's hunk file naming a path outside that diff, and
+`baseline-commit-unknown` when the `Baseline:` commit itself does not resolve in the
+repository. A diff touching only test files needs no classification at all: `paths` stays
+empty.
 
 Run:
 
@@ -176,6 +186,9 @@ the message names the specifics.
 | `trace-incomplete` | `finalize` | This run has no ledger, or its trace phase never completed. Run `trace` for this run ID — or finish an interrupted one — before finalizing |
 | `run-incomplete` | `finalize` | Some other obligation `resume` still lists pending, named `<kind> <id>: <reason>` per entry. Answer every entry and rerun finalize; nothing was published. One reason cannot be answered: `phase trace: stale` means the coverage source changed under the run, so no obligation of this run is about the source as it now reads — start a new run at a new run ID |
 | `stale-evidence` (source hash mismatch) | `finalize` | An evidence document's `sourceSha256` does not match the coverage source's current hash. The coverage source changed mid-run — mint a new run ID and repeat every layer against the source as it now reads |
+| `baseline-commit-unknown` | `finalize` | The coverage source's `Baseline:` commit does not resolve in this repository, so there is no diff to measure a freshness answer against. Fix the source's `Baseline:` line to a commit this repository has, then rerun |
+| `freshness-unclassified` | `finalize` | The freshness answer left one or more changed production paths — named in the message — with no entry in `freshness.paths`. Classify every one (`path`, `basis`) and resubmit; nothing was published |
+| `freshness-unknown-path` | `finalize` | A `freshness.paths` entry, or a stale finding's hunk file, names a path the message says is not a changed production path between the baseline and measured commits. Drop or correct the entry and resubmit; nothing was published |
 | `missing-verdict` | `finalize` | An active row has no layer-2 verdict, a layer-3-applicable row has none, a layer-4-applicable row has no mutation entry, or a layer-1 gap row's recorded verdict is not `MISSING`. The first three should never happen once `resume` reports nothing pending — treat it as a defect in `resume` or `finalize`, not a request this thread can fix. The last is a critic dispatch that disagreed with layer 1: reconcile per [critic phase](critic.md) and repeat that group's review |
 | `publication-unverifiable` | `finalize` | An own path from a prior publication of this run has bytes that are not what this run wrote — the message names it. Restore or commit the file by hand, or discard the edit, then rerun; recovery will not discard bytes it cannot prove are its own |
 | `recovery-failed` | `finalize` | An internal failure: recovery could not complete a change it had already proven safe — a trackedness question git could not answer, or a checkout or removal that failed partway through applying its plan. Not a bookkeeping defect in this request or evidence of tampering; repair the repository by hand per the message and rerun finalize |

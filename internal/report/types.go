@@ -149,13 +149,35 @@ type MutationEvidence struct {
 }
 
 type Freshness struct {
-	Result string         `json:"result"`
-	Stale  []StaleFinding `json:"stale"`
+	Result string          `json:"result"`
+	Paths  []FreshnessPath `json:"paths"`
+	Stale  []StaleFinding  `json:"stale"`
+}
+
+// FreshnessPath is one changed production path classified against the
+// approved coverage source: Basis is free prose for why the path does or
+// does not change the behavior the source claims.
+type FreshnessPath struct {
+	Path  string `json:"path"`
+	Basis string `json:"basis"`
 }
 
 type StaleFinding struct {
 	Hunk     string `json:"hunk"`
 	Behavior string `json:"behavior"`
+}
+
+// FreshnessRecord is the published, self-describing record of a freshness
+// answer: the two commits it was measured over, the classification of every
+// changed production path between them, and the answer itself. Reports
+// published before 1.3.0 carry none; Report.Freshness is a pointer so they
+// still decode.
+type FreshnessRecord struct {
+	Base     string          `json:"base"`
+	Measured string          `json:"measured"`
+	Paths    []FreshnessPath `json:"paths"`
+	Result   string          `json:"result"`
+	Stale    []StaleFinding  `json:"stale"`
 }
 
 type CriticVerdict struct {
@@ -200,11 +222,17 @@ type MutationInput struct {
 }
 
 type Inputs struct {
-	Source          *coverage.Source
-	RunID           string
-	HeadCommit      string
-	Trace           *TraceEvidence
-	Freshness       Freshness
+	Source     *coverage.Source
+	RunID      string
+	HeadCommit string
+	Trace      *TraceEvidence
+	Freshness  Freshness
+	// ProductionPaths is nil when the source's Baseline commit does not
+	// resolve in the repository, and otherwise names every changed
+	// production path of baseline..HeadCommit, even when that set is empty.
+	// ValidateFreshness reads the nil-ness to tell "unmeasurable" apart from
+	// "measured, nothing changed".
+	ProductionPaths []string
 	Batches         []Batch
 	Live            *LiveEvidence
 	LiveAttempt     *LiveAttempt
@@ -385,6 +413,7 @@ type Report struct {
 	HeadCommit      string            `json:"headCommit"`
 	BaselineCommit  string            `json:"baselineCommit"`
 	BaselineStatus  string            `json:"baselineStatus"`
+	Freshness       *FreshnessRecord  `json:"freshness"`
 	Approval        string            `json:"approval"`
 	Verdict         string            `json:"verdict"`
 	Acknowledged    bool              `json:"acknowledged"`

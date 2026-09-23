@@ -94,8 +94,10 @@ Trace snapshots the target, runs its declared suite in a disposable HEAD worktre
 records, compares baseline, disposes the worktree and verifies the original snapshot.
 
 Read `evidencePath` (traceEvidence for later ops), `dispatchPath`, `runDir`, `repoCommit`,
-`baselineStatus`, `findingCounts`, and `rowAccounting {activeRows,withResult,unaccounted}`.
-A baseline other than `ok` does not stop later layers; finalize accounts for it as PARTIAL.
+`baselineStatus`, `findingCounts`, `rowAccounting {activeRows,withResult,unaccounted}`, and
+`productionPaths` — every changed production path finalize will require classified, present
+only when the source's `Baseline:` commit resolves in the repository. A baseline other than
+`ok` does not stop later layers; finalize accounts for it as PARTIAL.
 
 Read the `dispatchPath` JSON once. Its envelope carries `runId`, `repoCommit`, `source`,
 `sourceSha256`; each row carries `rowId`, `behavior`, `expected`, `level`, `risk`,
@@ -110,15 +112,21 @@ Findings: `gap` = untagged/not run; `ambiguity` = not uniquely bindable/normaliz
 `red-runner` for nonzero runner exit without a normalized report. Use the executable's
 findings and row statuses unchanged.
 
-Read the branch's **production-only diff** and compare every externally observable change
-against dispatch rows' behavior groups. The parent supplies finalize's semantic freshness:
+Read the branch's **production-only diff** and classify every changed production path —
+`trace`'s own `productionPaths` names the set in advance — against dispatch rows' behavior
+groups. The parent supplies finalize's semantic freshness, one `paths` entry per changed
+production path:
 
 ```json
-{"result":"fresh","stale":[]}
+{"result":"fresh","paths":[{"path":"internal/orders/guard.go","basis":"adds a log line; behavior unchanged"}],"stale":[]}
 ```
 
-or `{"result":"stale","stale":[{"hunk":"internal/orders/guard.go:41-58","behavior":"partial-refund path"}]}`.
-Stale requires named hunks and behaviors and blocks; amend the approved source, not the verdict.
+or `{"result":"stale","paths":[...],"stale":[{"hunk":"internal/orders/guard.go:41-58","behavior":"partial-refund path"}]}`.
+Stale requires named hunks and behaviors and blocks; amend the approved source, not the
+verdict. finalize refuses before publishing anything: `freshness-unclassified` for a changed
+production path left out of `paths`; `freshness-unknown-path` for a `paths` entry, or a stale
+hunk's file, naming a path outside that diff; `baseline-commit-unknown` when the source's
+`Baseline:` commit itself does not resolve in the repository.
 
 ## Run-wide invariants
 

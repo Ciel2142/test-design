@@ -1,6 +1,7 @@
 package report
 
 import (
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
@@ -105,14 +106,15 @@ func greenMutations() []MutationInput {
 
 func greenInputs() *Inputs {
 	return &Inputs{
-		Source:     greenSource(),
-		RunID:      "run-1",
-		HeadCommit: "head-1",
-		Trace:      greenTrace(),
-		Freshness:  Freshness{Result: "fresh"},
-		Batches:    greenBatches(),
-		Live:       greenLive(),
-		Mutations:  greenMutations(),
+		Source:          greenSource(),
+		RunID:           "run-1",
+		HeadCommit:      "head-1",
+		Trace:           greenTrace(),
+		Freshness:       Freshness{Result: "fresh"},
+		ProductionPaths: []string{},
+		Batches:         greenBatches(),
+		Live:            greenLive(),
+		Mutations:       greenMutations(),
 	}
 }
 
@@ -724,7 +726,12 @@ func TestComputeNewFailuresAreBlocked(t *testing.T) {
 
 func TestComputeStaleFreshnessIsBlocked(t *testing.T) {
 	in := greenInputs()
-	in.Freshness = Freshness{Result: "stale", Stale: []StaleFinding{{Hunk: "spec.md:12", Behavior: "retry on 429"}}}
+	in.ProductionPaths = []string{"spec.md"}
+	in.Freshness = Freshness{
+		Result: "stale",
+		Paths:  []FreshnessPath{{Path: "spec.md", Basis: "adds the 429 retry rule"}},
+		Stale:  []StaleFinding{{Hunk: "spec.md:12", Behavior: "retry on 429"}},
+	}
 
 	r := mustCompute(t, in)
 
@@ -734,6 +741,51 @@ func TestComputeStaleFreshnessIsBlocked(t *testing.T) {
 		t.Errorf("reason detail = %q, want it to name the stale behavior", rn.Detail)
 	}
 	wantLayerStatus(t, r, "pass", "pass", "pass", "pass")
+}
+
+// TestReportRecordsFreshnessBasis holds the published report's JSON to the
+// classification Compute derived: base and measured name the two commits the
+// diff spans, and paths carries the classified entry with its basis.
+func TestReportRecordsFreshnessBasis(t *testing.T) {
+	in := greenInputs()
+	in.ProductionPaths = []string{"pkg/a.go"}
+	in.Freshness = Freshness{
+		Result: "fresh",
+		Paths:  []FreshnessPath{{Path: "pkg/a.go", Basis: "adds a comment; no behavior change"}},
+	}
+	r := mustCompute(t, in)
+
+	data, err := json.Marshal(r)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	var decoded struct {
+		Freshness struct {
+			Base     string          `json:"base"`
+			Measured string          `json:"measured"`
+			Paths    []FreshnessPath `json:"paths"`
+			Result   string          `json:"result"`
+			Stale    []StaleFinding  `json:"stale"`
+		} `json:"freshness"`
+	}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if decoded.Freshness.Base != "base-1" {
+		t.Errorf("freshness.base = %q, want %q", decoded.Freshness.Base, "base-1")
+	}
+	if decoded.Freshness.Measured != "head-1" {
+		t.Errorf("freshness.measured = %q, want %q", decoded.Freshness.Measured, "head-1")
+	}
+	if len(decoded.Freshness.Paths) != 1 || decoded.Freshness.Paths[0].Path != "pkg/a.go" || decoded.Freshness.Paths[0].Basis == "" {
+		t.Errorf("freshness.paths = %+v, want one classified entry for pkg/a.go with a basis", decoded.Freshness.Paths)
+	}
+	if decoded.Freshness.Result != "fresh" {
+		t.Errorf("freshness.result = %q, want fresh", decoded.Freshness.Result)
+	}
+	if decoded.Freshness.Stale == nil {
+		t.Error("freshness.stale = nil, want an empty array, never null")
+	}
 }
 
 func TestComputeRedRunnerIsBlocked(t *testing.T) {
@@ -821,7 +873,12 @@ func TestComputeRefusesStaleBatchRunID(t *testing.T) {
 
 func multiCauseInputs() *Inputs {
 	in := greenInputs()
-	in.Freshness = Freshness{Result: "stale", Stale: []StaleFinding{{Hunk: "spec.md:12", Behavior: "retry on 429"}}}
+	in.ProductionPaths = []string{"spec.md"}
+	in.Freshness = Freshness{
+		Result: "stale",
+		Paths:  []FreshnessPath{{Path: "spec.md", Basis: "adds the 429 retry rule"}},
+		Stale:  []StaleFinding{{Hunk: "spec.md:12", Behavior: "retry on 429"}},
+	}
 	in.Trace.BaselineStatus = "missing"
 	in.Trace.NewFailures = []TraceNewFailure{{Scope: "pkg/d", Name: "TestD"}}
 	in.Trace.RowResults = []TraceRowResult{

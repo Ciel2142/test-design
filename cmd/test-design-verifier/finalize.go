@@ -214,15 +214,6 @@ func finalizeOp(req *finalizeRequest, stdout io.Writer, between func()) *cliErro
 			Message: op + ": approval is required; record the approval line from the coverage gate",
 		}
 	}
-	// Everything the request itself can be refused for is refused here, before
-	// the repository is touched. report.Compute would raise these for itself,
-	// but only at the end — after recovery had already taken back the previous
-	// publication for a call that was never going to produce a report to put in
-	// its place, leaving the repository without the publication its own ledger
-	// still describes as completed.
-	if cliErr := requestFieldRefusal(op, &req.finalizeRequestBody); cliErr != nil {
-		return cliErr
-	}
 
 	// The revision the report measures is the one the run was opened against.
 	// Committing what a previous finalize published is not a change to the
@@ -244,6 +235,23 @@ func finalizeOp(req *finalizeRequest, stdout io.Writer, between func()) *cliErro
 			Message: fmt.Sprintf("%s: HEAD is %s but the run was opened at %s and %s changed between them; a verification describes one commit, so start a new run at HEAD, reusing this approval when the scope is unchanged",
 				op, head, opened, offending),
 		}
+	}
+
+	// productionPaths is the diff a freshness answer is measured against: the
+	// same one trace already reported, recomputed here from the same two
+	// commits because a request may arrive well after trace ran.
+	productionPaths, err := productionPathsSince(req.RepoRoot, req.CoverageSource, src.Runner.Kind, src.BaselineCommit, measured)
+	if err != nil {
+		return &cliError{Code: "production-paths-failed", Message: fmt.Sprintf("%s: %v", op, err)}
+	}
+	// Everything the request itself can be refused for is refused here, before
+	// the repository is touched. report.Compute would raise these for itself,
+	// but only at the end — after recovery had already taken back the previous
+	// publication for a call that was never going to produce a report to put in
+	// its place, leaving the repository without the publication its own ledger
+	// still describes as completed.
+	if cliErr := requestFieldRefusal(op, &req.finalizeRequestBody, productionPaths); cliErr != nil {
+		return cliErr
 	}
 	identity := ledgerIdentity(&req.verifyRequest, req.RepoRoot, measured, src)
 
@@ -288,6 +296,7 @@ func finalizeOp(req *finalizeRequest, stdout io.Writer, between func()) *cliErro
 		HeadCommit:      measured,
 		Trace:           run.trace,
 		Freshness:       req.Freshness,
+		ProductionPaths: productionPaths,
 		Batches:         run.batches,
 		Live:            run.live,
 		LiveAttempt:     run.liveAttempt,
@@ -438,31 +447,23 @@ func finalizeOp(req *finalizeRequest, stdout io.Writer, between func()) *cliErro
 	return writeStdout(stdout, out)
 }
 
-// requestFieldRefusal answers, from the request alone, every refusal
-// report.Compute raises about the three fields the parent still sends.
-// `approval` is finalize's own gate above and `acknowledgement` is free text
-// the report only quotes, so freshness is the whole of it. The codes and the
-// wording mirror internal/report/validate.go's validateFreshness exactly: a
-// caller must see the same refusal whether it is decided here or there, and
-// deciding it here is what keeps a request that can never produce a report from
-// reaching recovery.
-func requestFieldRefusal(op string, body *finalizeRequestBody) *cliError {
-	refuse := func(code, format string, args ...any) *cliError {
-		return &cliError{Code: code, Message: fmt.Sprintf("%s: %s", op, fmt.Sprintf(format, args...))}
-	}
-	switch f := body.Freshness; f.Result {
-	case "":
-		return refuse(report.CodeMissingFreshness, "freshness result is empty")
-	case "fresh":
-		return nil
-	case "stale":
-		if len(f.Stale) == 0 {
-			return refuse(report.CodeInvalidFreshness, "freshness result is stale with no stale findings")
+// requestFieldRefusal answers, from the request and productionPaths alone,
+// every refusal report.Compute raises about the three fields the parent still
+// sends. `approval` is finalize's own gate above and `acknowledgement` is free
+// text the report only quotes, so freshness is the whole of it. It calls
+// report.ValidateFreshness directly rather than repeating its checks: the two
+// call sites must always raise the same code with the same wording, and
+// deciding it here is what keeps a request that can never produce a report
+// from reaching recovery.
+func requestFieldRefusal(op string, body *finalizeRequestBody, productionPaths []string) *cliError {
+	if err := report.ValidateFreshness(body.Freshness, productionPaths); err != nil {
+		var refusal *report.RefusalError
+		if errors.As(err, &refusal) {
+			return &cliError{Code: refusal.Code, Message: fmt.Sprintf("%s: %s", op, refusal.Detail)}
 		}
-		return nil
-	default:
-		return refuse(report.CodeInvalidFreshness, "freshness result %q outside fresh|stale", f.Result)
+		return &cliError{Code: "compute-failed", Message: fmt.Sprintf("%s: %v", op, err)}
 	}
+	return nil
 }
 
 // pendingRefusal turns resume's pending list into finalize's refusal. The two

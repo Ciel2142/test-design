@@ -7,6 +7,18 @@
   "headCommit": "4c1d90ab7e2f5638c0a1b2d3e4f5061728394a5b",
   "baselineCommit": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
   "baselineStatus": "ok",
+  "freshness": {
+    "base": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    "measured": "4c1d90ab7e2f5638c0a1b2d3e4f5061728394a5b",
+    "paths": [
+      {
+        "path": "internal/orders/create.go",
+        "basis": "adds an input-validation check; does not change the create behavior scenarios test"
+      }
+    ],
+    "result": "fresh",
+    "stale": []
+  },
   "approval": "alex — \"go ahead, run it here\" (2026-07-30T14:01Z)",
   "verdict": "BLOCKED",
   "acknowledged": false,

@@ -10,6 +10,7 @@ func RenderMarkdown(r *Report) ([]byte, error) {
 	var b strings.Builder
 
 	writeMarkdownHeader(&b, r)
+	writeMarkdownFreshness(&b, r)
 	writeMarkdownLayer1(&b, r)
 	writeMarkdownLayer2(&b, r)
 	writeMarkdownLayer3(&b, r)
@@ -37,6 +38,40 @@ func writeMarkdownHeader(b *strings.Builder, r *Report) {
 		b.WriteString("- Acknowledgement pending — this PARTIAL verdict has not been acknowledged.\n")
 	}
 	b.WriteString("\n")
+}
+
+// writeMarkdownFreshness renders the freshness record: the two commits it was
+// measured over, every changed production path with its basis, and any stale
+// hunk. r.Freshness is nil for a report published before 1.3.0, which the
+// section says plainly rather than rendering an empty table.
+func writeMarkdownFreshness(b *strings.Builder, r *Report) {
+	b.WriteString("## Freshness\n\n")
+	f := r.Freshness
+	if f == nil {
+		b.WriteString("Not recorded — this report predates freshness paths.\n\n")
+		return
+	}
+	fmt.Fprintf(b, "Result: %s · Baseline: `%s` → HEAD: `%s`\n\n", f.Result, f.Base, f.Measured)
+
+	if len(f.Paths) == 0 {
+		b.WriteString("No changed production paths.\n\n")
+	} else {
+		b.WriteString("| Path | Basis |\n")
+		b.WriteString("| --- | --- |\n")
+		for _, p := range f.Paths {
+			fmt.Fprintf(b, "| %s | %s |\n", escapeCell(p.Path), escapeCell(p.Basis))
+		}
+		b.WriteString("\n")
+	}
+
+	if len(f.Stale) > 0 {
+		b.WriteString("| Hunk | Behavior |\n")
+		b.WriteString("| --- | --- |\n")
+		for _, s := range f.Stale {
+			fmt.Fprintf(b, "| %s | %s |\n", escapeCell(s.Hunk), escapeCell(s.Behavior))
+		}
+		b.WriteString("\n")
+	}
 }
 
 func writeMarkdownLayer1(b *strings.Builder, r *Report) {

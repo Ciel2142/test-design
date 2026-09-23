@@ -94,14 +94,15 @@ func baseMutations() []MutationInput {
 
 func baseInputs() *Inputs {
 	return &Inputs{
-		Source:     baseSource(),
-		RunID:      "run-1",
-		HeadCommit: "head-1",
-		Trace:      baseTrace(),
-		Freshness:  Freshness{Result: "fresh"},
-		Batches:    baseBatches(),
-		Live:       baseLive(),
-		Mutations:  baseMutations(),
+		Source:          baseSource(),
+		RunID:           "run-1",
+		HeadCommit:      "head-1",
+		Trace:           baseTrace(),
+		Freshness:       Freshness{Result: "fresh"},
+		ProductionPaths: []string{},
+		Batches:         baseBatches(),
+		Live:            baseLive(),
+		Mutations:       baseMutations(),
 	}
 }
 
@@ -172,6 +173,57 @@ func TestValidateInvalidFreshnessStaleWithNoFindings(t *testing.T) {
 	in := baseInputs()
 	in.Freshness = Freshness{Result: "stale"}
 	wantRefusal(t, Validate(in), CodeInvalidFreshness)
+}
+
+func TestValidateInvalidFreshnessFreshWithFindings(t *testing.T) {
+	in := baseInputs()
+	in.Freshness = Freshness{Result: "fresh", Stale: []StaleFinding{{Hunk: "spec.md:12", Behavior: "retry on 429"}}}
+	wantRefusal(t, Validate(in), CodeInvalidFreshness)
+}
+
+func TestValidateInvalidFreshnessEmptyBasis(t *testing.T) {
+	in := baseInputs()
+	in.ProductionPaths = []string{"spec.md"}
+	in.Freshness = Freshness{Result: "fresh", Paths: []FreshnessPath{{Path: "spec.md", Basis: ""}}}
+	wantRefusal(t, Validate(in), CodeInvalidFreshness)
+}
+
+func TestValidateInvalidFreshnessDuplicatePath(t *testing.T) {
+	in := baseInputs()
+	in.ProductionPaths = []string{"spec.md"}
+	in.Freshness = Freshness{Result: "fresh", Paths: []FreshnessPath{
+		{Path: "spec.md", Basis: "no behavior change"},
+		{Path: "spec.md", Basis: "no behavior change"},
+	}}
+	wantRefusal(t, Validate(in), CodeInvalidFreshness)
+}
+
+func TestValidateFreshnessUnclassifiedProductionPath(t *testing.T) {
+	in := baseInputs()
+	in.ProductionPaths = []string{"spec.md"}
+	in.Freshness = Freshness{Result: "fresh"}
+	re := wantRefusal(t, Validate(in), CodeFreshnessUnclassified)
+	if !strings.Contains(re.Detail, "spec.md") {
+		t.Errorf("Detail = %q, want it to name spec.md", re.Detail)
+	}
+}
+
+func TestValidateFreshnessUnknownPathOutsideDiff(t *testing.T) {
+	in := baseInputs()
+	in.Freshness = Freshness{Result: "fresh", Paths: []FreshnessPath{{Path: "spec.md", Basis: "no behavior change"}}}
+	wantRefusal(t, Validate(in), CodeFreshnessUnknownPath)
+}
+
+func TestValidateFreshnessUnknownPathFromStaleHunkOutsideDiff(t *testing.T) {
+	in := baseInputs()
+	in.Freshness = Freshness{Result: "stale", Stale: []StaleFinding{{Hunk: "spec.md:12", Behavior: "retry on 429"}}}
+	wantRefusal(t, Validate(in), CodeFreshnessUnknownPath)
+}
+
+func TestValidateBaselineCommitUnknown(t *testing.T) {
+	in := baseInputs()
+	in.ProductionPaths = nil
+	wantRefusal(t, Validate(in), CodeBaselineCommitUnknown)
 }
 
 func TestValidateUnknownRowRetiredInBatch(t *testing.T) {

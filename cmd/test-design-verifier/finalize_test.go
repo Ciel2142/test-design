@@ -664,6 +664,125 @@ func TestFinalize_ValidateRefusalKeepsItsCode(t *testing.T) {
 	f.wantRefusal(report.CodeMissingFreshness)
 }
 
+// productionChangeRepo commits a change to a production file, orders.go, on
+// top of fixtureRepo's pinned baseline: the diff finalize measures freshness
+// against then carries one changed production path.
+func productionChangeRepo(t *testing.T) string {
+	t.Helper()
+	repo := fixtureRepo(t)
+	orders := filepath.Join(repo, "orders", "orders.go")
+	data, err := os.ReadFile(orders)
+	if err != nil {
+		t.Fatalf("read the fixture's orders source: %v", err)
+	}
+	if err := os.WriteFile(orders, append(data, []byte("\n// behavior changed\n")...), 0o644); err != nil {
+		t.Fatalf("write the fixture's orders source: %v", err)
+	}
+	mustGit(t, repo, "add", "-A")
+	mustGit(t, repo, "commit", "-q", "-m", "change production behavior")
+	return repo
+}
+
+func TestFinalize_RefusesUnclassifiedProductionPath(t *testing.T) {
+	f := newFinalizeFixtureFor(t, productionChangeRepo(t), fixtureCoverageSource)
+
+	got := f.wantRefusal("freshness-unclassified")
+	if !strings.Contains(got.Message, "orders/orders.go") {
+		t.Errorf("message = %q, want it to name orders/orders.go", got.Message)
+	}
+}
+
+func TestFinalize_RefusesClassifiedPathOutsideDiff(t *testing.T) {
+	f := newFinalizeFixture(t)
+	f.body.Freshness = report.Freshness{
+		Result: "fresh",
+		Paths:  []report.FreshnessPath{{Path: "orders/orders.go", Basis: "no behavior change"}},
+	}
+
+	f.wantRefusal("freshness-unknown-path")
+}
+
+func TestFinalize_RefusesStaleHunkOutsideDiff(t *testing.T) {
+	f := newFinalizeFixture(t)
+	f.body.Freshness = report.Freshness{
+		Result: "stale",
+		Stale:  []report.StaleFinding{{Hunk: "orders/orders.go:10-12", Behavior: "changed validation"}},
+	}
+
+	f.wantRefusal("freshness-unknown-path")
+}
+
+// TestFinalize_TestOnlyDiffNeedsNoClassification holds finalize to the
+// exclusion the plan names for a test file: a diff that touches only a test
+// carries no changed production path, so the default fresh/no-paths answer
+// publishes rather than being refused freshness-unclassified.
+func TestFinalize_TestOnlyDiffNeedsNoClassification(t *testing.T) {
+	repo := fixtureRepo(t)
+	testFile := filepath.Join(repo, "orders", "orders_test.go")
+	data, err := os.ReadFile(testFile)
+	if err != nil {
+		t.Fatalf("read the fixture's orders test source: %v", err)
+	}
+	if err := os.WriteFile(testFile, append(data, []byte("\n// touched\n")...), 0o644); err != nil {
+		t.Fatalf("write the fixture's orders test source: %v", err)
+	}
+	mustGit(t, repo, "add", "-A")
+	mustGit(t, repo, "commit", "-q", "-m", "touch a test file only")
+
+	f := newFinalizeFixtureFor(t, repo, fixtureCoverageSource)
+
+	exit, stdout, stderr := f.run()
+	if exit != exitOK {
+		t.Fatalf("exit = %d, want %d; stderr=%s", exit, exitOK, stderr)
+	}
+	out := decodeFinalizeOutput(t, stdout)
+	rep := f.publishedReport(out.JSONPath)
+	if rep.Freshness == nil || rep.Freshness.Paths == nil || len(rep.Freshness.Paths) != 0 {
+		t.Errorf("freshness = %+v, want a published record with empty (non-nil) paths", rep.Freshness)
+	}
+}
+
+func TestFinalize_RefusesUnknownBaselineCommit(t *testing.T) {
+	f := newFinalizeFixtureFor(t, fixtureRepoWithUnresolvableBaseline(t), fixtureCoverageSource)
+
+	f.wantRefusal("baseline-commit-unknown")
+}
+
+// TestFinalize_PublishesFreshnessRecord is the end-to-end counterpart of
+// internal/report's TestReportRecordsFreshnessBasis: it holds the published
+// report's freshness record, reached through the full finalize request, to
+// the classification the request submitted.
+func TestFinalize_PublishesFreshnessRecord(t *testing.T) {
+	f := newFinalizeFixtureFor(t, productionChangeRepo(t), fixtureCoverageSource)
+	f.body.Freshness = report.Freshness{
+		Result: "fresh",
+		Paths:  []report.FreshnessPath{{Path: "orders/orders.go", Basis: "adds a comment; no behavior change"}},
+	}
+
+	exit, stdout, stderr := f.run()
+	if exit != exitOK {
+		t.Fatalf("exit = %d, want %d; stderr=%s", exit, exitOK, stderr)
+	}
+	out := decodeFinalizeOutput(t, stdout)
+	rep := f.publishedReport(out.JSONPath)
+
+	if rep.Freshness == nil {
+		t.Fatal("freshness = nil, want the record published")
+	}
+	if rep.Freshness.Base != f.src.BaselineCommit {
+		t.Errorf("base = %q, want %q", rep.Freshness.Base, f.src.BaselineCommit)
+	}
+	if rep.Freshness.Measured != f.head {
+		t.Errorf("measured = %q, want %q", rep.Freshness.Measured, f.head)
+	}
+	if len(rep.Freshness.Paths) != 1 || rep.Freshness.Paths[0].Path != "orders/orders.go" || rep.Freshness.Paths[0].Basis == "" {
+		t.Errorf("paths = %+v, want one classified entry for orders/orders.go with a basis", rep.Freshness.Paths)
+	}
+	if rep.Freshness.Result != "fresh" {
+		t.Errorf("result = %q, want fresh", rep.Freshness.Result)
+	}
+}
+
 func TestFinalize_MutationEvidenceForAnotherRunRefused(t *testing.T) {
 	f := newFinalizeFixture(t)
 	row := f.mutations[0]

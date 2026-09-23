@@ -8,6 +8,14 @@
 - Approved by: alex — "go ahead, run it here" (2026-07-30T14:01Z)
 - **Verdict: BLOCKED**
 
+## Freshness
+
+Result: fresh · Baseline: `a1b2c3d4e5f60718293a4b5c6d7e8f9012345678` → HEAD: `4c1d90ab7e2f5638c0a1b2d3e4f5061728394a5b`
+
+| Path | Basis |
+| --- | --- |
+| internal/orders/create.go | adds an input-validation check; does not change the create behavior scenarios test |
+
 ## Layer 1 — trace
 
 Status: blocked · Suite passed 12 · failed 0 · skipped 0 · new failures 0

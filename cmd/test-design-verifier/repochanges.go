@@ -67,3 +67,50 @@ func isTestFile(runnerKind, path string) bool {
 	}
 	return false
 }
+
+// isGoTestdataPath reports whether path carries a "testdata" directory
+// segment — the layout Go's own tooling excludes from a package's build, so a
+// golden file or fixture living there is not production source even when it
+// carries no "_test.go" suffix.
+func isGoTestdataPath(path string) bool {
+	for _, seg := range strings.Split(path, "/") {
+		if seg == "testdata" {
+			return true
+		}
+	}
+	return false
+}
+
+// productionPathsSince names every changed production path between baseline
+// and measured: changedPaths(repoRoot, baseline, measured), minus a test
+// file, a Go testdata path, and anything the coverage source's own
+// publication directory holds. trace and finalize both classify a freshness
+// answer against this same set, computed the same way from the same two
+// commits.
+//
+// It returns nil, nil when baseline does not resolve in this repository:
+// there is no diff to compute. trace reports that by omitting its output
+// field entirely; finalize refuses it as baseline-commit-unknown. A resolved
+// baseline always returns a non-nil slice, even when it names no paths.
+func productionPathsSince(repoRoot, coverageSource, runnerKind, baseline, measured string) ([]string, error) {
+	if !commitExists(repoRoot, baseline) {
+		return nil, nil
+	}
+	changed, err := changedPaths(repoRoot, baseline, measured)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(changed))
+	for _, path := range changed {
+		switch {
+		case isTestFile(runnerKind, path):
+			continue
+		case runnerKind == "go" && isGoTestdataPath(path):
+			continue
+		case isPublication(coverageSource, path):
+			continue
+		}
+		out = append(out, path)
+	}
+	return out, nil
+}
