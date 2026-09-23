@@ -217,19 +217,40 @@ func TestPluginDocs_ExampleCoverageDocParses(t *testing.T) {
 
 func TestPluginDocs_MutationSitesAreAFloor(t *testing.T) {
 	root := repoRoot(t)
-	for _, rel := range []string{
-		"agents/mutator.md",
-		filepath.Join("skills", "coverage-verification", "references", "mutation.md"),
+
+	mutatorPath := "agents/mutator.md"
+	mutatorData := readFileOrFatal(t, root, mutatorPath)
+	for _, want := range []string{
+		"not a ceiling",
+		"evaluate each one",
+		"`extra-N`",
+		"is a decision, not an omission",
+		"give a one-line argument",
 	} {
-		data, err := os.ReadFile(filepath.Join(root, rel))
-		if err != nil {
-			t.Fatalf("read %s: %v", rel, err)
+		if !strings.Contains(mutatorData, want) {
+			t.Errorf("%s: missing floor-rule text %q", mutatorPath, want)
 		}
-		if !strings.Contains(string(data), "floor") {
-			t.Errorf("%s: missing the sites-are-a-floor rule", rel)
+	}
+	if idx := strings.Index(mutatorData, "## Output format"); idx == -1 {
+		t.Fatalf("%s: missing ## Output format section", mutatorPath)
+	} else if !strings.Contains(mutatorData[idx:], "excluded") {
+		t.Errorf("%s: output format has no line shape for an excluded named site", mutatorPath)
+	}
+
+	mutationPath := filepath.Join("skills", "coverage-verification", "references", "mutation.md")
+	mutationData := readFileOrFatal(t, root, mutationPath)
+	for _, want := range []string{
+		"not a ceiling",
+		"answered by fewer sites than it names",
+		"`extra-N`",
+		"needs a one-line reason on the record",
+	} {
+		if !strings.Contains(mutationData, want) {
+			t.Errorf("%s: missing floor-rule text %q", mutationPath, want)
 		}
 	}
 
+	visited := map[string]int{}
 	for _, dir := range []string{"agents", "skills"} {
 		walkErr := filepath.Walk(filepath.Join(root, dir), func(path string, info os.FileInfo, err error) error {
 			if err != nil {
@@ -238,6 +259,7 @@ func TestPluginDocs_MutationSitesAreAFloor(t *testing.T) {
 			if info.IsDir() || !strings.HasSuffix(path, ".md") {
 				return nil
 			}
+			visited[dir]++
 			data, err := os.ReadFile(path)
 			if err != nil {
 				return err
@@ -250,5 +272,17 @@ func TestPluginDocs_MutationSitesAreAFloor(t *testing.T) {
 		if walkErr != nil {
 			t.Fatalf("walk %s: %v", dir, walkErr)
 		}
+		if visited[dir] == 0 {
+			t.Fatalf("walk %s: visited no .md files, want at least one", dir)
+		}
 	}
+}
+
+func readFileOrFatal(t *testing.T, root, rel string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(root, rel))
+	if err != nil {
+		t.Fatalf("read %s: %v", rel, err)
+	}
+	return string(data)
 }

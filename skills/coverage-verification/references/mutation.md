@@ -33,6 +33,14 @@ needs a one-line reason on the record — an equivalence to a listed site, or an
 it lies outside the row's fault — and a closing disclaimer that the list is exhaustive is
 never accepted as that reason.
 
+An excluded named site is a coverage-source finding, not a private judgment: the site came
+from the row's approved `Verification mutation` text, so excluding it means that text names
+a site that does not apply. Register `sites` from the mutator's returned list exactly as
+always — the excluded site is simply absent from it — and carry the mutator's argument to
+the user as a proposed amendment to the coverage source, per
+[test-coverage-design's Amendment section](../../test-coverage-design/SKILL.md#amendment);
+this reference does not repeat that procedure.
+
 If it returns `unappliable` with a reason instead of a list, record the row as
 
 ```json

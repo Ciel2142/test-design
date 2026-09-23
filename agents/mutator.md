@@ -105,9 +105,10 @@ Enumeration call:
 
 ```
 SC-07 sites
-  site-1  src/orders/guard.go:42  qty <= 0 becomes qty < 0
-  site-2  src/orders/guard.go:88  duplicate boundary check in the retry path
-  extra-1 src/orders/retry.go:19  same boundary re-checked after the retry queue drains
+  site-1    src/orders/guard.go:42  qty <= 0 becomes qty < 0
+  site-2    src/orders/guard.go:88  duplicate boundary check in the retry path
+  extra-1   src/orders/retry.go:19  same boundary re-checked after the retry queue drains
+  excluded  site-3  equivalent to site-2: same duplicate check, reached from the same retry path
 ```
 
 Apply call:
