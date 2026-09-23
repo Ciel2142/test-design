@@ -214,3 +214,41 @@ func TestPluginDocs_ExampleCoverageDocParses(t *testing.T) {
 		t.Errorf("ValidateLiveDecision(%s) = %v, want no error", path, err)
 	}
 }
+
+func TestPluginDocs_MutationSitesAreAFloor(t *testing.T) {
+	root := repoRoot(t)
+	for _, rel := range []string{
+		"agents/mutator.md",
+		filepath.Join("skills", "coverage-verification", "references", "mutation.md"),
+	} {
+		data, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			t.Fatalf("read %s: %v", rel, err)
+		}
+		if !strings.Contains(string(data), "floor") {
+			t.Errorf("%s: missing the sites-are-a-floor rule", rel)
+		}
+	}
+
+	for _, dir := range []string{"agents", "skills"} {
+		walkErr := filepath.Walk(filepath.Join(root, dir), func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if info.IsDir() || !strings.HasSuffix(path, ".md") {
+				return nil
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			if strings.Contains(string(data), "and no other") {
+				t.Errorf("%s: uses \"and no other\" as site-exclusion wording; named sites are a floor, not a ceiling", path)
+			}
+			return nil
+		})
+		if walkErr != nil {
+			t.Fatalf("walk %s: %v", dir, walkErr)
+		}
+	}
+}

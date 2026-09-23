@@ -52,6 +52,12 @@ func TestGoTarget(t *testing.T) {
 			wantCommand: []string{"go", "test", "-count=1", "-json", "-v", "pkg", "-run", "^TestX$"},
 		},
 		{
+			name:        "keeps -race",
+			cfg:         coverage.RunnerConfig{Kind: "go", Command: []string{"go", "test", "-count=1", "-race", "-json", "./..."}},
+			id:          Identity{Scope: "test-design/internal/widget", Name: "TestAdd"},
+			wantCommand: []string{"go", "test", "-count=1", "-race", "-json", "test-design/internal/widget", "-run", "^TestAdd$"},
+		},
+		{
 			name:        "escapes regex metacharacters in the test name",
 			cfg:         coverage.RunnerConfig{Kind: "go", Command: []string{"go", "test", "-count=1", "./..."}},
 			id:          Identity{Scope: "test-design/internal/widget", Name: "TestAdd[special]"},

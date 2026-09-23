@@ -42,6 +42,11 @@ The only exception: code with an **injectable scheduler or clock**, where the in
 is deterministic and chosen by the test. Then `unit` is honest, because the test really can
 produce the interleaving that triggers the bug.
 
+`-race` complements the repeated-iteration harness above; it never replaces it. The race
+detector only flags a data race it actually observes during the run — it proves nothing
+about an interleaving the run never hits, so the iteration count still carries the weight of
+producing that interleaving.
+
 ## Rendering exception
 
 **Rows on axis 11 default to `component` or above.**

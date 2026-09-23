@@ -55,6 +55,10 @@ rather than discovering them from a refusal:
   step needs a non-empty `expectation` and a non-empty `command`.
   Every SC-bound step needs at least one predicate (`missing-row-predicates`);
   an unchecked command is not evidence.
+- **Never repeat the profile's `start`, `health`, or `cleanup` commands inside `steps`.**
+  The executable runs `start` and `health` before your plan's steps and `cleanup` after
+  them; a walkthrough step that reissues one of those commands duplicates work the
+  executable already does.
 - **Commands only from the declared surface.** Every step's `command[0]` (in `steps` and
   in `cleanup`) must equal the first argument of some command in the profile's `start`,
   `health`, `walkthrough`, or `cleanup` lists — that includes a checked-in script, as

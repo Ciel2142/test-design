@@ -69,8 +69,8 @@ obligation.
 
 - `exempt` — the coverage source's own directory, where a run publishes its report and
   transcripts.
-- `isolated` — a test file exactly one prior group's bundle names, and no other prior group's
-  bundle or reads names.
+- `isolated` — a test file exactly one prior group's bundle names, absent from every other
+  prior group's bundle or reads.
 - `shared` — a production, build, dependency, data, or documentation change outside the
   coverage directory, or a test file more than one prior context names, or a test file that
   appears in exactly one group's reads but in no group's bundle.

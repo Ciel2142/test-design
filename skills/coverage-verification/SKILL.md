@@ -140,6 +140,9 @@ hunk's file, naming a path outside that diff; `baseline-commit-unknown` when the
 - Only the executable removes or restores a published file, and only its own.
 - Only the executable runs live commands and targeted tests, restores mutations and checks
   restore success. Parent must confirm the applied production diff is the row's named fault.
+- Dispatch subagents in bounded waves, never all at once: a dispatched agent's own nested
+  subagents count toward the harness's concurrency limit alongside this thread's own
+  dispatches.
 - Report the executable's verdict and reasons verbatim. PARTIAL needs a user acknowledgement
   after its published reasons; BLOCKED cannot finish. Never commit to reuse an old trace.
 

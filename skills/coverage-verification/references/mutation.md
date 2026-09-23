@@ -26,6 +26,13 @@ and makes no edit on this call. Pass that whole list, unchanged, as `sites` on t
 `evaluate-mutation` call in §3 below — the op registers it there, and the row cannot be
 answered by fewer sites than it names.
 
+Any site the row's `Verification mutation` text already names is a floor, not a ceiling:
+`mutator` must still search for and enumerate every other site of the same fault, labeling
+one it finds beyond the named sites `extra-N`. A named site missing from the returned list
+needs a one-line reason on the record — an equivalence to a listed site, or an argument that
+it lies outside the row's fault — and a closing disclaimer that the list is exhaustive is
+never accepted as that reason.
+
 If it returns `unappliable` with a reason instead of a list, record the row as
 
 ```json
@@ -43,6 +50,8 @@ Per site, in the order the agent listed them:
 
 1. Dispatch `mutator` again naming exactly one site from its own list. It applies that edit
    inside the worktree and returns the site label, the file, and a one-line description.
+   Confirm and evaluate only once that dispatch has returned — never before, and never
+   against a guess at what it will report.
 2. **Confirm the diff yourself** before evaluating:
 
    ```text

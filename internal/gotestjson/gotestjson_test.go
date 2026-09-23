@@ -226,6 +226,33 @@ func TestNormalizeEmptyStreamProducesEmptyReport(t *testing.T) {
 	}
 }
 
+func TestNormalizeRaceDetectedBecomesFailedRecord(t *testing.T) {
+	input := strings.Join([]string{
+		`{"Action":"run","Package":"racefixture","Test":"TestConcurrentIncrement"}`,
+		`{"Action":"output","Package":"racefixture","Test":"TestConcurrentIncrement","Output":"=== RUN   TestConcurrentIncrement\n"}`,
+		`{"Action":"output","Package":"racefixture","Test":"TestConcurrentIncrement","Output":"==================\n"}`,
+		`{"Action":"output","Package":"racefixture","Test":"TestConcurrentIncrement","Output":"WARNING: DATA RACE\n"}`,
+		`{"Action":"output","Package":"racefixture","Test":"TestConcurrentIncrement","Output":"Write at 0x00c0000140a0 by goroutine 8:\n"}`,
+		`{"Action":"output","Package":"racefixture","Test":"TestConcurrentIncrement","Output":"  test-design/internal/racefixture.increment()\n      /tmp/racefixture/race_test.go:15 +0x44\n"}`,
+		`{"Action":"output","Package":"racefixture","Test":"TestConcurrentIncrement","Output":"==================\n"}`,
+		`{"Action":"output","Package":"racefixture","Test":"TestConcurrentIncrement","Output":"--- FAIL: TestConcurrentIncrement (0.00s)\n"}`,
+		`{"Action":"fail","Package":"racefixture","Test":"TestConcurrentIncrement","Elapsed":0}`,
+		`{"Action":"output","Package":"racefixture","Output":"FAIL\n"}`,
+		`{"Action":"output","Package":"racefixture","Output":"FAIL\ttest-design/internal/racefixture\t0.015s\n"}`,
+		`{"Action":"fail","Package":"racefixture","Elapsed":0.015}`,
+	}, "\n") + "\n"
+
+	report, err := Normalize(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("Normalize: %v", err)
+	}
+
+	want := runrecord.Record{Status: runrecord.Failed, Scope: "racefixture", Name: "TestConcurrentIncrement"}
+	if len(report.Records) != 1 || report.Records[0] != want {
+		t.Fatalf("Records = %+v, want [%+v]", report.Records, want)
+	}
+}
+
 func TestNormalizeMetadataActionsProduceNoRecordAndNoError(t *testing.T) {
 	input := strings.Join([]string{
 		`{"Action":"start","Package":"pkg"}`,

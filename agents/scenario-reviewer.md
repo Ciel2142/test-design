@@ -145,6 +145,9 @@ human at approval, with its concrete consequence. Do not ask for another round.
 
 ## Rules
 
+- A Go-runner row on axis 5 (in-memory shared state across goroutines) whose harness hint
+  carries no `-race` earns `REWRITE <id>`: without the detector enabled, the harness cannot
+  prove the race is gone.
 - Never invent a row to reach a number, and never drop one to reach a number.
 - Never let a requirement fall out of the table silently. If coverage of it should go, say so as
   a finding with the consequence.

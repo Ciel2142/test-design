@@ -191,7 +191,12 @@ Runner rules:
 - **Go**: `runner-command` defaults to `["go", "test", "-count=1", "-json", "./..."]`.
   `-count=1` is mandatory — a cached result did not execute during this run and cannot prove
   a tagged test ran. A multi-module repository needs one coverage source's runner block per
-  affected `go.mod`; module boundaries are never guessed across them.
+  affected `go.mod`; module boundaries are never guessed across them. Add the single token
+  `-race` when an active row's mutation is shared memory read or written from more than one
+  goroutine — it needs cgo on the build machine, and once present it carries unchanged into
+  layer 4's mutation run, so the baseline must be captured with that same command. Write a
+  timeout as one token (`-timeout=30m`), never as two: two non-flag tokens make the package
+  pattern ambiguous.
 - **Maven / Gradle**: the command names the project's wrapper first (`./mvnw`, `./gradlew`),
   falling back to an installed toolchain only when the project explicitly uses one. Gradle's
   command must include `--rerun` (Gradle 7.6+) or `--rerun-tasks` — the verifier refuses a
@@ -381,6 +386,11 @@ Amendments **append** rows with new IDs — allocated from `next-id`, the same a
 — and move superseded ones to `## Retired`, with user approval. Never renumber, never
 silently edit a row an implementer already tagged against.
 
+A `MUTATION-SURVIVED` site names a defect the current suite cannot catch: repair it as an
+amendment, not a comment. Broaden the row's `Verification mutation` to name the surviving
+site, or append a new row carrying it, then re-verify. Explaining the survivor away in prose
+is never the repair.
+
 ## Migration — only for an old source
 
 If the parser identifies an old header or registry collision, **read
@@ -400,6 +410,8 @@ does not need migration context.
       consequences carries its `Risk rationale:` line; every argue-down carries a recorded
       approval line
 - [ ] Axis 5 rows `integration`+; axis 11 rows `component`+
+- [ ] `-race` present in `runner-command` when an active row's mutation is a shared-memory
+      race across goroutines
 - [ ] Harness hints on `integration`, `component`, `smoke`, `e2e` rows
 - [ ] Invariants and out-of-scope both present
 - [ ] `## Live decision` complete: `not-applicable` carries its reason; `required` carries
