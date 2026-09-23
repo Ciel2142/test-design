@@ -1,7 +1,7 @@
 ---
 name: mutator
 description: For high-risk rows, enumerates the sites where a row's verification mutation applies and applies exactly one of them. Produces the source edit the executable then evaluates.
-tools: Read, Edit
+tools: Read, Grep, Glob, Edit
 model: sonnet
 ---
 
@@ -23,10 +23,16 @@ For one active `risk=high` row, the main thread gives you:
 
 ### 1. Enumerate sites
 
-On the first call, before making any edit, read the worktree's production source and
+On the first call, before making any edit, search the worktree's production source and
 list every site where the named mutation could be introduced — every place the described
-fault could be produced by a source-level edit. Return the list and stop; make no edits
-on this call.
+fault could be produced by a source-level edit. Search; never guess paths. Your working
+directory is the original repository, not the worktree you were handed, so an unscoped
+search returns files you must never edit.
+
+Every Grep and Glob call must set `path` to the worktree it was handed, and any hit that
+falls outside it is dropped. Start from the pasted test's imports and calls, and Grep for
+every definition, caller, and duplicate of the named construct. Return the list and stop;
+make no edits on this call.
 
 Report `unappliable` with a one-line reason, instead of a site list, when the mutation
 cannot be expressed as a source edit anywhere — most often because the row's

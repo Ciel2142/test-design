@@ -117,7 +117,7 @@ func TestPluginDocs_AgentToolRestrictions(t *testing.T) {
 		path    string
 		allowed map[string]bool
 	}{
-		{"agents/mutator.md", map[string]bool{"Read": true, "Edit": true}},
+		{"agents/mutator.md", map[string]bool{"Read": true, "Grep": true, "Glob": true, "Edit": true}},
 		{"agents/live-runner.md", map[string]bool{"Read": true, "Grep": true, "Glob": true}},
 		{"agents/coverage-critic.md", map[string]bool{"Read": true, "Grep": true, "Glob": true}},
 		{"agents/scenario-reviewer.md", map[string]bool{"Read": true, "Grep": true, "Glob": true}},
@@ -128,6 +128,31 @@ func TestPluginDocs_AgentToolRestrictions(t *testing.T) {
 				t.Errorf("%s: tool %q escapes the agent's execution/edit boundary", agent.path, tool)
 			}
 		}
+	}
+}
+
+func TestPluginDocs_MutatorSearchScopedToWorktree(t *testing.T) {
+	root := repoRoot(t)
+	tools := agentTools(t, root, "agents/mutator.md")
+	hasGrep, hasGlob := false, false
+	for _, tool := range tools {
+		switch tool {
+		case "Grep":
+			hasGrep = true
+		case "Glob":
+			hasGlob = true
+		}
+	}
+	if !hasGrep || !hasGlob {
+		t.Errorf("agents/mutator.md: tools = %v, want Grep and Glob so enumeration can search", tools)
+	}
+
+	data, err := os.ReadFile(filepath.Join(root, "agents", "mutator.md"))
+	if err != nil {
+		t.Fatalf("read agents/mutator.md: %v", err)
+	}
+	if !strings.Contains(string(data), "set `path` to the worktree") {
+		t.Errorf("agents/mutator.md: missing instruction to set `path` to the worktree on every Grep/Glob call")
 	}
 }
 
