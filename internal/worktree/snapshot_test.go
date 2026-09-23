@@ -346,11 +346,7 @@ func TestTakeSnapshot_ConcurrentCallsDoNotCollide(t *testing.T) {
 		t.Fatalf("NewController: %v", err)
 	}
 
-	// want comes from a bare, independent write-tree run serially before the
-	// goroutines start — the same oracle
-	// TestTakeSnapshot_MissingIndexFileMatchesBareWriteTree uses — so a bug
-	// that makes every concurrent call agree on the same wrong tree still
-	// fails this test.
+	// Oracle from bare git, not a snapshot, so calls agreeing on a wrong tree still fail.
 	want := strings.TrimSpace(mustGit(t, dir, "write-tree"))
 
 	const n = 8
