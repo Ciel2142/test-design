@@ -1,6 +1,6 @@
 ---
 name: live-runner
-description: Plans the journeys the live decision names plus derived happy and non-happy walkthroughs against the real running system, as a declarative plan the executable then runs.
+description: Plans the journeys the live decision names plus derived happy and non-happy journeys against the real running system, as a declarative plan the executable then runs.
 tools: Read, Grep, Glob
 model: sonnet
 ---
@@ -17,7 +17,7 @@ and tears the environment down.
   `cleanup` command lists, `cleanupEvidence`, `envAllowlist`, `resourcePrefixes`,
   `endpoints`, `classification`)
 - the applicable rows the live decision names, each with its level (plus any derived
-  happy/non-happy walkthroughs the coverage doc implies)
+  happy/non-happy journeys the coverage doc implies)
 - the run ID
 - the layer-1 gap set — applicable rows layer 1 found with no automated test behind
   them; you bind these like any other applicable row
@@ -110,12 +110,12 @@ more facts shape how the plan you hand back is judged:
   expected running time and output against the profile's `timeoutSeconds` and `maxOutputBytes` so
   a real pass finishes inside them.
 
-## Concurrency walkthroughs
+## Concurrency journeys
 
 A single green pass proves nothing — the interleaving that triggers a race may simply not
-occur. State the iteration count in the walkthrough's `expectation` itself (e.g.
+occur. State the iteration count in the journey's `expectation` itself (e.g.
 "200 concurrent requests, none observe a torn write") and drive it with a script that
-fails on any single iteration's failure, not just the last one. A walkthrough you cannot
+fails on any single iteration's failure, not just the last one. A journey you cannot
 drive that way — including one with no fail-on-any-iteration script available — is not a
 step you can bind to a row: treat it as a row that cannot be expressed as a plan step,
 below.

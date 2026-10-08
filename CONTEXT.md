@@ -23,14 +23,14 @@ The single named production fault a scenario's test must detect.
 _Avoid_: bug, canary
 
 **Risk**:
-`high` or `med` per scenario, set by consequence (security boundary, data loss/corruption, irreversible side effect, harmful shared state) or an explicit impact rationale, never by axis membership alone.
+`low`, `med` or `high` per scenario, set by consequence (security boundary, data loss/corruption, irreversible side effect, harmful shared state) or an explicit impact rationale, never by axis membership alone.
 
 **Live decision**:
 The coverage source's declaration that deployed verification is `required` (with journeys) or `not-applicable` (with a reason).
 _Avoid_: live flag, smoke decision
 
 **Journey**:
-One `J-n` deployed exercise in a live decision: the scenarios it exercises and its observable expected result on the selected revision.
+One `J-n` deployed exercise in a live decision: the scenarios it exercises and its observable expected result on the selected revision. A live profile's `walkthrough` list only declares the commands a journey may use; it is not a journey.
 _Avoid_: walkthrough, smoke test, e2e
 
 **Live profile**:

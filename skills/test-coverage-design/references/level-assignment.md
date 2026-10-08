@@ -30,6 +30,24 @@ A journey may also exercise `unit` or `integration` rows on its way through, and
 in its `Scenarios` cell records that it does. It does not relabel them — each keeps the
 cheapest level that catches its mutation, and keeps being covered by its own test.
 
+## What a live level cannot carry
+
+`smoke` and `e2e` are earned by a positive observation on the deployed revision. Two shapes
+of row cannot be observed that way and do not belong at a live level, whatever their
+subject:
+
+- **Absence as the only observable.** "No message is published", "the external call is not
+  made", "no row is written" — a journey that waits and sees nothing has proved only that
+  it waited. The row needs a positive signal a plan predicate can read (a count that stays
+  at one, a rejection status, a recorded refusal), or it belongs at `unit` or `integration`
+  where the absence is asserted directly on the collaborator.
+- **A retry or timeout window as the thing under test.** A journey has one deadline per
+  command and no polling predicate; backoff, retry exhaustion and timeout handling are
+  `integration` rows against an injected clock or a failing collaborator.
+
+A row that cannot be expressed through the live profile's declared commands is a row at the
+wrong level, not a reason to widen the profile.
+
 ## Concurrency exception
 
 **Rows on axis 5 default to `integration` or above.**

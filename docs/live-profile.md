@@ -202,7 +202,8 @@ Checklist before committing a profile:
 - The profile is committed. Verification runs against a clean tree, and the report is only
   reproducible from configuration that is part of the repository.
 
-`prepare-live` validates the committed profile before dispatch. Its refusals name the failing
-rule, in this order: `invalid-limits`, `unsupported-classification`, `undeclared-endpoint`,
+`prepare-live` validates the committed profile before dispatch and refuses
+`profile-unavailable` when it fails; the message names the failing rule, in this order:
+`invalid-limits`, `unsupported-classification`, `undeclared-endpoint`,
 `run-id-missing-from-resources`, `missing-cleanup`. Each writes `live-attempt.json` so the
 run continues as `PARTIAL`; fix the profile and rerun verification.

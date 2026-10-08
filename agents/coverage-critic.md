@@ -56,6 +56,14 @@ Exactly one per row.
   head, re-read the assertions, ask which one flips. If none flips, `WEAK`.
 - **Assertion on the wrong side of the boundary.** A row about `qty <= 0` tested only with
   `qty = -5` does not catch `<` versus `<=`. The boundary value itself must appear.
+- **Assertion on an outcome the mutated code also produces.** A repeated request that must
+  not resend asserts only `status == SENT`; a service that resends and answers `SENT` again
+  passes it. The assertion has to read what the mutation changes — the call count, the
+  stored bytes, the second row — not a status both implementations return.
+- **Negative test that can fail for the wrong reason.** A test for one invalid field with a
+  second field also invalid fails on whichever check runs first; the mutation on the
+  intended guard may leave it failing, and so passing. Everything outside the row's focus
+  must be valid for the assertion to be about the row.
 
 ## Output format
 

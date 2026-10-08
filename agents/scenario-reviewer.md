@@ -120,7 +120,7 @@ REWRITE SC-12
   record is stored after a negative quantity
 ADD refund larger than the original charge is rejected
   requirements.md "a refund never exceeds the captured amount"; no row asserts it
-RISK SC-07 medium→high
+RISK SC-07 med→high
   a failure writes the wrong owner onto a shared account, so one tenant reads another
   tenant's balance
 LIVE J-2 expected result is not observable on the deployed revision

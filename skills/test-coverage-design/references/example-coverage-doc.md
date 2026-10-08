@@ -29,7 +29,7 @@ None — the suite was green at the baseline commit.
 
 ## Review record
 
-- Reviewer instructions: `agents/scenario-reviewer.md` at commit `9c6750e`,
+- Reviewer instructions: `agents/scenario-reviewer.md` from plugin version `1.2.0`,
   `git hash-object` `b7f0c1d4e8a26f3915c4d0a7be2f81c630d95a4e`.
 - `MERGE SC-03 SC-04` — one defect, the uniqueness check outside the transaction, kills both.
   **Applied**: SC-04 retired into SC-03.
