@@ -36,7 +36,10 @@ language or test runner is supported.
 
 A Go 1.26+ toolchain on the machine running either skill. The plugin's executable has no
 third-party dependencies, so there is no build step and no binary to install — every op
-runs as `go run -C "$CLAUDE_PLUGIN_ROOT" ./cmd/test-design-verifier <op> …`.
+runs as `go run -C "$CLAUDE_PLUGIN_ROOT" ./cmd/test-design-verifier <op> …`. Inside a
+Claude Code session that variable is usually empty in the Bash tool's shell; both skills
+open with a step that resolves the plugin root from the skill directory or from
+`~/.claude/plugins/installed_plugins.json` and pastes the literal path into every command.
 
 ## The verifier executable
 
@@ -109,6 +112,45 @@ after a feature's spec is approved, and `/test-design:coverage-verification
 <coverage-source>` at the `finishing-a-development-branch` handoff. See
 [docs/opt-in.md](docs/opt-in.md) for the resulting handoffs and `wave-planning`
 composition.
+
+## Verify the install
+
+Restart Claude Code, then type `/test-design:` — the completion list must offer
+`test-coverage-design` and `coverage-verification`. From any shell:
+
+```bash
+go version
+R=$(grep -o '"installPath": *"[^"]*/test-design/[^"]*"' \
+  ~/.claude/plugins/installed_plugins.json | head -1 | cut -d'"' -f4)
+go run -C "$R" ./cmd/test-design-verifier
+```
+
+`go version` reports 1.26 or later, and the bare executable answers
+`{"code":"unknown-operation","message":"no operation specified"}` — that is the plugin
+compiling and the ops dispatcher running.
+
+## Troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| `go run -C "": …` or an op that reports the plugin as the target | `CLAUDE_PLUGIN_ROOT` is empty in the shell. Run the resolution step at the top of the skill and paste the printed path. |
+| `source-outside-repo` from `preflight` | `-source` was given relative to the plugin, or `-repo` was omitted. Pass `-repo "$TARGET_REPO"` and a path relative to it. |
+| `/test-design:…` skills missing after `plugin update` | Updates apply on the next session. Restart Claude Code. |
+| The Skill tool refuses `test-coverage-design` | Intended: both skills carry `disable-model-invocation`. Type the slash command yourself. |
+| `dirty-repository` or `source-not-reproducible` | Commit or discard the change the message names. There is no force flag. |
+| `normalization-failed: no fresh report file matched report-globs` from `baseline` or `trace` | The runner command failed before it wrote any report, typically a wrong `JAVA_HOME` or a missing wrapper. Run the exact `runner-command` by hand in a detached worktree at the baseline commit to see the real error. |
+| `row-not-bound: row bound ambiguously` from `prepare-mutation` | Two tests carry `covers:` for one `high` row. Keep the tag on the test that flips under the mutation, cite the row from the other with a different word, and start a new run. |
+| `foreign-diff` from `evaluate-mutation` | The mutator edited a template, YAML, XSD, build or test path. The row's fault is outside production source; amend the coverage source to name a fault in the code that consumes that file. |
+
+## Developing
+
+The verifier's end-to-end tests run real `go test` suites inside disposable worktrees, so
+the command package needs longer than Go's default ten-minute per-package timeout:
+
+```bash
+make test        # go test -timeout 40m ./...
+make check       # gofmt, go vet, and the fast packages only
+```
 
 ## Further reading
 
