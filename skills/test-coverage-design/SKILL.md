@@ -23,7 +23,25 @@ scope. Do not run it silently to completion.
 ## Prerequisite
 
 ID allocation, source validation, and baseline capture run through a Go executable
-committed to the plugin, invoked as:
+committed to the plugin.
+
+Resolve the plugin root once, before any command. `CLAUDE_PLUGIN_ROOT` is substituted
+into the plugin's configuration files; it is not exported into the shell the Bash tool
+runs, so it is usually empty there:
+
+```bash
+R="${CLAUDE_PLUGIN_ROOT:-${CLAUDE_SKILL_DIR:+$(cd "$CLAUDE_SKILL_DIR/../.." && pwd)}}"
+[ -n "$R" ] || R=$(grep -o '"installPath": *"[^"]*/test-design/[^"]*"' \
+  ~/.claude/plugins/installed_plugins.json | head -1 | cut -d'"' -f4)
+echo "$R"
+```
+
+The printed absolute path is the plugin root. Paste it in place of `$CLAUDE_PLUGIN_ROOT`
+in every command below: shell variables do not survive between tool calls, so a value set
+in one command is gone in the next. A root that does not contain
+`cmd/test-design-verifier` is wrong; stop and ask where the plugin is installed.
+
+Every op is then invoked as:
 
 ```text
 go run -C "$CLAUDE_PLUGIN_ROOT" ./cmd/test-design-verifier <op> …
@@ -137,7 +155,7 @@ No other columns. `Expected` precedes the mutation because implementation is dri
 observable behavior, not by the fault that will later probe it. Priority, mission, and
 grouping live outside the table.
 
-Harness hints for `integration`, `component`, `smoke`, and `e2e` rows go on `harness SC-nn: <hint>` lines below the table; each behavior group records which axis produced each surviving row.
+Harness hints for `integration`, `component`, `smoke`, and `e2e` rows go on `harness SC-nn: <hint>` lines after the table's last row, never between rows: a non-table line ends the table, every row below it silently leaves the active set, and its tags surface later as `drift` on an ID that is plainly written in the document. Each behavior group records which axis produced each surviving row.
 
 | Column | Rule |
 |---|---|
@@ -164,6 +182,12 @@ which makes the pruning rule vacuous — and it gives the layer-4 mutator nothin
 Every row must name something a person could actually type into the source. Only the final
 mutator applies it, after the completed implementation is green, in a disposable worktree —
 design time only names the fault, it never introduces it.
+
+For a `high` row the fault must also live in production source the runner accepts: a `.go`
+file that is not `_test.go` or under `testdata/`, or a `.java`/`.kt` file under `src/main`.
+A fault that lives only in a template, a YAML placeholder, an XSD or a build file cannot be
+applied by layer 4 — `evaluate-mutation` refuses the edit `foreign-diff` — so phrase the
+mutation on the code that consumes that file, or the row cannot carry `high`.
 
 ## Verification block
 
@@ -300,9 +324,11 @@ concrete consequence; the user decides, and there is no further round.
 
 Record the round in a `## Review record` section of the coverage source:
 
-- the reviewer instruction revision — the commit SHA of `agents/scenario-reviewer.md` and its
-  `git hash-object agents/scenario-reviewer.md` digest — so a later reader knows which
-  instructions produced these findings;
+- the reviewer instruction revision — the plugin `version` from the plugin root's
+  `.claude-plugin/plugin.json` and the digest `git -C <plugin root> hash-object
+  agents/scenario-reviewer.md` prints — so a later reader knows which instructions produced
+  these findings. The installed copy is not a git checkout, so there is no commit to cite;
+  `hash-object` needs no repository;
 - the findings as returned;
 - the resolution of each: applied, rejected with the reason, or escalated.
 
@@ -406,6 +432,8 @@ does not need migration context.
 - [ ] Every behavior group has a `Ruled out:` line citing spec or code facts
 - [ ] Axis 5 rule-outs name the absent shared resource
 - [ ] Every `Verification mutation` is a mutation, not a negated `Expected`
+- [ ] Every `high` row's mutation lives in runner-accepted production source, not a
+      template, YAML, XSD or build file
 - [ ] Risk derived from consequence; every `high` outside the four always-`high`
       consequences carries its `Risk rationale:` line; every argue-down carries a recorded
       approval line
@@ -487,6 +515,15 @@ Credit runs the other way too: several tests may contribute to one row, and ever
 that binds to it is one of its contributors. Each contributor carries its own execution
 evidence. A contributor that was skipped, or whose test never ran, is that row's `gap`; a
 contributor that failed is that row's `red` — whatever the row's other contributors did.
+
+A `high` row is the exception in the other direction. Layer 4 resolves it to one test
+identity, and `prepare-mutation` refuses `row-not-bound: row bound ambiguously` when two
+tests carry `covers:` for it — a refusal layer 1 never previews, because trace credits every
+contributor. Give each `high` row exactly one `covers:` owner, the test that flips under its
+mutation; a second test that touches the row cites it with another word, such as
+`// exercises: SC-nn`, which neither scanner reads. Both scanners read the whole comment
+body after `covers:` as IDs, so prose there becomes one `drift` finding per word: a
+`covers:` line carries IDs and nothing else.
 
 Citing SC-IDs in the plan alone is not enough: `coverage-verification` layer 1 binds tags in
 test source, not the plan, so an untagged test reads as a `gap` even when the plan cited the

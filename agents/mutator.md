@@ -19,6 +19,8 @@ For one active `risk=high` row, the main thread gives you:
   anything outside it
 - the SC row, including its `Verification mutation` column text
 - the resolved test identity `{scope, name}` layer 1 already bound the row to
+- on an apply call, one site line copied verbatim from your own enumeration: file,
+  enclosing function, line and edit
 
 ## Two calls, two jobs
 
@@ -32,8 +34,10 @@ search returns files you must never edit.
 
 Every Grep and Glob call must set `path` to the worktree it was handed, and any hit that
 falls outside it is dropped. Start from the pasted test's imports and calls, and Grep for
-every definition, caller, and duplicate of the named construct. Return the list and stop;
-make no edits on this call.
+every definition, caller, and duplicate of the named construct. Each site names its file,
+the enclosing function or method, the line and the edit; the function name is what tells
+two identically spelled statements apart. Return the list and stop; make no edits on this
+call.
 
 Report `unappliable` with a one-line reason, instead of a site list, when the mutation
 cannot be expressed as a source edit anywhere — most often because the row's
@@ -43,8 +47,12 @@ substitute edit.
 
 ### 2. Apply one site
 
-On a later call naming exactly one site from your own list, apply that mutation and
-nothing else. Touch exactly one production file with one focused change. Never edit a
+On a later call quoting exactly one site line from your own list, apply that mutation and
+nothing else. Before editing, read the named range again and confirm the enclosing
+function is the one the site names; when the same statement text occurs elsewhere in the
+file, the named line is the only one you touch. A site whose function and line no longer
+agree is a stale call: reply `SC-nn site-k mismatch` with what you found at that line, and
+edit nothing. Touch exactly one production file with one focused change. Never edit a
 test file, a build file, a config file, or anything under `docs/`, `.test-design/`, or
 `testdata/`. Never touch a file outside the worktree you were given, and never touch the
 original repository.
@@ -105,9 +113,9 @@ Enumeration call:
 
 ```
 SC-07 sites
-  site-1    src/orders/guard.go:42  qty <= 0 becomes qty < 0
-  site-2    src/orders/guard.go:88  duplicate boundary check in the retry path
-  extra-1   src/orders/retry.go:19  same boundary re-checked after the retry queue drains
+  site-1    src/orders/guard.go:42  Reserve           qty <= 0 becomes qty < 0
+  site-2    src/orders/guard.go:88  ReserveRetry      duplicate boundary check in the retry path
+  extra-1   src/orders/retry.go:19  drainRetryQueue   same boundary re-checked after the retry queue drains
   excluded  site-3  equivalent to site-2: same duplicate check, reached from the same retry path
 ```
 
@@ -116,7 +124,15 @@ Apply call:
 ```
 SC-07 site-1 applied
   file: src/orders/guard.go
+  site: line 42 in Reserve
   edit: changed `qty <= 0` to `qty < 0` in the initial guard
+```
+
+Stale site:
+
+```
+SC-07 site-2 mismatch
+  found: line 88 is now inside ReserveMany, not ReserveBatch; no edit made
 ```
 
 Unappliable:

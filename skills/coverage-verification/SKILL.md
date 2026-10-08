@@ -25,8 +25,26 @@ No approved source means no invocation or report: leave normal finishing untouch
 
 The source is a repo-relative dedicated coverage document or an approved spec with an
 inline floor-rule SC table and Verification block. Go 1.26+ is required; no committed
-binary or separate build step is needed. Before any `go run -C`, capture the **absolute
-target repository** while still in that repository (not the plugin checkout):
+binary or separate build step is needed.
+
+Resolve the plugin root once, before any command. `CLAUDE_PLUGIN_ROOT` is substituted
+into the plugin's configuration files; it is not exported into the shell the Bash tool
+runs, so it is usually empty there:
+
+```bash
+R="${CLAUDE_PLUGIN_ROOT:-${CLAUDE_SKILL_DIR:+$(cd "$CLAUDE_SKILL_DIR/../.." && pwd)}}"
+[ -n "$R" ] || R=$(grep -o '"installPath": *"[^"]*/test-design/[^"]*"' \
+  ~/.claude/plugins/installed_plugins.json | head -1 | cut -d'"' -f4)
+echo "$R"
+```
+
+The printed absolute path is the plugin root. Paste it in place of `$CLAUDE_PLUGIN_ROOT`
+in every command below: shell variables do not survive between tool calls, so a value set
+in one command is gone in the next. A root that does not contain
+`cmd/test-design-verifier` is wrong; stop and ask where the plugin is installed.
+
+Before any `go run -C`, capture the **absolute target repository** while still in that
+repository (not the plugin checkout):
 
 ```bash
 TARGET_REPO=$(git rev-parse --show-toplevel)

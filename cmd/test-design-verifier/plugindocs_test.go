@@ -156,6 +156,30 @@ func TestPluginDocs_MutatorSearchScopedToWorktree(t *testing.T) {
 	}
 }
 
+// CLAUDE_PLUGIN_ROOT is substituted into configuration files, not exported
+// into the Bash tool's shell, so each skill must tell the reader how to
+// resolve the plugin root before the first `go run -C`.
+func TestPluginDocs_PluginRootResolution(t *testing.T) {
+	root := repoRoot(t)
+	for _, skill := range []string{"coverage-verification", "test-coverage-design"} {
+		path := filepath.Join("skills", skill, "SKILL.md")
+		data, err := os.ReadFile(filepath.Join(root, path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := string(data)
+		first := strings.Index(text, `go run -C "$CLAUDE_PLUGIN_ROOT"`)
+		resolve := strings.Index(text, "installed_plugins.json")
+		if resolve < 0 {
+			t.Errorf("%s: no plugin-root resolution step naming installed_plugins.json", path)
+			continue
+		}
+		if first >= 0 && first < resolve {
+			t.Errorf("%s: first go run -C at offset %d precedes the resolution step at %d", path, first, resolve)
+		}
+	}
+}
+
 var opTokenPattern = regexp.MustCompile(`test-design-verifier ([a-zA-Z0-9<>-]+)`)
 
 func TestPluginDocs_DocumentedCommandsExist(t *testing.T) {

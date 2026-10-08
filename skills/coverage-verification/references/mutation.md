@@ -15,14 +15,19 @@ go run -C "$CLAUDE_PLUGIN_ROOT" ./cmd/test-design-verifier prepare-mutation -req
 
 The request adds `rowID` to the shared body. Output: `rowID`, `identity {scope, name}`,
 `runnerKind`, `worktreePath`, `runDir`. It refuses `row-not-found` for an ID that is retired
-or absent, `row-not-bound` when no tag in the worktree binds the row, and `dirty-repository`
-when the tree is not clean.
+or absent, `row-not-bound` when no tag in the worktree binds the row **or when more than
+one test does** (`row bound ambiguously: row SC-nn cites N distinct identities`), and
+`dirty-repository` when the tree is not clean. The ambiguous case is one layer 1 never
+previews: trace credits every contributor and reports the row passed. A `high` row needs
+exactly one `covers:` owner; the fix is in test source — keep `covers:` on the test that
+flips under the mutation, cite the row from the others with a different word — and then
+a new run, since the tagged source changed.
 
 ### 2. Enumerate the sites
 
 Dispatch [mutator](../../../agents/mutator.md) with the `worktreePath`, the SC row facts from `dispatchPath`, including `verificationMutation`
-text, and the resolved `identity`. It returns the list of sites where that mutation applies
-and makes no edit on this call. Pass that whole list, unchanged, as `sites` on every
+text, and the resolved `identity`. It returns the list of sites where that mutation applies,
+each naming its file, enclosing function, line and edit, and makes no edit on this call. Pass that whole list, unchanged, as `sites` on every
 `evaluate-mutation` call for this row in §3 below, not only its first: the op registers the
 list only once a call reaches its first accepted diff, so a call refused earlier than that —
 `empty-diff`, `foreign-diff`, `multi-site-diff`, `duplicate-site`, `site-interrupted`,
@@ -61,17 +66,24 @@ invent a substitute. `finalize` publishes the record as `mutation-unappliable-<r
 
 Per site, in the order the agent listed them:
 
-1. Dispatch `mutator` again naming exactly one site from its own list. It applies that edit
-   inside the worktree and returns the site label, the file, and a one-line description.
-   Confirm and evaluate only once that dispatch has returned — never before, and never
-   against a guess at what it will report.
+1. Dispatch `mutator` again, quoting exactly one site line from its own list verbatim: file,
+   enclosing function, line and edit. The same statement text often appears in more than
+   one method of a file, and the function name in the dispatch is what keeps the edit at
+   the enumerated site. The agent applies that edit inside the worktree and returns the
+   site label, the file, the line and function, and a one-line description. Confirm and
+   evaluate only once that dispatch has returned — never before, and never against a guess
+   at what it will report. A `mismatch` reply means it made no edit: the worktree is still
+   clean for that site. Re-read the site in the worktree and re-dispatch once with the
+   corrected line; if the site cannot be found there, treat the row as under
+   [When confirmation fails](#when-confirmation-fails).
 2. **Confirm the diff yourself** before evaluating:
 
    ```text
    git -C <worktreePath> diff
    ```
 
-   Read it and confirm it is the row's named verification mutation at that site.
+   Read it and confirm it is the row's named verification mutation at that site: the
+   hunk header names the enclosing function, and it must be the one the site named.
    `evaluate-mutation` polices the diff structurally — one file, one hunk, no test, build,
    config, `docs/`, `.test-design/`, or `testdata/` path — but structure cannot tell a
    mutation that reproduces the row's fault from an unrelated one-line edit that happens to

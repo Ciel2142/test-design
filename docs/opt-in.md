@@ -10,7 +10,9 @@ has no third-party dependencies and needs no build step or committed binary.
 Before any such command, capture the absolute target repository while in the project,
 not the plugin: `TARGET_REPO=$(git rev-parse --show-toplevel)`. Requests use that absolute
 value as `repoRoot`; flags use `-repo "$TARGET_REPO"` and target-relative source paths.
-The plugin's `-C` working directory is never the target root.
+The plugin's `-C` working directory is never the target root. `CLAUDE_PLUGIN_ROOT` itself
+is usually empty in the Bash tool's shell; each skill opens with a step that resolves the
+plugin root from the skill directory or from `~/.claude/plugins/installed_plugins.json`.
 
 ## Installation behavior
 
