@@ -5,7 +5,7 @@
   "author": {
     "name": "AT_VALukin"
   },
-  "repository": "http://100.64.0.5:3000/service/test-design.git",
+  "repository": "http://100.64.0.1:3000/service/test-design.git",
   "keywords": [
     "testing",
     "test-coverage",

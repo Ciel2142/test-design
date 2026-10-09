@@ -96,7 +96,7 @@ docs/superpowers/coverage/transcripts/<run-id>/                  every evidence 
 Clone, then point a local marketplace at the clone:
 
 ```bash
-git clone http://100.64.0.5:3000/service/test-design.git
+git clone http://100.64.0.1:3000/service/test-design.git
 claude plugin marketplace add ./test-design
 claude plugin install test-design@test-design
 ```
