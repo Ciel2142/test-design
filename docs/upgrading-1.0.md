@@ -256,6 +256,17 @@ the marketplace checkout is not enough by itself; run
 `claude plugin update test-design@test-design` and restart Claude Code, the same as any other
 plugin update.
 
+## 1.4 OpenCode support
+
+Nothing changes for Claude Code users: the verifier, its ops, the evidence schema and the
+coverage-source format are untouched, and the verifier still stamps evidence `1.3.0`. The
+skills' plugin-root step gains a `TEST_DESIGN_PLUGIN_ROOT` fallback, which Claude Code never
+sets.
+
+OpenCode 1.19+ can now run both stages from the same clone: `make install-opencode`, then
+restart OpenCode. Its commands are `/test-coverage-design` and `/coverage-verification`, and
+its agents carry no `test-design:` prefix. See the README's OpenCode section.
+
 ## What did not change
 
 - The two entry points: `/test-design:test-coverage-design` after spec approval,
