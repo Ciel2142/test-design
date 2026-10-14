@@ -267,6 +267,12 @@ OpenCode 1.19+ can now run both stages from the same clone: `make install-openco
 restart OpenCode. Its commands are `/test-coverage-design` and `/coverage-verification`, and
 its agents carry no `test-design:` prefix. See the README's OpenCode section.
 
+1.4.1 lets a non-interactive `opencode run` finish a verification: the adapter pre-allows
+the verifier's temp directories and the plugin's `agents/` for every agent, where OpenCode
+would otherwise prompt and `opencode run` would reject the prompt and end the session. It
+also documents `record-review`'s `policy` object (`critic`, `instructions`) in the
+critic and run-state references.
+
 ## What did not change
 
 - The two entry points: `/test-design:test-coverage-design` after spec approval,
