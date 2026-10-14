@@ -180,6 +180,30 @@ func TestPluginDocs_PluginRootResolution(t *testing.T) {
 	}
 }
 
+// Under OpenCode nothing substitutes CLAUDE_PLUGIN_ROOT; the adapter exports
+// the root under its own name, and each skill must read that same name.
+func TestPluginDocs_OpenCodeRootVariable(t *testing.T) {
+	const name = "TEST_DESIGN_PLUGIN_ROOT"
+	root := repoRoot(t)
+	adapter, err := os.ReadFile(filepath.Join(root, "opencode", "plugin.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(adapter), "output.env."+name+" =") {
+		t.Errorf("opencode/plugin.js: does not export %s into the shell", name)
+	}
+	for _, skill := range []string{"coverage-verification", "test-coverage-design"} {
+		path := filepath.Join("skills", skill, "SKILL.md")
+		data, err := os.ReadFile(filepath.Join(root, path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(data), "${"+name+":-") {
+			t.Errorf("%s: plugin-root resolution does not read %s", path, name)
+		}
+	}
+}
+
 var opTokenPattern = regexp.MustCompile(`test-design-verifier ([a-zA-Z0-9<>-]+)`)
 
 func TestPluginDocs_DocumentedCommandsExist(t *testing.T) {

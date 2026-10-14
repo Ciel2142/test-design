@@ -27,10 +27,11 @@ committed to the plugin.
 
 Resolve the plugin root once, before any command. `CLAUDE_PLUGIN_ROOT` is substituted
 into the plugin's configuration files; it is not exported into the shell the Bash tool
-runs, so it is usually empty there:
+runs, so it is usually empty there. Under OpenCode the plugin's adapter exports
+`TEST_DESIGN_PLUGIN_ROOT` into every shell instead:
 
 ```bash
-R="${CLAUDE_PLUGIN_ROOT:-${CLAUDE_SKILL_DIR:+$(cd "$CLAUDE_SKILL_DIR/../.." && pwd)}}"
+R="${CLAUDE_PLUGIN_ROOT:-${TEST_DESIGN_PLUGIN_ROOT:-${CLAUDE_SKILL_DIR:+$(cd "$CLAUDE_SKILL_DIR/../.." && pwd)}}}"
 [ -n "$R" ] || R=$(grep -o '"installPath": *"[^"]*/test-design/[^"]*"' \
   ~/.claude/plugins/installed_plugins.json | head -1 | cut -d'"' -f4)
 echo "$R"
@@ -40,6 +41,10 @@ The printed absolute path is the plugin root. Paste it in place of `$CLAUDE_PLUG
 in every command below: shell variables do not survive between tool calls, so a value set
 in one command is gone in the next. A root that does not contain
 `cmd/test-design-verifier` is wrong; stop and ask where the plugin is installed.
+
+Under OpenCode the two commands are `/test-coverage-design` and `/coverage-verification`,
+and `scenario-reviewer` is registered under that bare name; Claude Code spells them
+`/test-design:<skill>` and `test-design:scenario-reviewer`.
 
 Every op is then invoked as:
 
@@ -202,7 +207,7 @@ verifier. Required keys:
 | `report-globs` | JSON array of report-file globs, relative to `runner-root`; may be `[]` for `go`, required non-empty for `maven`/`gradle` |
 | `baseline-evidence` | Repo-relative path where `baseline` publishes its evidence file |
 | `baseline-sha256` | SHA-256 the verifier prints after `baseline` runs; `pending` until then |
-| `final-command` | The exact explicit final-verification command, as a JSON array: `["/test-design:coverage-verification", "<repo-relative path to this document>"]` |
+| `final-command` | The exact explicit final-verification command, as a JSON array: `["/test-design:coverage-verification", "<repo-relative path to this document>"]`, or `["/coverage-verification", …]` under OpenCode |
 
 Optional key `live-profile` names a committed profile at
 `.test-design/live-profiles/<name>.json`, repo-relative. It is required whenever the

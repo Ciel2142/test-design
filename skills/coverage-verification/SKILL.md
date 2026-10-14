@@ -23,16 +23,21 @@ No approved source means no invocation or report: leave normal finishing untouch
 /test-design:coverage-verification <coverage-source>
 ```
 
+Under OpenCode the command is `/coverage-verification <coverage-source>`, and the agents
+this skill dispatches are registered under their bare file names (`coverage-critic`,
+`live-runner`, `mutator`) where Claude Code prefixes them `test-design:`.
+
 The source is a repo-relative dedicated coverage document or an approved spec with an
 inline floor-rule SC table and Verification block. Go 1.26+ is required; no committed
 binary or separate build step is needed.
 
 Resolve the plugin root once, before any command. `CLAUDE_PLUGIN_ROOT` is substituted
 into the plugin's configuration files; it is not exported into the shell the Bash tool
-runs, so it is usually empty there:
+runs, so it is usually empty there. Under OpenCode the plugin's adapter exports
+`TEST_DESIGN_PLUGIN_ROOT` into every shell instead:
 
 ```bash
-R="${CLAUDE_PLUGIN_ROOT:-${CLAUDE_SKILL_DIR:+$(cd "$CLAUDE_SKILL_DIR/../.." && pwd)}}"
+R="${CLAUDE_PLUGIN_ROOT:-${TEST_DESIGN_PLUGIN_ROOT:-${CLAUDE_SKILL_DIR:+$(cd "$CLAUDE_SKILL_DIR/../.." && pwd)}}}"
 [ -n "$R" ] || R=$(grep -o '"installPath": *"[^"]*/test-design/[^"]*"' \
   ~/.claude/plugins/installed_plugins.json | head -1 | cut -d'"' -f4)
 echo "$R"

@@ -1,6 +1,6 @@
 # test-design
 
-A Claude Code plugin adding two stages to the [superpowers](https://github.com/obra/superpowers) flow.
+A Claude Code plugin (also installable in [OpenCode](#opencode)) adding two stages to the [superpowers](https://github.com/obra/superpowers) flow.
 
 | Stage | When | What it produces |
 |---|---|---|
@@ -113,6 +113,36 @@ after a feature's spec is approved, and `/test-design:coverage-verification
 [docs/opt-in.md](docs/opt-in.md) for the resulting handoffs and `wave-planning`
 composition.
 
+### OpenCode
+
+The same clone serves OpenCode (verified on 1.19.0) through one adapter file,
+[opencode/plugin.js](opencode/plugin.js). From the clone:
+
+```bash
+make install-opencode   # links it into ~/.config/opencode/plugins/test-design.js
+```
+
+On startup the adapter registers the repo's `skills/` directory and its four agents,
+translated from Claude Code's frontmatter: each runs as an OpenCode subagent with the
+tools its `tools:` line names and every other tool denied — no bash, web or nested
+agents. It may touch the verifier's temporary worktrees freely; any other directory outside
+the project prompts. One gap: OpenCode's `edit` permission also covers `write`, so the
+mutator could create a file where Claude Code's `Edit` could not. The adapter also exports `TEST_DESIGN_PLUGIN_ROOT` into every
+shell, so the skills find the verifier without `CLAUDE_PLUGIN_ROOT`. A `git pull` updates
+everything; restart OpenCode to pick it up.
+
+The commands are `/test-coverage-design` and `/coverage-verification <coverage-source>`,
+and the agents are `coverage-critic`, `live-runner`, `mutator` and `scenario-reviewer`,
+with no `test-design:` prefix. OpenCode 1.19 ignores `disable-model-invocation`, so the
+adapter refuses any attempt by the model to load either skill itself; only a typed command
+starts them. The agents' Claude `model: sonnet` hint is dropped, so they run on the
+calling model; to pin one, set it in `opencode.json`. Each top-level key you set there
+replaces the adapter's (a `permission` you set replaces the whole map):
+
+```json
+{ "agent": { "mutator": { "model": "anthropic/claude-sonnet-4-5" } } }
+```
+
 ## Verify the install
 
 Restart Claude Code, then type `/test-design:` — the completion list must offer
@@ -129,6 +159,14 @@ go run -C "$R" ./cmd/test-design-verifier
 `{"code":"unknown-operation","message":"no operation specified"}` — that is the plugin
 compiling and the ops dispatcher running.
 
+Under OpenCode, `opencode agent list` must show the four agents as `(subagent)`, and the
+skill check must print 2 (redirect to a file: piped, the large output arrives truncated):
+
+```bash
+opencode debug skill > /tmp/oc-skills.json
+grep -cE 'skills/(test-coverage-design|coverage-verification)/SKILL.md' /tmp/oc-skills.json
+```
+
 ## Troubleshooting
 
 | Symptom | Cause and fix |
@@ -137,6 +175,7 @@ compiling and the ops dispatcher running.
 | `source-outside-repo` from `preflight` | `-source` was given relative to the plugin, or `-repo` was omitted. Pass `-repo "$TARGET_REPO"` and a path relative to it. |
 | `/test-design:…` skills missing after `plugin update` | Updates apply on the next session. Restart Claude Code. |
 | The Skill tool refuses `test-coverage-design` | Intended: both skills carry `disable-model-invocation`. Type the slash command yourself. |
+| OpenCode: `Configuration is invalid at …/agents/<name>.md … tools` | An agent file from `agents/` was linked into OpenCode's agents directory. Remove that link: Claude Code's frontmatter is not OpenCode's, and the adapter registers the agents itself. |
 | `dirty-repository` or `source-not-reproducible` | Commit or discard the change the message names. There is no force flag. |
 | `normalization-failed: no fresh report file matched report-globs` from `baseline` or `trace` | The runner command failed before it wrote any report, typically a wrong `JAVA_HOME` or a missing wrapper. Run the exact `runner-command` by hand in a detached worktree at the baseline commit to see the real error. |
 | `row-not-bound: row bound ambiguously` from `prepare-mutation` | Two tests carry `covers:` for one `high` row. Keep the tag on the test that flips under the mutation, cite the row from the other with a different word, and start a new run. |
@@ -150,6 +189,7 @@ the command package needs longer than Go's default ten-minute per-package timeou
 ```bash
 make test        # go test -timeout 40m ./...
 make check       # gofmt, go vet, and the fast packages only
+make test-opencode  # the OpenCode adapter's unit tests (Node 22.7+)
 ```
 
 ## Further reading
