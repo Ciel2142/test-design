@@ -86,3 +86,20 @@ export function guardedSkills(skillsDir) {
   }
   return names;
 }
+
+/**
+ * Top-level permission letting every agent reach dirs outside the project the
+ * skills need: the verifier's temp dirs (each run's payloads) and the
+ * plugin's agents/ (the instruction files a dispatch cites). A blanket string
+ * policy is the user's call and stays as is; a pattern the user set keeps the
+ * user's action.
+ * @param {string | Record<string, unknown> | undefined} permission
+ * @param {string[]} dirs
+ */
+export function withExternalAccess(permission, dirs) {
+  if (typeof permission === "string") return permission;
+  const current = permission?.external_directory;
+  const external = typeof current === "string" ? { "*": current } : { ...current };
+  for (const dir of dirs) external[dir] ??= "allow";
+  return { ...permission, external_directory: external };
+}

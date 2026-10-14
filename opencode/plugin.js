@@ -3,7 +3,7 @@
 // from the repository it lives in, so a `git pull` is the whole update.
 import { readdirSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import { agentConfig, guardedSkills, pluginRoot, worktreePatterns } from "./adapter.js";
+import { agentConfig, guardedSkills, pluginRoot, withExternalAccess, worktreePatterns } from "./adapter.js";
 
 export const TestDesign = async () => {
   const root = pluginRoot();
@@ -21,6 +21,7 @@ export const TestDesign = async () => {
         const ours = agentConfig(readFileSync(join(agentsDir, file), "utf8"), worktreePatterns());
         cfg.agent[name] = { ...ours, ...cfg.agent[name] };
       }
+      cfg.permission = withExternalAccess(cfg.permission, [...worktreePatterns(), join(agentsDir, "*")]);
       const paths = cfg.skills?.paths ?? [];
       cfg.skills = { ...cfg.skills, paths: paths.includes(skillsDir) ? paths : [...paths, skillsDir] };
     },

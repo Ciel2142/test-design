@@ -38,8 +38,8 @@ from having no edit tools, not from having no information.
 
 ### The bundle and the manifest
 
-`record-review started` takes `policy`: the critic's name and the absolute paths of the
-instruction files the parent dispatches it with. It returns `bundle` — the whole test files
+`record-review started` takes `policy`: `critic`, the critic's name, and `instructions`, the
+absolute paths of the instruction files the parent dispatches it with. It returns `bundle` — the whole test files
 the group's rows are pasted from, each with the rows it serves — captured from what is on
 disk at HEAD, never from a digest the parent supplies.
 

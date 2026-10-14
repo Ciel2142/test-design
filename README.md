@@ -127,7 +127,10 @@ translated from Claude Code's frontmatter: each runs as an OpenCode subagent wit
 tools its `tools:` line names and every other tool denied — no bash, web or nested
 agents. It may touch the verifier's temporary worktrees freely; any other directory outside
 the project prompts. One gap: OpenCode's `edit` permission also covers `write`, so the
-mutator could create a file where Claude Code's `Edit` could not. The adapter also exports `TEST_DESIGN_PLUGIN_ROOT` into every
+mutator could create a file where Claude Code's `Edit` could not. Every agent, the main one included,
+may also read and write the verifier's temp directories and read the plugin's `agents/`
+without a prompt: the skills read each run's payloads from the former and cite the latter
+in every dispatch, and a prompt there would stop a non-interactive `opencode run`. The adapter also exports `TEST_DESIGN_PLUGIN_ROOT` into every
 shell, so the skills find the verifier without `CLAUDE_PLUGIN_ROOT`. A `git pull` updates
 everything; restart OpenCode to pick it up.
 

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { agentConfig, guardedSkills, parseFrontmatter, pluginRoot } from "./adapter.js";
+import { agentConfig, guardedSkills, parseFrontmatter, pluginRoot, withExternalAccess, worktreePatterns } from "./adapter.js";
 import { TestDesign } from "./plugin.js";
 
 const agent = (frontmatter, body = "Body.\n") => `---\n${frontmatter}\n---\n\n${body}`;
@@ -50,6 +50,20 @@ test("agentConfig refuses an agent without a description or tools line", () => {
   assert.throws(() => agentConfig(agent("description: x"), []), /tools/);
 });
 
+test("withExternalAccess adds allows without overriding the user", () => {
+  assert.deepEqual(withExternalAccess(undefined, ["/t/v-*"]), { external_directory: { "/t/v-*": "allow" } });
+  assert.deepEqual(withExternalAccess({ edit: "ask", external_directory: "deny" }, ["/t/v-*"]), {
+    edit: "ask",
+    external_directory: { "*": "deny", "/t/v-*": "allow" },
+  });
+  assert.deepEqual(
+    withExternalAccess({ external_directory: { "/t/v-*": "ask", "/x/*": "allow" } }, ["/t/v-*", "/u/v-*"]),
+    { external_directory: { "/t/v-*": "ask", "/x/*": "allow", "/u/v-*": "allow" } },
+    "a pattern the user set keeps the user's action",
+  );
+  assert.equal(withExternalAccess("allow", ["/t/v-*"]), "allow", "a blanket policy is left alone");
+});
+
 test("guardedSkills names exactly the skills that disable model invocation", () => {
   const root = mkdtempSync(join(tmpdir(), "td-skills-"));
   const skill = (name, extra) => {
@@ -77,6 +91,8 @@ test("the plugin registers the repository's agents and skills without overriding
   assert.equal(cfg.agent.mutator.model, "anthropic/claude-sonnet-4-5", "user override wins");
   assert.equal(cfg.agent.mutator.permission.edit, "allow");
   assert.deepEqual(cfg.skills.paths, ["/elsewhere", join(pluginRoot(), "skills")]);
+  assert.equal(cfg.permission.external_directory[worktreePatterns()[0]], "allow");
+  assert.equal(cfg.permission.external_directory[join(pluginRoot(), "agents", "*")], "allow");
   await hooks.config(cfg);
   assert.equal(cfg.skills.paths.length, 2, "a second config pass does not duplicate the path");
 });

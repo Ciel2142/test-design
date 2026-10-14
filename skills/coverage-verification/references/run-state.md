@@ -160,7 +160,9 @@ dispatch, never partway through one.
 - `started` fixes the group's rows and the input identity they are judged against: each row's
   primary source hash first, then every contributor's, taken from the current trace record's
   dispatch inputs. Request: `groupId`, `status: "started"`, `rows` (every row the group
-  covers).
+  covers), and `policy` — `critic`, the dispatched agent's name, and `instructions`, the
+  absolute paths of the instruction files it was dispatched with (see
+  [critic phase](critic.md#the-bundle-and-the-manifest)).
 - `completed` writes the group's evidence and records the outcome. Request: `groupId`,
   `status: "completed"`, `verdicts` (one `{rowId, verdict, reason}` per row of the group). The
   written evidence (`review-<groupId>-<seq>.json`, where `<seq>` is the started record's
@@ -172,7 +174,8 @@ dispatch, never partway through one.
 Merged into the shared request body:
 
 ```json
-{"groupId": "batch-1", "status": "started", "rows": ["SC-07", "SC-09"]}
+{"groupId": "batch-1", "status": "started", "rows": ["SC-07", "SC-09"],
+ "policy": {"critic": "coverage-critic", "instructions": ["<plugin root>/agents/coverage-critic.md"]}}
 ```
 
 ```json
